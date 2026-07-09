@@ -27,6 +27,7 @@ function createSummary(taskId = TASK_ID): RuntimeTaskSessionSummary {
 		lastOutputAt: 1,
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 	};

@@ -52,6 +52,7 @@ function createSummary(taskId: string, agentId: RuntimeTaskSessionSummary["agent
 		lastOutputAt: Date.now(),
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,

@@ -72,6 +72,7 @@ function createSessionSummary(
 		lastOutputAt: updatedAt,
 		reviewReason: finalMessage ? "hook" : null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: updatedAt,
 		latestHookActivity: finalMessage
 			? {

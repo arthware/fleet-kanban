@@ -41,6 +41,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 		lastOutputAt: Date.now(),
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,

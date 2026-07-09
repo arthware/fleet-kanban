@@ -291,6 +291,10 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	lastOutputAt: z.number().nullable(),
 	reviewReason: runtimeTaskSessionReviewReasonSchema,
 	exitCode: z.number().nullable(),
+	// The agent CLI's own session/conversation id, captured on start so a later
+	// board load can resume the exact same session by id. Defaults to null so a
+	// sessions.json written before this field existed still parses.
+	agentSessionId: z.string().nullable().default(null),
 	lastHookAt: z.number().nullable().default(null),
 	latestHookActivity: runtimeTaskHookActivitySchema.nullable().default(null),
 	warningMessage: z.string().nullable().optional(),

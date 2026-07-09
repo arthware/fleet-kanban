@@ -15,6 +15,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary>): RuntimeTa
 		lastOutputAt: null,
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 		warningMessage: null,

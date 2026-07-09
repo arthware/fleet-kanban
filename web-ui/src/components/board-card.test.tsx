@@ -107,6 +107,7 @@ function createSummary(
 		lastOutputAt: 1,
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: 1,
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,
@@ -412,6 +413,7 @@ describe("BoardCard", () => {
 						lastOutputAt: Date.now(),
 						reviewReason: null,
 						exitCode: null,
+						agentSessionId: null,
 						lastHookAt: Date.now(),
 						latestHookActivity: {
 							activityText: "Using Read",
@@ -558,6 +560,7 @@ describe("BoardCard", () => {
 						lastOutputAt: Date.now(),
 						reviewReason: null,
 						exitCode: null,
+						agentSessionId: null,
 						lastHookAt: Date.now(),
 						latestHookActivity: {
 							activityText: "Agent active",

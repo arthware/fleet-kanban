@@ -89,6 +89,7 @@ function createSession(taskId: string, state: "running" | "awaiting_review" | "i
 		lastOutputAt: state === "idle" ? null : Date.now(),
 		reviewReason: state === "awaiting_review" ? "hook" : null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 	};

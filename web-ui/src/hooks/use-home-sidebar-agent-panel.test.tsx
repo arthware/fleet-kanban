@@ -15,6 +15,7 @@ function createSummary(state: RuntimeTaskSessionSummary["state"], updatedAt: num
 		lastOutputAt: updatedAt,
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,

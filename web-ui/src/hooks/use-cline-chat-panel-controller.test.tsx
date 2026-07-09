@@ -40,6 +40,7 @@ function createSummary(
 		lastOutputAt: Date.now(),
 		reviewReason: null,
 		exitCode: null,
+		agentSessionId: null,
 		lastHookAt: null,
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,
