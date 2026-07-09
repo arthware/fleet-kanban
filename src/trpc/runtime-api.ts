@@ -4,7 +4,6 @@
 // should stay in focused services instead of accumulating here.
 
 import { rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { TRPCError } from "@trpc/server";
 import { createClineMcpRuntimeService } from "../cline-sdk/cline-mcp-runtime-service";
@@ -12,6 +11,7 @@ import { createClineMcpSettingsService } from "../cline-sdk/cline-mcp-settings-s
 import { createClineProviderService } from "../cline-sdk/cline-provider-service";
 import { isClineClearSlashCommand } from "../cline-sdk/cline-slash-commands";
 import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
+import { clineHomeDir } from "../config/cline-home";
 import type { RuntimeConfigState } from "../config/runtime-config";
 import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtime-config";
 import type {
@@ -100,9 +100,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		},
 	});
 	const debugResetTargetPaths = [
-		join(homedir(), ".cline", "data"),
-		join(homedir(), ".cline", "kanban"),
-		join(homedir(), ".cline", "worktrees"),
+		join(clineHomeDir(), "data"),
+		join(clineHomeDir(), "kanban"),
+		join(clineHomeDir(), "worktrees"),
 	] as const;
 
 	const buildConfigResponse = (runtimeConfig: RuntimeConfigState) =>

@@ -51,12 +51,18 @@ const DESCRIPTION_COLLAPSE_LABEL = "Less";
 const DESCRIPTION_COLLAPSE_SUFFIX = `… ${DESCRIPTION_EXPAND_LABEL}`;
 const DESCRIPTION_EXPANDED_SUFFIX = `… ${DESCRIPTION_COLLAPSE_LABEL}`;
 
-function reconstructTaskWorktreeDisplayPath(taskId: string, workspacePath: string | null | undefined): string | null {
+function reconstructTaskWorktreeDisplayPath(
+	taskId: string,
+	workspacePath: string | null | undefined,
+	worktreesRoot: string | null | undefined,
+): string | null {
 	if (!workspacePath) {
 		return null;
 	}
 	try {
-		return buildTaskWorktreeDisplayPath(taskId, workspacePath);
+		const path = buildTaskWorktreeDisplayPath(taskId, workspacePath, worktreesRoot ?? undefined);
+		// With a real root the path is absolute; abbreviate the home prefix for display.
+		return worktreesRoot ? formatPathForDisplay(path) : path;
 	} catch {
 		return null;
 	}
@@ -233,6 +239,7 @@ export function BoardCard({
 	isDependencyTarget = false,
 	isDependencyLinking = false,
 	workspacePath,
+	taskWorktreesRoot,
 	defaultClineModelId = null,
 }: {
 	card: BoardCardModel;
@@ -257,6 +264,7 @@ export function BoardCard({
 	isDependencyTarget?: boolean;
 	isDependencyLinking?: boolean;
 	workspacePath?: string | null;
+	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
@@ -414,7 +422,7 @@ export function BoardCard({
 	const reviewWorkspacePath = reviewWorkspaceSnapshot
 		? formatPathForDisplay(reviewWorkspaceSnapshot.path)
 		: isTrashCard
-			? reconstructTaskWorktreeDisplayPath(card.id, workspacePath)
+			? reconstructTaskWorktreeDisplayPath(card.id, workspacePath, taskWorktreesRoot)
 			: null;
 	const reviewRefLabel = reviewWorkspaceSnapshot?.branch ?? reviewWorkspaceSnapshot?.headCommit?.slice(0, 8) ?? "HEAD";
 	const reviewChangeSummary = reviewWorkspaceSnapshot

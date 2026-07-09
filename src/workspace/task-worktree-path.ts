@@ -30,8 +30,11 @@ export function getWorkspaceFolderLabelForWorktreePath(repoPath: string): string
 	return cleaned || "workspace";
 }
 
-export function buildTaskWorktreeDisplayPath(taskId: string, repoPath: string): string {
+export function buildTaskWorktreeDisplayPath(taskId: string, repoPath: string, worktreesRoot?: string | null): string {
 	const normalizedTaskId = normalizeTaskIdForWorktreePath(taskId);
 	const workspaceLabel = getWorkspaceFolderLabelForWorktreePath(repoPath);
-	return `${KANBAN_TASK_WORKTREES_DISPLAY_ROOT}/${normalizedTaskId}/${workspaceLabel}`;
+	// When the caller knows the real worktrees root (it follows CLINE_HOME), build
+	// an absolute path from it; otherwise fall back to the legacy ~/.cline display.
+	const root = worktreesRoot?.trim() ? worktreesRoot.replace(/[\\/]+$/g, "") : KANBAN_TASK_WORKTREES_DISPLAY_ROOT;
+	return `${root}/${normalizedTaskId}/${workspaceLabel}`;
 }

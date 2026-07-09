@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFile, realpath, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
+import { clineHomeDir } from "../config/cline-home";
 
 import {
 	type RuntimeBoardColumnId,
@@ -20,7 +20,6 @@ import { createGitProcessEnv } from "../core/git-process-env";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 
-const RUNTIME_HOME_PARENT_DIR = ".cline";
 const RUNTIME_HOME_DIR = "kanban";
 const RUNTIME_WORKTREES_DIR = "worktrees";
 const WORKSPACES_DIR = "workspaces";
@@ -159,11 +158,11 @@ function createEmptyWorkspaceIndex(): WorkspaceIndexFile {
 }
 
 export function getRuntimeHomePath(): string {
-	return join(homedir(), RUNTIME_HOME_PARENT_DIR, RUNTIME_HOME_DIR);
+	return join(clineHomeDir(), RUNTIME_HOME_DIR);
 }
 
 export function getTaskWorktreesHomePath(): string {
-	return join(homedir(), RUNTIME_HOME_PARENT_DIR, RUNTIME_WORKTREES_DIR);
+	return join(clineHomeDir(), RUNTIME_WORKTREES_DIR);
 }
 
 export function getWorkspacesRootPath(): string {
@@ -531,6 +530,7 @@ function toWorkspaceStateResponse(
 	return {
 		repoPath: context.repoPath,
 		statePath: context.statePath,
+		taskWorktreesRoot: getTaskWorktreesHomePath(),
 		git: context.git,
 		board,
 		sessions,

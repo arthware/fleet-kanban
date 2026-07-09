@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-
+import { clineHomeDir } from "../config/cline-home";
 import type { RuntimeClineMcpServer, RuntimeClineMcpSettingsResponse } from "../core/api-contract";
 import { lockedFileSystem } from "../fs/locked-file-system";
 
@@ -95,7 +94,7 @@ export function resolveMcpSettingsPath(): string {
 	if (configuredPath) {
 		return resolve(configuredPath);
 	}
-	return join(homedir(), ".cline", "data", "settings", "cline_mcp_settings.json");
+	return join(clineHomeDir(), "data", "settings", "cline_mcp_settings.json");
 }
 
 function parseSettingsFile(filePath: string): RuntimeClineMcpServer[] {

@@ -26,6 +26,7 @@ interface UseWorkspaceSyncInput {
 
 interface UseWorkspaceSyncResult {
 	workspacePath: string | null;
+	taskWorktreesRoot: string | null;
 	workspaceGit: RuntimeGitRepositoryInfo | null;
 	workspaceRevision: number | null;
 	setWorkspaceRevision: Dispatch<SetStateAction<number | null>>;
@@ -61,6 +62,7 @@ export function useWorkspaceSync({
 	setCanPersistWorkspaceState,
 }: UseWorkspaceSyncInput): UseWorkspaceSyncResult {
 	const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+	const [taskWorktreesRoot, setTaskWorktreesRoot] = useState<string | null>(null);
 	const [workspaceGit, setWorkspaceGit] = useState<RuntimeGitRepositoryInfo | null>(null);
 	const [appliedWorkspaceProjectId, setAppliedWorkspaceProjectId] = useState<string | null>(null);
 	const [workspaceRevision, setWorkspaceRevision] = useState<number | null>(null);
@@ -107,6 +109,7 @@ export function useWorkspaceSync({
 				return;
 			}
 			setWorkspacePath(nextWorkspaceState.repoPath);
+			setTaskWorktreesRoot(nextWorkspaceState.taskWorktreesRoot);
 			setWorkspaceGit(nextWorkspaceState.git);
 			setSessions((currentSessions) => {
 				const incomingSessions = nextWorkspaceState.sessions ?? {};
@@ -194,6 +197,7 @@ export function useWorkspaceSync({
 
 	return {
 		workspacePath,
+		taskWorktreesRoot,
 		workspaceGit,
 		workspaceRevision,
 		setWorkspaceRevision,
