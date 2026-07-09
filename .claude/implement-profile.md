@@ -50,5 +50,6 @@ Verify in an **isolated board, never the product board**:
 
 ## Commit
 
-End-user subject, **no `Co-Authored-By` trailer** (see `AGENTS.md`). Reference the id. Never commit
-unless asked — invoking `/implement` is that ask, but still honor the Commit gate.
+**Semantic-commit type prefix** (`feat:` / `fix:` / `docs:` / `refactor:` / `chore:` / `test:` …) +
+an end-user subject; **no `Co-Authored-By` trailer** (see `AGENTS.md`). Reference the id. Never
+commit unless asked — invoking `/implement` is that ask, but still honor the Commit gate.
