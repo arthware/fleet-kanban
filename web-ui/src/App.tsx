@@ -216,6 +216,7 @@ export default function App(): ReactElement {
 		isWorkspaceMetadataPending,
 		refreshWorkspaceState,
 		resetWorkspaceSyncState,
+		taskWorktreesRoot,
 	} = useWorkspaceSync({
 		currentProjectId,
 		streamedWorkspaceState,
@@ -935,6 +936,7 @@ export default function App(): ReactElement {
 												data={board}
 												taskSessions={sessions}
 												workspacePath={workspacePath}
+												taskWorktreesRoot={taskWorktreesRoot}
 												onCardSelect={handleCardSelect}
 												onCreateTask={handleOpenCreateTask}
 												onStartTask={handleStartTaskFromBoard}

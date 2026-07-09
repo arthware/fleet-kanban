@@ -53,6 +53,7 @@ export function KanbanBoard({
 	onDragEnd,
 	onRequestProgrammaticCardMoveReady,
 	workspacePath,
+	taskWorktreesRoot,
 	defaultClineModelId,
 }: {
 	data: BoardData;
@@ -80,6 +81,7 @@ export function KanbanBoard({
 	onDragEnd: (result: DropResult) => void;
 	onRequestProgrammaticCardMoveReady?: (requestMove: RequestProgrammaticCardMove | null) => void;
 	workspacePath?: string | null;
+	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
 }): React.ReactElement {
 	const dragOccurredRef = useRef(false);
@@ -410,6 +412,7 @@ export function KanbanBoard({
 						dependencyTargetTaskId={dependencyLinking.draft?.targetTaskId ?? null}
 						isDependencyLinking={dependencyLinking.draft !== null}
 						workspacePath={workspacePath}
+						taskWorktreesRoot={taskWorktreesRoot}
 						defaultClineModelId={defaultClineModelId}
 						onCardClick={(card) => {
 							if (!dragOccurredRef.current) {

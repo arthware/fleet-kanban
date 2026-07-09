@@ -302,6 +302,10 @@ export type RuntimeTaskSessionSummary = z.infer<typeof runtimeTaskSessionSummary
 export const runtimeWorkspaceStateResponseSchema = z.object({
 	repoPath: z.string(),
 	statePath: z.string(),
+	// Absolute root under which this instance's task worktrees live. Follows
+	// CLINE_HOME, so the client can display real worktree paths instead of
+	// reconstructing a hardcoded ~/.cline/worktrees.
+	taskWorktreesRoot: z.string(),
 	git: runtimeGitRepositoryInfoSchema,
 	board: runtimeBoardDataSchema,
 	sessions: z.record(z.string(), runtimeTaskSessionSummarySchema),

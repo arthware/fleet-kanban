@@ -8,6 +8,7 @@ import { getRuntimeAgentCatalogEntry, isRuntimeAgentLaunchSupported } from "../c
 import type { RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 import { detectInstalledCommands } from "../terminal/agent-registry";
+import { clineHomeDir } from "./cline-home";
 import { areRuntimeProjectShortcutsEqual } from "./shortcut-utils";
 
 interface RuntimeGlobalConfigFileShape {
@@ -47,7 +48,6 @@ export interface RuntimeConfigUpdateInput {
 	openPrPromptTemplate?: string;
 }
 
-const RUNTIME_HOME_PARENT_DIR = ".cline";
 const RUNTIME_HOME_DIR = "kanban";
 const CONFIG_FILENAME = "config.json";
 const PROJECT_CONFIG_PARENT_DIR = ".cline";
@@ -113,7 +113,7 @@ export function pickBestInstalledAgentIdFromDetected(detectedCommands: readonly 
 }
 
 function getRuntimeHomePath(): string {
-	return join(homedir(), RUNTIME_HOME_PARENT_DIR, RUNTIME_HOME_DIR);
+	return join(clineHomeDir(), RUNTIME_HOME_DIR);
 }
 
 function normalizeAgentId(agentId: RuntimeAgentId | string | null | undefined): RuntimeAgentId {
