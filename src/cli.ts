@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
@@ -11,7 +11,7 @@ import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
 import { loadGlobalRuntimeConfig, loadRuntimeConfig } from "./config/runtime-config";
 import type { RuntimeCommandRunResponse } from "./core/api-contract";
-import { createGitProcessEnv } from "./core/git-process-env";
+import { probeGitRepository } from "./core/git-repository-probe";
 import {
 	installGracefulShutdownHandlers,
 	shouldSuppressImmediateDuplicateShutdownSignals,
@@ -237,13 +237,7 @@ async function pathIsDirectory(path: string): Promise<boolean> {
 }
 
 function hasGitRepository(path: string): boolean {
-	const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-		cwd: path,
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "ignore"],
-		env: createGitProcessEnv(),
-	});
-	return result.status === 0 && result.stdout.trim() === "true";
+	return probeGitRepository(path) === "yes";
 }
 
 function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
@@ -411,7 +405,7 @@ async function startServer(): Promise<{
 		cwd: process.cwd(),
 		loadGlobalRuntimeConfig,
 		loadRuntimeConfig,
-		hasGitRepository,
+		probeGitRepository,
 		pathIsDirectory,
 		onTerminalManagerReady: (workspaceId, manager) => {
 			runtimeStateHub?.trackTerminalManager(workspaceId, manager);

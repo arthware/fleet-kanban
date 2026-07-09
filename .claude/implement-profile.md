@@ -22,6 +22,20 @@ exploration-mode — no unit tests there**; don't run this flow for CLI-only cha
   **Unit layer** = pure functions, reducers, helpers, path/serialization logic.
 - `npm run build` typechecks test files too — keep them compiling.
 
+### Pragmatic testing (exploration phase) — and one hard safety rule
+
+We're still exploring, so be pragmatic: **if a test is too dangerous or too complicated to run
+safely, don't — skip it, say so, and lean on the targeted units + `npm run build`.** Chase coverage
+of the logic you changed, not the whole suite.
+
+- Run only the **targeted unit tests for the code you touched** (`vitest run <path>`), and **isolate
+  `CLINE_HOME` *and* `HOME`** in the test's setup (`clineHomeDir()` prefers `CLINE_HOME` over `HOME`,
+  so overriding only `HOME` is not enough).
+- **NEVER run the full or integration suite in this dogfood setup.** Those tests manage
+  `$CLINE_HOME/worktrees`, and because your task worktree lives *under* `CLINE_HOME`, a full run
+  **deletes your own worktree** (wipes tracked files, `node_modules`, and the `.git` pointer). This
+  already destroyed a worktree once. Targeted units + build are enough for confidence here.
+
 ## Build / lint
 
 - Build: `cd fleet-kanban && npm run build` — runs `tsc --noEmit` (typechecks tests), vite, esbuild.
