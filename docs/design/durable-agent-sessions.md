@@ -1,3 +1,5 @@
+> **Superseded / parent:** see [`durable-board-state.md`](./durable-board-state.md) — the durable-state design that folds this session design in as its §7. This file is kept for the detailed session-resume option analysis.
+
 # Durable agent sessions
 
 **Status:** design · **Epic:** `fleet/docs/kanban-ui-epic.md` §4.6 · **Scope:** fleet-kanban (fork) ·
