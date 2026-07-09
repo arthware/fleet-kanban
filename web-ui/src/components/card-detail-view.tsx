@@ -28,6 +28,7 @@ import type {
 } from "@/runtime/types";
 import { useRuntimeWorkspaceChanges } from "@/runtime/use-runtime-workspace-changes";
 import { useTaskWorkspaceStateVersionValue } from "@/stores/workspace-metadata-store";
+import { hasLiveTerminalSession } from "@/terminal/terminal-session-liveness";
 import { useTerminalThemeColors } from "@/terminal/theme-colors";
 import { type BoardCard, type CardSelection, getTaskAutoReviewCancelButtonLabel } from "@/types";
 import { useWindowEvent } from "@/utils/react-use";
@@ -511,7 +512,13 @@ export function CardDetailView({
 	const detailDiffContentPanelPercent = `${((1 - detailDiffFileTreeRatio) * 100).toFixed(1)}%`;
 	const detailDiffFileTreePanelFlex = `0 0 ${detailDiffFileTreePanelPercent}`;
 	const showMoveToTrashActions = selection.column.id === "review" || selection.column.id === "in_progress";
-	const isTaskTerminalEnabled = selection.column.id === "in_progress" || selection.column.id === "review";
+	// Only wire up the live terminal (WebSocket + ResizeObserver) when the column
+	// allows it AND the session still has a live PTY. Reopening a stale card whose
+	// PTY exited (e.g. moved back from done) must not attach a dead terminal — that
+	// starts a fit/resize feedback loop that pins the renderer at ~100% CPU.
+	const isTaskTerminalEnabled =
+		(selection.column.id === "in_progress" || selection.column.id === "review") &&
+		hasLiveTerminalSession(sessionSummary);
 	const effectiveTaskAgentId = sessionSummary?.agentId ?? selection.card.agentId ?? selectedAgentId;
 	const showClineAgentChatPanel = isNativeClineAgentSelected(effectiveTaskAgentId);
 	const availablePaths = useMemo(() => {

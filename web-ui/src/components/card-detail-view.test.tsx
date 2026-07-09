@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CardDetailView } from "@/components/card-detail-view";
+import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { LocalStorageKey } from "@/storage/local-storage-store";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 import type { BoardCard, BoardColumn, CardSelection } from "@/types";
@@ -15,7 +16,9 @@ const {
 	mockClineAppendToDraft,
 	mockClineSendText,
 } = vi.hoisted(() => ({
-	mockAgentTerminalPanel: vi.fn((_props: { panelBackgroundColor?: string; terminalBackgroundColor?: string }) => null),
+	mockAgentTerminalPanel: vi.fn(
+		(_props: { panelBackgroundColor?: string; terminalBackgroundColor?: string; terminalEnabled?: boolean }) => null,
+	),
 	mockClineAgentChatPanel: vi.fn((..._args: unknown[]) => null),
 	mockDiffViewerPanel: vi.fn((..._args: unknown[]) => null),
 	mockClineAppendToDraft: vi.fn(),
@@ -121,6 +124,41 @@ function createSelection(): CardSelection {
 	};
 }
 
+function createInProgressSelection(): CardSelection {
+	const selection = createSelection();
+	const inProgressColumn = selection.allColumns.find((column) => column.id === "in_progress");
+	if (!inProgressColumn) {
+		throw new Error("Expected an in_progress column.");
+	}
+	inProgressColumn.cards = [selection.card];
+	return {
+		card: selection.card,
+		column: inProgressColumn,
+		allColumns: selection.allColumns,
+	};
+}
+
+function createSessionSummary(overrides: Partial<RuntimeTaskSessionSummary>): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "running",
+		agentId: null,
+		workspacePath: null,
+		pid: 4321,
+		startedAt: 1,
+		updatedAt: 1,
+		lastOutputAt: null,
+		reviewReason: null,
+		exitCode: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		warningMessage: null,
+		latestTurnCheckpoint: null,
+		previousTurnCheckpoint: null,
+		...overrides,
+	};
+}
+
 type MockedDiffViewerProps = {
 	onAddToTerminal?: (formatted: string) => void;
 	onSendToTerminal?: (formatted: string) => void;
@@ -219,6 +257,52 @@ describe("CardDetailView", () => {
 			(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
 				previousActEnvironment;
 		}
+	});
+
+	async function renderWithSession(sessionSummary: RuntimeTaskSessionSummary | null): Promise<void> {
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={createInProgressSelection()}
+					currentProjectId="workspace-1"
+					sessionSummary={sessionSummary}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+	}
+
+	function latestTerminalEnabled(): boolean | undefined {
+		return mockAgentTerminalPanel.mock.calls.at(-1)?.[0]?.terminalEnabled;
+	}
+
+	describe("live terminal gating", () => {
+		it("attaches the terminal for an in-progress card whose PTY is still running", async () => {
+			await renderWithSession(createSessionSummary({ state: "running", pid: 4321 }));
+
+			expect(latestTerminalEnabled()).toBe(true);
+		});
+
+		it("does not attach the terminal once the session's PTY has exited", async () => {
+			// Reopening a stale card (moved back from done) leaves a summary with pid null.
+			await renderWithSession(createSessionSummary({ state: "awaiting_review", pid: null }));
+
+			expect(latestTerminalEnabled()).toBe(false);
+		});
+
+		it("does not attach the terminal when the card has no session at all", async () => {
+			await renderWithSession(null);
+
+			expect(latestTerminalEnabled()).toBe(false);
+		});
 	});
 
 	it("collapses the expanded diff on Escape without closing the detail view", async () => {

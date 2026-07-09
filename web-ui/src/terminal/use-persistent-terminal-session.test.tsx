@@ -149,6 +149,20 @@ describe("usePersistentTerminalSession", () => {
 		expect(disposePersistentTerminalMock).toHaveBeenCalledWith("project-1", "task-a");
 	});
 
+	it("never attaches a terminal while disabled, even as the session restart signal flip-flops", async () => {
+		// A stale card (dead PTY) gates the terminal off. Re-render churn that flips
+		// sessionStartedAt back and forth must not keep spawning terminals/observers.
+		for (const startedAt of [100, 200, 100, 300, 100]) {
+			await act(async () => {
+				root.render(
+					<HookHarness taskId="task-a" workspaceId="project-1" sessionStartedAt={startedAt} enabled={false} />,
+				);
+			});
+		}
+
+		expect(ensurePersistentTerminalMock).not.toHaveBeenCalled();
+	});
+
 	it("does not remount when callback props change", async () => {
 		const terminal = createPersistentTerminalMock();
 		ensurePersistentTerminalMock.mockReturnValue(terminal);

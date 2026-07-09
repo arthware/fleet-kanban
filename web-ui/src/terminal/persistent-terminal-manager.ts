@@ -12,6 +12,7 @@ import type {
 	RuntimeTerminalWsClientMessage,
 	RuntimeTerminalWsServerMessage,
 } from "@/runtime/types";
+import { shouldFitTerminalContainer, type TerminalContainerSize } from "@/terminal/terminal-fit-guard";
 import { clearTerminalGeometry, reportTerminalGeometry } from "@/terminal/terminal-geometry-registry";
 import { createKanbanTerminalOptions } from "@/terminal/terminal-options";
 import {
@@ -154,6 +155,7 @@ class PersistentTerminal {
 	private lastError: string | null = null;
 	private resizeObserver: ResizeObserver | null = null;
 	private resizeTimer: ReturnType<typeof setTimeout> | null = null;
+	private lastFitSize: TerminalContainerSize | null = null;
 	private visibleContainer: HTMLDivElement | null = null;
 	private ioSocket: WebSocket | null = null;
 	private controlSocket: WebSocket | null = null;
@@ -329,8 +331,15 @@ class PersistentTerminal {
 		if (!this.visibleContainer) {
 			return;
 		}
-		this.fitAddon.fit();
 		const bounds = this.visibleContainer.getBoundingClientRect();
+		const size: TerminalContainerSize = { width: bounds.width, height: bounds.height };
+		// Never fit an invisible/degenerate or unchanged container — fitting would
+		// reflow the viewport, re-fire the ResizeObserver, and never converge.
+		if (!shouldFitTerminalContainer(size, this.lastFitSize)) {
+			return;
+		}
+		this.lastFitSize = size;
+		this.fitAddon.fit();
 		const pixelWidth = Math.round(bounds.width);
 		const pixelHeight = Math.round(bounds.height);
 		reportTerminalGeometry(this.taskId, {
@@ -572,6 +581,7 @@ class PersistentTerminal {
 			return;
 		}
 		this.visibleContainer = null;
+		this.lastFitSize = null;
 		clearTerminalGeometry(this.taskId);
 		this.parkingRoot.appendChild(this.hostElement);
 	}
