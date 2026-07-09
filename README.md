@@ -1,4 +1,6 @@
-## npx kanban (Research Preview)
+## fleet-kanban (Research Preview)
+
+> **fleet-kanban** is a fork of [Cline Kanban](https://github.com/cline/kanban), tailored for the `fleet` agent workflow.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/2aa3dcc7-94e3-4076-bcfe-6d0272007cfe" width="100%" />
