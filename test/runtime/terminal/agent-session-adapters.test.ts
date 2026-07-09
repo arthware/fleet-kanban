@@ -752,6 +752,96 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args[permissionModeIndex + 1]).toBe("plan");
 	});
 
+	it("starts a fresh Claude session under a minted session id", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-fresh-id",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			agentSessionId: "11111111-2222-3333-4444-555555555555",
+		});
+
+		const sessionIdIndex = launch.args.indexOf("--session-id");
+		expect(sessionIdIndex).toBeGreaterThan(-1);
+		expect(launch.args[sessionIdIndex + 1]).toBe("11111111-2222-3333-4444-555555555555");
+		expect(launch.args).not.toContain("--resume");
+		expect(launch.args).not.toContain("--continue");
+	});
+
+	it("resumes a Claude session by its stored session id", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-resume-id",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			agentSessionId: "stored-claude-id",
+			resumeSession: true,
+		});
+
+		const resumeIndex = launch.args.indexOf("--resume");
+		expect(resumeIndex).toBeGreaterThan(-1);
+		expect(launch.args[resumeIndex + 1]).toBe("stored-claude-id");
+		expect(launch.args).not.toContain("--session-id");
+	});
+
+	it("resumes a Codex session by its stored session id", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-codex-resume-id",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			agentSessionId: "stored-codex-id",
+			resumeSession: true,
+		});
+
+		const resumeIndex = launch.args.indexOf("resume");
+		expect(resumeIndex).toBeGreaterThan(-1);
+		expect(launch.args).toContain("stored-codex-id");
+		expect(launch.args).not.toContain("--last");
+	});
+
+	it("does not pass any resume flag for a fresh Codex session", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-codex-fresh",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+		});
+
+		expect(launch.args).not.toContain("resume");
+		expect(launch.args).not.toContain("--last");
+	});
+
+	it("falls back to Claude's heuristic continue when resuming without a session id", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-resume-no-id",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeSession: true,
+			resumeFromTrash: true,
+		});
+
+		expect(launch.args).toContain("--continue");
+		expect(launch.args).not.toContain("--resume");
+		expect(launch.args).not.toContain("--session-id");
+	});
+
 	it("preserves explicit autonomous args when autonomous mode is disabled", async () => {
 		setupTempHome();
 

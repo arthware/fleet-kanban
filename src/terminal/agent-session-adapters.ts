@@ -36,6 +36,12 @@ export interface AgentAdapterLaunchInput {
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
+	// The agent CLI's own session id. On a fresh start Claude launches under it
+	// (`--session-id`); on a resume it identifies which session to reopen.
+	agentSessionId?: string | null;
+	// True when this launch resumes an existing agent session by id rather than
+	// starting a fresh one.
+	resumeSession?: boolean;
 	env?: Record<string, string | undefined>;
 	workspaceId?: string;
 }
@@ -622,8 +628,21 @@ const claudeAdapter: AgentSessionAdapter = {
 		) {
 			args.push("--permission-mode", "auto");
 		}
-		if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
+		const claudeSessionId = input.agentSessionId?.trim();
+		const claudeHasResumeFlag = hasCliOption(args, "--resume") || hasCliOption(args, "--continue");
+		if (input.resumeSession && claudeSessionId && !claudeHasResumeFlag) {
+			// Resume the exact prior session by id instead of Claude's cwd/recency guess.
+			args.push("--resume", claudeSessionId);
+		} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
 			args.push("--continue");
+		} else if (
+			!input.resumeSession &&
+			claudeSessionId &&
+			!claudeHasResumeFlag &&
+			!hasCliOption(args, "--session-id")
+		) {
+			// Fresh start under a known id so the session can be resumed later.
+			args.push("--session-id", claudeSessionId);
 		}
 		if (input.startInPlanMode) {
 			const withoutImmediateBypass = args.filter((arg) => arg !== "--dangerously-skip-permissions");
@@ -749,7 +768,16 @@ const codexAdapter: AgentSessionAdapter = {
 			codexArgs.push("--dangerously-bypass-approvals-and-sandbox");
 		}
 
-		if (input.resumeFromTrash) {
+		const codexSessionId = input.agentSessionId?.trim();
+		if (input.resumeSession && codexSessionId) {
+			// Resume the exact prior conversation by id instead of `resume --last`.
+			if (!codexArgs.includes("resume")) {
+				codexArgs.push("resume");
+			}
+			if (!codexArgs.includes(codexSessionId)) {
+				codexArgs.push(codexSessionId);
+			}
+		} else if (input.resumeFromTrash) {
 			if (!codexArgs.includes("resume")) {
 				codexArgs.push("resume");
 			}

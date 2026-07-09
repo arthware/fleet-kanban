@@ -1,6 +1,8 @@
 // PTY-backed runtime for non-Cline task sessions and the workspace shell terminal.
 // It owns process lifecycle, terminal protocol filtering, and summary updates
 // for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
+import { randomUUID } from "node:crypto";
+
 import type {
 	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
@@ -15,12 +17,14 @@ import {
 	type AgentOutputTransitionInspectionPredicate,
 	prepareAgentLaunch,
 } from "./agent-session-adapters";
+import { resolveLaunchSessionId } from "./agent-session-launch";
 import {
 	hasClaudeWorkspaceTrustPrompt,
 	shouldAutoConfirmClaudeWorkspaceTrust,
 	stopWorkspaceTrustTimers,
 	WORKSPACE_TRUST_CONFIRM_DELAY_MS,
 } from "./claude-workspace-trust";
+import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
@@ -322,6 +326,15 @@ export class TerminalSessionManager implements TerminalSessionService {
 			},
 		});
 
+		// Resume by the task's stored session id when it has one; otherwise start
+		// fresh (minting an id for agents that accept one at spawn). This is the
+		// one datum that lets a later start reattach to the same agent session.
+		const { agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
+			agentId: request.agentId,
+			storedSessionId: entry.summary.agentSessionId,
+			mintSessionId: () => randomUUID(),
+		});
+
 		const launch = await prepareAgentLaunch({
 			taskId: request.taskId,
 			agentId: request.agentId,
@@ -333,6 +346,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			images: request.images,
 			startInPlanMode: request.startInPlanMode,
 			resumeFromTrash: request.resumeFromTrash,
+			agentSessionId: launchSessionId,
+			resumeSession,
 			env: request.env,
 			workspaceId: request.workspaceId,
 		});
@@ -540,6 +555,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			lastOutputAt: null,
 			reviewReason: request.resumeFromTrash ? "attention" : null,
 			exitCode: null,
+			agentSessionId: launchSessionId,
 			lastHookAt: null,
 			latestHookActivity: null,
 			warningMessage: null,
@@ -548,7 +564,50 @@ export class TerminalSessionManager implements TerminalSessionService {
 		});
 		this.emitSummary(entry.summary);
 
+		// Codex assigns its own session id, written to a rollout file once it
+		// boots. Discover it in the background so a later start can resume by id.
+		if (request.agentId === "codex" && !launchSessionId) {
+			this.captureCodexSessionIdInBackground(request.taskId, request.cwd, startedAt);
+		}
+
 		return cloneSummary(entry.summary);
+	}
+
+	private captureCodexSessionIdInBackground(taskId: string, cwd: string, startedAtMs: number): void {
+		const maxAttempts = 20;
+		const intervalMs = 500;
+		let attempts = 0;
+
+		const attempt = (): void => {
+			attempts += 1;
+			const entry = this.entries.get(taskId);
+			// Stop if the session is gone or the id was captured another way.
+			if (!entry?.active || entry.summary.agentSessionId) {
+				return;
+			}
+			captureCodexSessionId({ cwd, startedAtMs })
+				.then((sessionId) => {
+					const currentEntry = this.entries.get(taskId);
+					if (!currentEntry?.active || currentEntry.summary.agentSessionId) {
+						return;
+					}
+					if (sessionId) {
+						const summary = updateSummary(currentEntry, { agentSessionId: sessionId });
+						this.emitSummary(summary);
+						return;
+					}
+					if (attempts < maxAttempts) {
+						setTimeout(attempt, intervalMs).unref();
+					}
+				})
+				.catch(() => {
+					if (attempts < maxAttempts) {
+						setTimeout(attempt, intervalMs).unref();
+					}
+				});
+		};
+
+		setTimeout(attempt, intervalMs).unref();
 	}
 
 	async startShellSession(request: StartShellSessionRequest): Promise<RuntimeTaskSessionSummary> {
@@ -713,7 +772,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 
 		// Preserve agentId so the server can route to the correct agent type
-		// (Cline SDK vs terminal PTY) when a task is restored from trash.
+		// (Cline SDK vs terminal PTY) when a task is restored from trash. Also
+		// keep agentSessionId (omitted from this patch): a stale, dead session is
+		// still resumable by id if its transcript survives, so we must not wipe it.
 		const summary = updateSummary(entry, {
 			state: "idle",
 			workspacePath: null,

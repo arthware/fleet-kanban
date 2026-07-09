@@ -319,7 +319,7 @@ export async function resolveCodexRolloutFinalMessageForCwd(
 	return null;
 }
 
-async function findCodexRolloutFileForCwd(
+export async function findCodexRolloutFileForCwd(
 	cwd: string,
 	sessionStartedAtMs: number,
 	sessionsRoot: string,
