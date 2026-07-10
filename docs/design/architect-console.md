@@ -396,16 +396,20 @@ testable.
 | **O2** | `fleet task tail` | CLI transcript read for the headless architect | reuse 4934b's reader (§9) | after O |
 | **S1** | `fleet task say` + bracketed-paste delivery + liveness guard | **architect→agent steering** | existing `sendTaskSessionInput` (none) | **1 — highest** |
 | **S2** | `needs_input` reviewReason + `to_needs_input` hook + `ls`/tile surfacing | **agent→architect signal** | schema (additive) | **2** |
-| **C1** | per-card `agentModel`/`agentThinking`: schema → launch pass-through → `kanban` flags → `fleet task create --model/--think` | cost lever (§7) | schema (additive) | 3 (parallel) |
-| **C2** | `fleet-kanban/.claude/settings.json` default + create-dialog surfacing + `AGENTS.md` guardrail | defaults + UI + anti-research | C1 | 3 (parallel) |
+| **G** | anti-research guardrail paragraph in each child repo's `AGENTS.md` (§10.3) | cost lever, **zero code** | — | **ships now** |
+| **C1** | per-card `agentModel`: schema → launch pass-through → `kanban --agent-model` flag → `fleet task create --model` | cost lever (§7), the reliable half | schema (additive) | 3 (parallel) |
+| **C1b** | per-card `agentThinking`: `--think` mapping to each adapter's native knob | cost lever, blocked on **D-C** | C1 + D-C resolved | 3 — fast-follow |
+| **C2** | `fleet-kanban/.claude/settings.json` default + create-dialog surfacing | defaults + UI | C1 | 3 (parallel) |
 | **R1** | change-index skeleton auto-stamp at done-time + `fleet task index ls/find` | Record (b) + Scope read | — | 4 (parallel) |
 | **R2** | change-index enrichment (`index add --card`, upsert) + `AGENTS.md` wrap-up contract | Record (a) hybrid | R1 | 4 |
 
 **Dependency notes / link the cards:**
 - **S1 → S2** ship as a pair (the channel is only useful bidirectionally) but S1 lands first and is
   independently demoable (steer a running card).
-- **C1 → C2**, **R1 → R2** are internal chains; the **S**, **C**, **R** tracks are mutually
-  parallelizable after O.
+- **C1 → C1b → C2**, **R1 → R2** are internal chains; the **S**, **C**, **R** tracks are mutually
+  parallelizable after O. **C1b** is gated on open decision **D-C** (native thinking knob), so C1
+  (`--model`, rock-solid) ships without waiting on it.
+- **G** has no code dependency and lands immediately — don't hold a free cost lever behind the R track.
 - Do **S first**: it's the priority gap, has zero new transport (substrate exists), and gives the
   architect its first real control.
 
@@ -429,9 +433,10 @@ tests** for the pure transforms. Write RED first.
   existed still parse (additive/optional guarantee).
 
 **BDD / surface (drive the real seam):**
-- `fleet task say` — start a card on the isolated instance (port 3500, `CLINE_HOME=.fleet/cline`),
-  `say` a message, assert it reaches the session (Cline path: input recorded; PTY path: bytes
-  written / prompt advanced). Assert `say` on an ended card returns the resume hint.
+- `fleet task say` — start a card on an ephemeral isolated instance (unique random port, **never**
+  3500/3484; throwaway `CLINE_HOME="$(mktemp -d)/cline"`, **never** `.fleet/cline`), `say` a message,
+  assert it reaches the session (Cline path: input recorded; PTY path: bytes written / prompt
+  advanced). Assert `say` on an ended card returns the resume hint.
 - `fleet task ls` shows `needs-input` for a card whose agent hit a permission prompt (simulate via a
   `to_needs_input` hook ingest), and reverts after `say`.
 - `fleet task create --model haiku --think low` — card persists `agentModel`/`agentThinking`, and a
@@ -439,10 +444,15 @@ tests** for the pure transforms. Write RED first.
 - `fleet task tail <id>` prints the last N transcript lines for both a live and an **ended** card
   (the ended case is the regression that motivates it).
 
-**Harness discipline (from `AGENTS.md`):** verify only on the isolated instance (port 3500,
-`CLINE_HOME=~/code/repos/tools/.fleet/cline`, `--skip-shutdown-cleanup`), never the product board
-(3484); kill child `claude` procs then the server after. Scrub `KANBAN_RUNTIME_PORT` before running
-`middleware.test`/committing (see the pre-commit port-env memory).
+**Harness discipline (from `AGENTS.md`):** verify **only** on an ephemeral, isolated instance —
+`PORT=$((3600 + RANDOM % 300))` (unique, **never** 3500 or 3484) and a throwaway
+`CLINE_HOME="$(mktemp -d)/cline"` (**never** `~/code/repos/tools/.fleet/cline`), launched with
+`--no-open --skip-shutdown-cleanup`. **3500 is the LIVE dogfood board that hosts the architect and
+every card, including the session running the test** — booting/killing a test instance there is the
+self-destruct that has repeatedly cost us work. 3484 is the product board and equally off-limits.
+When done, `kill` only your own pid and `rm -rf` the throwaway home; kill child `claude` procs then
+the server. Scrub `KANBAN_RUNTIME_PORT` before running `middleware.test`/committing (see the
+pre-commit port-env memory).
 
 ---
 
@@ -495,6 +505,7 @@ tests** for the pure transforms. Write RED first.
 
 ## 15. Ready for `/implement`
 
-Dispatch order: **S1 (`fleet task say`) → S2 (`needs_input` signal)** first (the priority channel),
-then **O2 (`fleet task tail`)** once 4934b's reader is known, with **C (per-card model)** and
-**R (change-index)** in parallel. Each card above is independently testable per §12.
+Dispatch order: **G (`AGENTS.md` guardrail)** ships now (zero code), alongside **S1 (`fleet task
+say`) → S2 (`needs_input` signal)** as the priority channel; then **O2 (`fleet task tail`)** once
+4934b's reader is known, with **C1 (per-card `--model`)** and **R (change-index)** in parallel.
+**C1b (`--think`)** follows C1 once D-C is resolved. Each card above is independently testable per §12.
