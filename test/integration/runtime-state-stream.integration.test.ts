@@ -713,6 +713,105 @@ describe.sequential("runtime state stream integration", () => {
 		}
 	}, 30_000);
 
+	it("surfaces a permission-prompt hook as reviewReason 'needs_input' and clears it on to_in_progress", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-needs-input-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-needs-input-");
+
+		mkdirSync(projectPath, { recursive: true });
+		initGitRepository(projectPath);
+
+		const port = await getAvailablePort();
+		const server = await startKanbanServer({
+			cwd: projectPath,
+			homeDir: tempHome,
+			port,
+		});
+
+		try {
+			const runtimeUrl = new URL(server.runtimeUrl);
+			const workspaceId = decodeURIComponent(runtimeUrl.pathname.slice(1));
+			expect(workspaceId).not.toBe("");
+
+			const taskId = "needs-input-task";
+			const startShellResponse = await requestJson<RuntimeShellSessionStartResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "runtime.startShellSession",
+				type: "mutation",
+				workspaceId,
+				payload: {
+					taskId,
+					baseRef: "HEAD",
+				},
+			});
+			expect(startShellResponse.status).toBe(200);
+			expect(startShellResponse.payload.ok).toBe(true);
+
+			// A permission prompt arrives as a `to_review` event carrying the
+			// permission_prompt notificationType — the raw distinction the claude
+			// adapter already emits. It must land as `needs_input`, not plain `hook`.
+			const needsInputHook = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId,
+					event: "to_review",
+					metadata: { source: "claude", notificationType: "permission_prompt" },
+				},
+			});
+			expect(needsInputHook.status).toBe(200);
+			expect(needsInputHook.payload.ok).toBe(true);
+
+			const blockedState = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "workspace.getState",
+				type: "query",
+				workspaceId,
+			});
+			expect(blockedState.status).toBe(200);
+			expect(blockedState.payload.sessions[taskId]?.state).toBe("awaiting_review");
+			expect(blockedState.payload.sessions[taskId]?.reviewReason).toBe("needs_input");
+
+			// Answering the agent (a resumed turn fires to_in_progress) clears the
+			// blocked signal and returns the card to running.
+			const resumeHook = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId,
+					event: "to_in_progress",
+				},
+			});
+			expect(resumeHook.status).toBe(200);
+			expect(resumeHook.payload.ok).toBe(true);
+
+			const runningState = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "workspace.getState",
+				type: "query",
+				workspaceId,
+			});
+			expect(runningState.status).toBe(200);
+			expect(runningState.payload.sessions[taskId]?.state).toBe("running");
+			expect(runningState.payload.sessions[taskId]?.reviewReason).toBeNull();
+
+			await requestJson({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "runtime.stopTaskSession",
+				type: "mutation",
+				workspaceId,
+				payload: { taskId },
+			});
+		} finally {
+			await server.stop();
+			cleanupProject();
+			cleanupHome();
+		}
+	}, 30_000);
+
 	it("streams centralized workspace metadata updates for task worktrees", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-metadata-stream-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-metadata-stream-");

@@ -680,7 +680,15 @@ const claudeAdapter: AgentSessionAdapter = {
 					PermissionRequest: [
 						{
 							matcher: "*",
-							hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }],
+							hooks: [
+								{
+									type: "command",
+									command: buildHookCommand("to_review", {
+										source: "claude",
+										notificationType: "permission_prompt",
+									}),
+								},
+							],
 						},
 					],
 					PostToolUse: [
@@ -698,7 +706,15 @@ const claudeAdapter: AgentSessionAdapter = {
 					Notification: [
 						{
 							matcher: "permission_prompt",
-							hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }],
+							hooks: [
+								{
+									type: "command",
+									command: buildHookCommand("to_review", {
+										source: "claude",
+										notificationType: "permission_prompt",
+									}),
+								},
+							],
 						},
 						{
 							matcher: "*",

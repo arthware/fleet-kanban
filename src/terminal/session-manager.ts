@@ -933,11 +933,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 		if (!entry) {
 			return null;
 		}
-		if (reason !== "hook") {
+		if (reason !== "hook" && reason !== "needs_input") {
 			return cloneSummary(entry.summary);
 		}
 		const before = entry.summary;
-		const summary = this.applySessionEvent(entry, { type: "hook.to_review" });
+		const summary = this.applySessionEvent(entry, {
+			type: reason === "needs_input" ? "hook.to_needs_input" : "hook.to_review",
+		});
 		if (summary !== before && entry.active) {
 			for (const listener of entry.listeners.values()) {
 				listener.onState?.(cloneSummary(summary));

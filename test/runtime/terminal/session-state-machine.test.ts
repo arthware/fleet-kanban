@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
-import { reduceSessionTransition } from "../../../src/terminal/session-state-machine";
+import { isNeedsInputReviewHook, reduceSessionTransition } from "../../../src/terminal/session-state-machine";
 
 function createRunningSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -50,6 +50,71 @@ describe("reduceSessionTransition", () => {
 
 			expect(result.changed).toBe(false);
 			expect(result.patch).toEqual({});
+		});
+	});
+
+	describe("hook.to_needs_input (agent blocked on a question)", () => {
+		it("moves a running session to awaiting_review with reviewReason 'needs_input'", () => {
+			const summary = createRunningSummary({ pid: 4242 });
+
+			const result = reduceSessionTransition(summary, { type: "hook.to_needs_input" });
+
+			expect(result.changed).toBe(true);
+			expect(result.patch.state).toBe("awaiting_review");
+			expect(result.patch.reviewReason).toBe("needs_input");
+			// Like to_review, it must keep the PTY alive so `fleet task say` can answer.
+			expect(result.patch).not.toHaveProperty("pid");
+			const next = { ...summary, ...result.patch };
+			expect(next.pid).toBe(4242);
+		});
+
+		it("is a no-op when the session is not running", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "needs_input" });
+
+			const result = reduceSessionTransition(summary, { type: "hook.to_needs_input" });
+
+			expect(result.changed).toBe(false);
+			expect(result.patch).toEqual({});
+		});
+
+		it("clears back to running on to_in_progress once the agent is answered", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "needs_input" });
+
+			const result = reduceSessionTransition(summary, { type: "hook.to_in_progress" });
+
+			expect(result.changed).toBe(true);
+			expect(result.patch.state).toBe("running");
+			expect(result.patch.reviewReason).toBeNull();
+		});
+
+		it("clears back to running on agent.prompt-ready", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "needs_input" });
+
+			const result = reduceSessionTransition(summary, { type: "agent.prompt-ready" });
+
+			expect(result.changed).toBe(true);
+			expect(result.patch.state).toBe("running");
+			expect(result.patch.reviewReason).toBeNull();
+		});
+	});
+
+	describe("isNeedsInputReviewHook", () => {
+		it("flags a permission-prompt notification as needs-input", () => {
+			expect(isNeedsInputReviewHook({ source: "claude", notificationType: "permission_prompt" })).toBe(true);
+		});
+
+		it("flags a PermissionRequest hook as needs-input (case-insensitive)", () => {
+			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "PermissionRequest" })).toBe(true);
+		});
+
+		it("does NOT flag an end-of-turn Stop hook", () => {
+			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "Stop" })).toBe(false);
+		});
+
+		it("does NOT flag empty or missing metadata", () => {
+			expect(isNeedsInputReviewHook(null)).toBe(false);
+			expect(isNeedsInputReviewHook(undefined)).toBe(false);
+			expect(isNeedsInputReviewHook({})).toBe(false);
 		});
 	});
 

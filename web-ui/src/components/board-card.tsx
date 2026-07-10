@@ -2,7 +2,17 @@ import { Draggable } from "@hello-pangea/dnd";
 import { getRuntimeAgentCatalogEntry } from "@runtime-agent-catalog";
 import { formatClineToolCallLabel } from "@runtime-cline-tool-call-display";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
-import { AlertCircle, AlertTriangle, Bot, GitBranch, Pencil, Play, RotateCcw, Trash2 } from "lucide-react";
+import {
+	AlertCircle,
+	AlertTriangle,
+	Bot,
+	GitBranch,
+	MessageCircleQuestion,
+	Pencil,
+	Play,
+	RotateCcw,
+	Trash2,
+} from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -147,12 +157,21 @@ function isCardCreditLimitError(summary: RuntimeTaskSessionSummary | undefined):
 	return summary.latestHookActivity?.notificationType === "credit_limit";
 }
 
+function isCardNeedsInput(summary: RuntimeTaskSessionSummary | undefined): boolean {
+	return summary?.state === "awaiting_review" && summary.reviewReason === "needs_input";
+}
+
 function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined): CardSessionActivity | null {
 	if (!summary) {
 		return null;
 	}
 	if (isCardCreditLimitError(summary)) {
 		return { dotColor: SESSION_ACTIVITY_COLOR.warning, text: "Out of credits" };
+	}
+	if (isCardNeedsInput(summary)) {
+		// The agent stopped to ask, not to hand off. Show its question if it left one.
+		const question = summary.latestHookActivity?.finalMessage?.trim();
+		return { dotColor: SESSION_ACTIVITY_COLOR.thinking, text: question || "Needs your input" };
 	}
 	const hookActivity = summary.latestHookActivity;
 	const activityText = hookActivity?.activityText?.trim();
@@ -405,6 +424,7 @@ export function BoardCard({
 	}, [descriptionFont, descriptionWidth, displayDescription]);
 
 	const isCreditLimit = isCardCreditLimitError(sessionSummary);
+	const needsInput = isCardNeedsInput(sessionSummary);
 	const renderStatusMarker = () => {
 		if (isCreditLimit) {
 			return <AlertTriangle size={12} className="text-status-orange" />;
@@ -674,6 +694,14 @@ export function BoardCard({
 									</Tooltip>
 								) : null}
 							</div>
+							{needsInput ? (
+								<div className="mt-1">
+									<span className="inline-flex max-w-full items-center gap-1 rounded-md border border-status-blue/40 bg-status-blue/10 px-1.5 py-0.5 text-xs font-medium text-status-blue">
+										<MessageCircleQuestion size={12} className="shrink-0" />
+										<span className="truncate">Needs input</span>
+									</span>
+								</div>
+							) : null}
 							{displayDescription ? (
 								<div ref={descriptionContainerRef}>
 									<p

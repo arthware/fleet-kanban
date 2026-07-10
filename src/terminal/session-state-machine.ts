@@ -1,10 +1,36 @@
-import type { RuntimeTaskSessionReviewReason, RuntimeTaskSessionSummary } from "../core/api-contract";
+import type {
+	RuntimeTaskHookActivity,
+	RuntimeTaskSessionReviewReason,
+	RuntimeTaskSessionSummary,
+} from "../core/api-contract";
 
 export type SessionTransitionEvent =
 	| { type: "hook.to_review" }
+	| { type: "hook.to_needs_input" }
 	| { type: "hook.to_in_progress" }
 	| { type: "agent.prompt-ready" }
 	| { type: "process.exit"; exitCode: number | null; interrupted: boolean };
+
+/**
+ * A `to_review` hook that means "blocked — answer me" rather than "done — review
+ * me". The claude adapter already emits the raw distinction: a `PermissionRequest`
+ * hook or a `Notification(permission_prompt)` fire while the agent waits on the
+ * human, whereas `Stop` fires when the turn simply ended. Both currently collapse
+ * to `reviewReason: "hook"`; this classifier lets the ingest path lift the former
+ * to `reviewReason: "needs_input"` so the architect can tell them apart at a glance.
+ */
+export function isNeedsInputReviewHook(metadata: Partial<RuntimeTaskHookActivity> | null | undefined): boolean {
+	if (!metadata) {
+		return false;
+	}
+	const notificationType = metadata.notificationType?.trim().toLowerCase() ?? "";
+	const hookEventName = metadata.hookEventName?.trim().toLowerCase() ?? "";
+	return (
+		notificationType === "permission_prompt" ||
+		notificationType === "permission.asked" ||
+		hookEventName === "permissionrequest"
+	);
+}
 
 export interface SessionTransitionResult {
 	changed: boolean;
@@ -13,7 +39,7 @@ export interface SessionTransitionResult {
 }
 
 function canReturnToRunning(reason: RuntimeTaskSessionReviewReason): boolean {
-	return reason === "attention" || reason === "hook" || reason === "error";
+	return reason === "attention" || reason === "hook" || reason === "error" || reason === "needs_input";
 }
 
 function asReviewState(reason: RuntimeTaskSessionReviewReason): RuntimeTaskSessionSummary["state"] {
@@ -37,6 +63,21 @@ export function reduceSessionTransition(
 				patch: {
 					state: "awaiting_review",
 					reviewReason: "hook",
+				},
+				clearAttentionBuffer: true,
+			};
+		}
+		case "hook.to_needs_input": {
+			// Same halt as `to_review` (keep the PTY alive so `fleet task say` can
+			// answer), but tag the reason so the architect sees "blocked" not "done".
+			if (summary.state !== "running") {
+				return { changed: false, patch: {}, clearAttentionBuffer: false };
+			}
+			return {
+				changed: true,
+				patch: {
+					state: "awaiting_review",
+					reviewReason: "needs_input",
 				},
 				clearAttentionBuffer: true,
 			};

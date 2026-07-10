@@ -7,6 +7,7 @@ import type {
 import { parseHookIngestRequest } from "../core/api-validation";
 import { loadWorkspaceContextById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
+import { isNeedsInputReviewHook } from "../terminal/session-state-machine";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
 
@@ -32,7 +33,10 @@ function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event
 	}
 	return (
 		summary.state === "awaiting_review" &&
-		(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error")
+		(summary.reviewReason === "attention" ||
+			summary.reviewReason === "hook" ||
+			summary.reviewReason === "error" ||
+			summary.reviewReason === "needs_input")
 	);
 }
 
@@ -75,8 +79,14 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					} satisfies RuntimeHookIngestResponse;
 				}
 
+				// A permission prompt ("blocked — answer me") arrives as the same
+				// `to_review` event as an end-of-turn stop ("done — review me"); the
+				// hook metadata is what tells them apart, so lift the former reason.
+				const reviewReason = isNeedsInputReviewHook(body.metadata) ? "needs_input" : "hook";
 				const transitionedSummary =
-					event === "to_review" ? manager.transitionToReview(taskId, "hook") : manager.transitionToRunning(taskId);
+					event === "to_review"
+						? manager.transitionToReview(taskId, reviewReason)
+						: manager.transitionToRunning(taskId);
 				if (!transitionedSummary) {
 					return {
 						ok: false,
