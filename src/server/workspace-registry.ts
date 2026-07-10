@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 import { type RuntimeConfigState, toGlobalRuntimeConfigState } from "../config/runtime-config";
 import type {
 	RuntimeBoardColumnId,
@@ -7,6 +9,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import type { GitRepositoryProbe } from "../core/git-repository-probe";
+import { parseHomeAgentSessionId } from "../core/home-agent-session";
 import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceBoardById,
@@ -14,6 +17,8 @@ import {
 	loadWorkspaceState,
 	type RuntimeWorkspaceIndexEntry,
 } from "../state/workspace-state";
+import { locateAgentTranscript } from "../terminal/agent-transcript-locator";
+import { deriveHomeAgentClaudeSessionId } from "../terminal/home-agent-session-id";
 import { TerminalSessionManager } from "../terminal/session-manager";
 import { selectArchitectAwareProjects } from "./architect-workspace";
 
@@ -328,6 +333,31 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		for (const summary of terminalManager.listSummaries()) {
 			response.sessions[summary.taskId] =
 				(await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
+		}
+		// Cold load: a home/architect Claude chat has a durable, *derivable* session id,
+		// but the persisted record may be stale (its id was never captured, so it reads
+		// as "gone"). When there is no live in-memory session, re-derive the id and
+		// classify its lifecycle from the transcript on disk — so the board shows the
+		// architect as resumable, matching how it will actually be resumed.
+		for (const [taskId, summary] of Object.entries(response.sessions)) {
+			if (terminalManager.getSummary(taskId)) {
+				continue;
+			}
+			const parsed = parseHomeAgentSessionId(taskId);
+			if (!parsed || parsed.agentId !== "claude") {
+				continue;
+			}
+			const agentSessionId = deriveHomeAgentClaudeSessionId(parsed.workspaceId, "claude");
+			const transcript = await locateAgentTranscript({
+				agentId: "claude",
+				sessionId: agentSessionId,
+				homePath: homedir(),
+			});
+			response.sessions[taskId] = {
+				...summary,
+				agentSessionId,
+				agentSessionLifecycle: transcript.present ? "resumable" : "gone",
+			};
 		}
 		return response;
 	};

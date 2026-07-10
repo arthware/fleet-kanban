@@ -20,3 +20,20 @@ export function isHomeAgentSessionId(sessionId: string): boolean {
 export function isHomeAgentSessionIdForWorkspace(sessionId: string, workspaceId: string): boolean {
 	return sessionId.startsWith(`${HOME_AGENT_SESSION_PREFIX}${workspaceId}:`);
 }
+
+/**
+ * Inverse of {@link createHomeAgentSessionId}: recover the `workspaceId` and
+ * `agentId` from a home-agent session id, or null if it isn't one. Lets callers
+ * re-derive a home agent's durable (deterministic) session id from its task id.
+ */
+export function parseHomeAgentSessionId(sessionId: string): { workspaceId: string; agentId: string } | null {
+	if (!isHomeAgentSessionId(sessionId)) {
+		return null;
+	}
+	const rest = sessionId.slice(HOME_AGENT_SESSION_PREFIX.length);
+	const separatorIndex = rest.lastIndexOf(":");
+	if (separatorIndex <= 0 || separatorIndex >= rest.length - 1) {
+		return null;
+	}
+	return { workspaceId: rest.slice(0, separatorIndex), agentId: rest.slice(separatorIndex + 1) };
+}
