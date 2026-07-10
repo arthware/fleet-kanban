@@ -13,6 +13,7 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
+import { isHomeAgentSessionId } from "../core/home-agent-session";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -29,6 +30,7 @@ import {
 } from "./claude-workspace-trust";
 import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
+import { deriveHomeAgentClaudeSessionId, resolveHomeAgentLaunch } from "./home-agent-session-id";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
 import { reduceSessionTransition, type SessionTransitionEvent } from "./session-state-machine";
@@ -349,15 +351,41 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const resumeMode = requestedResumeMode === "resume" && lifecycle === "resumable" ? "resume" : "fresh";
 		updateSummary(entry, { agentSessionLifecycle: lifecycle });
 
-		// Resume by the task's stored session id only when lifecycle routing says
-		// it is resumable. A gone transcript starts fresh even if an old id remains
-		// persisted.
-		const { agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
-			agentId: request.agentId,
-			storedSessionId: entry.summary.agentSessionId,
-			resumeMode,
-			mintSessionId: () => randomUUID(),
-		});
+		// The home/architect chat is a single, persistent conversation. Give it a
+		// deterministic session id so it is always resumable and never lost on a
+		// board restart: start it with --session-id the first time, then resume it on
+		// every launch after (chosen by whether its transcript already exists).
+		const homeAgentSessionId =
+			request.agentId === "claude" && request.workspaceId && isHomeAgentSessionId(request.taskId)
+				? deriveHomeAgentClaudeSessionId(request.workspaceId, request.agentId)
+				: null;
+
+		let launchSessionId: string | null;
+		let resumeSession: boolean;
+		if (homeAgentSessionId) {
+			const homeTranscript = await locateAgentTranscript({
+				agentId: request.agentId,
+				sessionId: homeAgentSessionId,
+				homePath: homedir(),
+			});
+			({ agentSessionId: launchSessionId, resumeSession } = resolveHomeAgentLaunch({
+				agentSessionId: homeAgentSessionId,
+				transcriptPresent: homeTranscript.present,
+			}));
+			// Persist the deterministic id so the board/UI and lifecycle see a
+			// resumable session instead of an uncaptured (null) one.
+			updateSummary(entry, { agentSessionId: launchSessionId });
+		} else {
+			// Resume by the task's stored session id only when lifecycle routing says
+			// it is resumable. A gone transcript starts fresh even if an old id remains
+			// persisted.
+			({ agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
+				agentId: request.agentId,
+				storedSessionId: entry.summary.agentSessionId,
+				resumeMode,
+				mintSessionId: () => randomUUID(),
+			}));
+		}
 
 		const launch = await prepareAgentLaunch({
 			taskId: request.taskId,
