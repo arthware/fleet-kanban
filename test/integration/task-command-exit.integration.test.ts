@@ -1,24 +1,19 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import { createGitTestEnv } from "../utilities/git-env";
+import {
+	getAvailablePort,
+	requestGracefulShutdown,
+	resolveShutdownIpcHookPath,
+	resolveTsxLoaderImportSpecifier,
+	waitForExit,
+	waitForProcessStart as waitForServerStart,
+} from "../utilities/kanban-test-instance";
 import { createTempDir } from "../utilities/temp-dir";
-
-const requireFromHere = createRequire(import.meta.url);
-
-function resolveShutdownIpcHookPath(): string {
-	return resolve(process.cwd(), "test/integration/shutdown-ipc-hook.cjs");
-}
-
-function resolveTsxLoaderImportSpecifier(): string {
-	return pathToFileURL(requireFromHere.resolve("tsx")).href;
-}
 
 function initGitRepository(path: string): void {
 	const init = spawnSync("git", ["init"], {
@@ -57,82 +52,6 @@ function commitAll(cwd: string, message: string): string {
 	return runGit(cwd, ["rev-parse", "HEAD"]);
 }
 
-async function getAvailablePort(): Promise<number> {
-	const server = createServer();
-	await new Promise<void>((resolveListen, rejectListen) => {
-		server.once("error", rejectListen);
-		server.listen(0, "127.0.0.1", () => {
-			resolveListen();
-		});
-	});
-	const address = server.address();
-	const port = typeof address === "object" && address ? address.port : null;
-	await new Promise<void>((resolveClose, rejectClose) => {
-		server.close((error) => {
-			if (error) {
-				rejectClose(error);
-				return;
-			}
-			resolveClose();
-		});
-	});
-	if (!port) {
-		throw new Error("Could not allocate a test port.");
-	}
-	return port;
-}
-
-async function waitForServerStart(process: ChildProcess, timeoutMs = 10_000): Promise<void> {
-	await new Promise<void>((resolveStart, rejectStart) => {
-		if (!process.stdout || !process.stderr) {
-			rejectStart(new Error("Expected child process stdout/stderr pipes to be available."));
-			return;
-		}
-		let settled = false;
-		let stdout = "";
-		let stderr = "";
-		const timeoutId = setTimeout(() => {
-			if (settled) {
-				return;
-			}
-			settled = true;
-			rejectStart(new Error(`Timed out waiting for server start.\nstdout:\n${stdout}\nstderr:\n${stderr}`));
-		}, timeoutMs);
-		const handleOutput = (chunk: Buffer, source: "stdout" | "stderr") => {
-			const text = chunk.toString();
-			if (source === "stdout") {
-				stdout += text;
-			} else {
-				stderr += text;
-			}
-			if (!stdout.includes("Cline Kanban running at ") || settled) {
-				return;
-			}
-			settled = true;
-			clearTimeout(timeoutId);
-			resolveStart();
-		};
-		process.stdout.on("data", (chunk: Buffer) => {
-			handleOutput(chunk, "stdout");
-		});
-		process.stderr.on("data", (chunk: Buffer) => {
-			handleOutput(chunk, "stderr");
-		});
-		process.once("exit", (code, signal) => {
-			if (settled) {
-				return;
-			}
-			settled = true;
-			clearTimeout(timeoutId);
-			rejectStart(
-				new Error(
-					`Server process exited before startup (code=${String(code)} signal=${String(signal)}).\nstdout:\n${stdout}\nstderr:\n${stderr}`,
-				),
-			);
-		});
-	});
-}
-
 function installBrowserOpenStub(binDir: string, logPath: string): void {
 	mkdirSync(binDir, { recursive: true });
 	const script = `#!/usr/bin/env sh
@@ -169,37 +88,6 @@ async function waitForBrowserOpenCount(logPath: string, expectedCount: number, t
 	throw new Error(
 		`Timed out waiting for browser open count ${expectedCount}. Current log: ${readBrowserOpenLog(logPath).join(", ")}`,
 	);
-}
-
-async function waitForExit(process: ChildProcess, timeoutMs: number): Promise<boolean> {
-	if (process.exitCode !== null) {
-		return true;
-	}
-
-	return await new Promise<boolean>((resolveExit) => {
-		const handleExit = () => {
-			clearTimeout(timeoutId);
-			resolveExit(true);
-		};
-		const timeoutId = setTimeout(() => {
-			process.removeListener("exit", handleExit);
-			resolveExit(false);
-		}, timeoutMs);
-		process.once("exit", handleExit);
-	});
-}
-
-async function requestGracefulShutdown(process: ChildProcess): Promise<void> {
-	if (typeof process.send !== "function" || !process.connected) {
-		process.kill("SIGINT");
-		return;
-	}
-
-	await new Promise<void>((resolveSend) => {
-		process.send?.({ type: "kanban.shutdown" }, () => {
-			resolveSend();
-		});
-	});
 }
 
 function spawnSourceCli(
