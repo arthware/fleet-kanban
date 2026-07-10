@@ -3,6 +3,14 @@
   "to change X, edit Y" index + gotchas). Start here instead of searching the whole tree.
 - `docs/architecture.md` — the *conceptual* map (mental model, ownership, design rules, main flows).
 
+**Don't research from zero.** If you're an impl agent working a card, do NOT launch broad
+codebase-discovery sub-agents to re-learn the tree. Your prompt should already point at the relevant
+change-index reference (prior work: which commit/files touched this area) and the `to change X, edit
+Y` map in `component-overview.md` — start there and read those files directly. Only escalate to wider
+exploration when that primed context genuinely doesn't cover what you need, and when you do, say so
+(what was missing) so the next card's prompt can be primed better. Broad Opus-driven sweeps on every
+card are the cost spiral we're closing, not the default.
+
 ---
 
 This file captures tribal knowledge-the nuanced, non-obvious patterns that make the difference between a quick fix and hours of debugging.
