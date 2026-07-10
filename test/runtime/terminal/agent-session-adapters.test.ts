@@ -937,3 +937,76 @@ describe("toBracketedPasteSubmission", () => {
 		expect(toBracketedPasteSubmission("line one", false)).toBe("[200~line one[201~");
 	});
 });
+
+function getFlagValue(args: string[], flag: string): string | undefined {
+	const index = args.indexOf(flag);
+	return index >= 0 ? args[index + 1] : undefined;
+}
+
+function countFlag(args: string[], flag: string): number {
+	return args.filter((arg) => arg === flag).length;
+}
+
+describe("per-card agent model", () => {
+	it("launches a Claude session on the card's chosen model via --model", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-model-claude",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "do the mechanical thing",
+			agentModel: "claude-haiku-4-5",
+		});
+
+		expect(getFlagValue(launch.args, "--model")).toBe("claude-haiku-4-5");
+		expect(countFlag(launch.args, "--model")).toBe(1);
+	});
+
+	it("launches a Codex session on the card's chosen model via --model", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-model-codex",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp",
+			prompt: "do the mechanical thing",
+			agentModel: "gpt-5-codex",
+		});
+
+		expect(getFlagValue(launch.args, "--model")).toBe("gpt-5-codex");
+		expect(countFlag(launch.args, "--model")).toBe(1);
+	});
+
+	it("does not pass --model when the card has no agent model", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-model-default",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "use the default model",
+		});
+
+		expect(launch.args).not.toContain("--model");
+	});
+
+	it("lets an explicit user --model win over the card's agent model", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-model-explicit",
+			agentId: "claude",
+			binary: "claude",
+			args: ["--model", "user-chosen-model"],
+			cwd: "/tmp",
+			prompt: "explicit wins",
+			agentModel: "claude-haiku-4-5",
+		});
+
+		expect(getFlagValue(launch.args, "--model")).toBe("user-chosen-model");
+		expect(countFlag(launch.args, "--model")).toBe(1);
+	});
+});

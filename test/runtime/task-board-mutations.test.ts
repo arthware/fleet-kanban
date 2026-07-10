@@ -154,6 +154,28 @@ describe("per-task agent/model/provider overrides", () => {
 		expect(created.task.clineSettings).toBeUndefined();
 	});
 
+	it("persists a per-card agent model on the card when creating a task", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Mechanical task", baseRef: "main", agentId: "claude", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		expect(created.task.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("leaves the agent model undefined when not provided", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Default-model task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+
+		expect(created.task.agentModel).toBeUndefined();
+	});
+
 	it("updates agentId from undefined to a value", () => {
 		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
 		expect(created.task.agentId).toBeUndefined();

@@ -139,6 +139,11 @@ export const runtimeBoardCardSchema = z
 		autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
 		images: z.array(runtimeTaskImageSchema).optional(),
 		agentId: runtimeAgentIdSchema.optional(),
+		// Per-card model for the CLI-agent launch path (claude/codex/…). Distinct
+		// from clineSettings (the Cline-SDK path). Passed to the agent CLI as its
+		// native --model flag so mechanical cards can run a cheaper model. Optional
+		// so a board.json written before this field existed still parses.
+		agentModel: z.string().optional(),
 		clineSettings: runtimeTaskClineSettingsSchema.optional(),
 		clineProviderId: z.string().optional(),
 		clineModelId: z.string().optional(),
@@ -1001,6 +1006,9 @@ export const runtimeTaskSessionStartRequestSchema = z.object({
 	cols: z.number().int().positive().optional(),
 	rows: z.number().int().positive().optional(),
 	agentId: runtimeAgentIdSchema.optional(),
+	// Per-card model for the CLI-agent launch path; forwarded to the adapter's
+	// native --model flag. Mirrors the card's agentModel override.
+	agentModel: z.string().optional(),
 	clineSettings: runtimeTaskClineSettingsSchema.optional(),
 });
 export type RuntimeTaskSessionStartRequest = z.infer<typeof runtimeTaskSessionStartRequestSchema>;

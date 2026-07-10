@@ -20,6 +20,7 @@ export interface RuntimeCreateTaskInput {
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
+	agentModel?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -308,6 +309,7 @@ export function addTaskToColumn(
 		autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
+		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
 		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,
 		createdAt: now,

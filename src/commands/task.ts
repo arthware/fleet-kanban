@@ -483,6 +483,7 @@ async function createTask(input: {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId;
+	agentModel?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
@@ -503,6 +504,7 @@ async function createTask(input: {
 				autoReviewEnabled: input.autoReviewEnabled,
 				autoReviewMode: input.autoReviewMode,
 				agentId: input.agentId,
+				agentModel: input.agentModel,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
 			},
@@ -527,6 +529,7 @@ async function createTask(input: {
 			autoReviewEnabled: created.autoReviewEnabled === true,
 			autoReviewMode: created.autoReviewMode ?? "commit",
 			...(created.agentId ? { agentId: created.agentId } : {}),
+			...(created.agentModel ? { agentModel: created.agentModel } : {}),
 			...formatTaskClineSettings(created.clineSettings),
 		},
 	};
@@ -712,6 +715,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			startInPlanMode: task.startInPlanMode,
 			baseRef: task.baseRef,
 			agentId: task.agentId,
+			agentModel: task.agentModel,
 			clineSettings: task.clineSettings,
 		});
 		if (!started.ok || !started.summary) {
@@ -1224,6 +1228,10 @@ export function registerTaskCommand(program: Command): void {
 		.option("--auto-review-mode <mode>", "Auto-review mode: commit | pr.", parseAutoReviewMode)
 		.option("--agent-id <id>", "Agent override: cline | claude | codex | droid | gemini | opencode | default.")
 		.option(
+			"--agent-model <id>",
+			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
+		)
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" for workspace default.',
 		)
@@ -1245,6 +1253,7 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewEnabled?: unknown;
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
+				agentModel?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1261,6 +1270,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId) ?? undefined,
+							agentModel: parseOptionalStringOrDefault(options.agentModel) ?? undefined,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
 								modelId: parseOptionalStringOrDefault(options.clineModel) ?? undefined,

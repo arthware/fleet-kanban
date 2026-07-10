@@ -33,6 +33,10 @@ export interface AgentAdapterLaunchInput {
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
+	// Per-card model override for the CLI-agent launch path. When set (and the
+	// user hasn't passed their own --model), the adapter launches the agent CLI
+	// with `--model <agentModel>` so mechanical cards can run a cheaper model.
+	agentModel?: string;
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
@@ -133,6 +137,18 @@ function hasCliOption(args: string[], optionName: string): boolean {
 		}
 	}
 	return false;
+}
+
+/**
+ * Push the card's per-card model as `--model <id>` — but only when the user
+ * hasn't already passed their own `--model`/`-m`, so an explicit arg always wins.
+ * Used by the claude and codex adapters (both take a `--model` flag).
+ */
+function applyAgentModel(args: string[], agentModel: string | undefined): void {
+	const model = agentModel?.trim();
+	if (model && !hasCliOption(args, "--model") && !hasCliOption(args, "-m")) {
+		args.push("--model", model);
+	}
 }
 
 function getClineHookScriptPath(
@@ -662,6 +678,8 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--permission-mode", "plan");
 		}
 
+		applyAgentModel(args, input.agentModel);
+
 		const hooks = resolveHookContext(input);
 		if (hooks) {
 			const settingsPath = join(getHookAgentDirectory("claude"), "settings.json");
@@ -818,6 +836,8 @@ const codexAdapter: AgentSessionAdapter = {
 		if (appendedSystemPrompt && !hasCodexConfigOverride(codexArgs, "developer_instructions")) {
 			codexArgs.push("-c", `developer_instructions=${JSON.stringify(appendedSystemPrompt)}`);
 		}
+
+		applyAgentModel(codexArgs, input.agentModel);
 
 		const hooks = resolveHookContext(input);
 		if (hooks) {

@@ -92,6 +92,7 @@ export interface StartTaskSessionRequest {
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
+	agentModel?: string;
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
@@ -395,6 +396,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
 			prompt: request.prompt,
+			agentModel: request.agentModel,
 			images: request.images,
 			startInPlanMode: request.startInPlanMode,
 			resumeFromTrash: request.resumeFromTrash,
