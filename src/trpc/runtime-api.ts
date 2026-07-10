@@ -181,6 +181,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				// own. The same classification also seeds the architect's initial context
 				// with awareness of the sub-repos it oversees (empty for everyone else).
 				let architectContextPreamble = "";
+				let fleetToolsWarning: string | null = null;
 				let taskCwd: string;
 				if (isHomeAgentSessionId(body.taskId)) {
 					const homeAgentContext = await resolveHomeAgentContext({
@@ -190,6 +191,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					});
 					taskCwd = homeAgentContext.cwd;
 					architectContextPreamble = homeAgentContext.architectContextPreamble;
+					fleetToolsWarning = homeAgentContext.fleetToolsWarning;
 				} else {
 					taskCwd = await resolveExistingTaskCwdOrEnsure({
 						cwd: workspaceScope.workspacePath,
@@ -198,6 +200,11 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					});
 				}
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
+
+				// Surface a fleet-tools resolution failure to the user without blocking the
+				// start: the architect still launches, but its board commands are unavailable.
+				const applyFleetToolsWarning = <T extends { warningMessage?: string | null }>(summary: T): T =>
+					fleetToolsWarning ? { ...summary, warningMessage: fleetToolsWarning } : summary;
 
 				// Per-task config source-of-truth precedence:
 				//
@@ -280,7 +287,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 
 					return {
 						ok: true,
-						summary: nextSummary,
+						summary: applyFleetToolsWarning(nextSummary),
 					};
 				}
 
@@ -338,7 +345,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				return {
 					ok: true,
-					summary: nextSummary,
+					summary: applyFleetToolsWarning(nextSummary),
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

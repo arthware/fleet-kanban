@@ -9,6 +9,7 @@ const startTaskSessionMutateMock = vi.hoisted(() => vi.fn());
 const stopTaskSessionMutateMock = vi.hoisted(() => vi.fn());
 const reloadTaskChatSessionMutateMock = vi.hoisted(() => vi.fn());
 const notifyErrorMock = vi.hoisted(() => vi.fn());
+const showAppToastMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/runtime/trpc-client", () => ({
 	getRuntimeTrpcClient: (workspaceId: string | null) => ({
@@ -32,6 +33,7 @@ vi.mock("@/runtime/task-session-geometry", () => ({
 
 vi.mock("@/components/app-toaster", () => ({
 	notifyError: notifyErrorMock,
+	showAppToast: showAppToastMock,
 }));
 
 interface HookSnapshot {
@@ -230,6 +232,7 @@ describe("useHomeAgentSession", () => {
 			summary: createSummary(taskId, "cline"),
 		}));
 		notifyErrorMock.mockReset();
+		showAppToastMock.mockReset();
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -307,6 +310,38 @@ describe("useHomeAgentSession", () => {
 			taskId: initialTaskId,
 		});
 		expect(rotatedSnapshot.sessionKeys).toEqual([rotatedSnapshot.taskId]);
+	});
+
+	it("surfaces a start-time warning as a toast when the home agent reports one", async () => {
+		const fleetWarning = "Kanban Agent started without its fleet board tools: the fleet CLI was not found on PATH.";
+		startTaskSessionMutateMock.mockImplementation(async ({ taskId }: { taskId: string }) => ({
+			ok: true,
+			summary: { ...createSummary(taskId, "codex"), warningMessage: fleetWarning },
+		}));
+
+		await act(async () => {
+			root.render(
+				<HookHarness config={createRuntimeConfig()} currentProjectId="workspace-1" onSnapshot={() => {}} />,
+			);
+			await createFlushPromises();
+		});
+
+		expect(showAppToastMock).toHaveBeenCalledTimes(1);
+		expect(showAppToastMock).toHaveBeenCalledWith(
+			expect.objectContaining({ intent: "warning", message: fleetWarning }),
+			expect.any(String),
+		);
+	});
+
+	it("does not toast when the home agent starts cleanly", async () => {
+		await act(async () => {
+			root.render(
+				<HookHarness config={createRuntimeConfig()} currentProjectId="workspace-1" onSnapshot={() => {}} />,
+			);
+			await createFlushPromises();
+		});
+
+		expect(showAppToastMock).not.toHaveBeenCalled();
 	});
 
 	it("does not restart the home terminal session on a no-op rerender", async () => {

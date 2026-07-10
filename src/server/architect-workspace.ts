@@ -9,6 +9,7 @@
 // See docs/design/architect-steering.md §3 and §5 (Cards A1, A2).
 
 import { isPathWithinRoot } from "../workspace/path-sandbox";
+import { type FleetAgentHelpResult, runFleetAgentHelp as runFleetAgentHelpViaCli } from "./fleet-cli";
 
 export interface RegisteredWorkspace {
 	workspaceId: string;
@@ -93,12 +94,18 @@ export function classifyArchitectWorkspace(workspaces: RegisteredWorkspace[]): A
  * of its cwd, so it already reads across them with normal file tools — this only
  * seeds awareness, it grants no new capability.
  *
+ * When `fleetToolsHelp` is supplied (the curated output of `fleet help --agent`),
+ * it is appended below the sub-repo list so the architect knows it drives the
+ * board through the `fleet` CLI. Omit it (or pass `null`) to inject the sub-repo
+ * list alone — e.g. when the CLI is unavailable.
+ *
  * Returns `""` when there is no architect (flat/peer layout) or the architect
  * oversees nothing, so a non-architect workspace injects nothing.
  */
 export function buildArchitectContextPreamble(
 	classification: ArchitectClassification,
 	workspaces: RegisteredWorkspace[],
+	fleetToolsHelp?: string | null,
 ): string {
 	if (classification.architectWorkspaceId === null) {
 		return "";
@@ -110,12 +117,15 @@ export function buildArchitectContextPreamble(
 		return "";
 	}
 	const list = overseen.map((ws) => `- ${ws.workspaceId} (${ws.repoPath})`).join("\n");
-	return `# Architect Workspace
+	const subRepos = `# Architect Workspace
 
 You are the architect overseeing these sub-repositories:
 ${list}
 
 They live as subdirectories of your workspace, so you can read across them with your normal file tools.`;
+
+	const tools = fleetToolsHelp?.trim();
+	return tools ? `${subRepos}\n\n${tools}` : subRepos;
 }
 
 export interface ResolveAgentConfigRootInput {
@@ -164,27 +174,46 @@ export interface HomeAgentContext {
 	 * when this workspace is not the architect (impl/peer/flat).
 	 */
 	architectContextPreamble: string;
+	/**
+	 * A user-facing warning to surface when the architect started without its
+	 * fleet tools (the `fleet` CLI is missing or errored). `null` when the fleet
+	 * tools loaded, or for a non-architect workspace. The session still starts —
+	 * this only tells the user its board commands are unavailable.
+	 */
+	fleetToolsWarning: string | null;
+}
+
+/** Resolves the architect's fleet tool instructions; injected so tests can stub the CLI. */
+export type FleetAgentHelpRunner = (cwd: string) => Promise<FleetAgentHelpResult>;
+
+function describeMissingFleetTools(reason: string): string {
+	return `Kanban Agent started without its fleet board tools: ${reason}. It can still read the sub-repositories, but \`fleet\` board commands are unavailable until this is fixed.`;
 }
 
 /**
  * The launch context for a home/workspace agent, routed through architect
  * classification: the cwd it roots at and — only for the architect workspace —
- * the awareness preamble naming the sub-repositories it oversees.
+ * the awareness preamble naming the sub-repositories it oversees plus the curated
+ * `fleet help --agent` tool list appended below it.
  *
  * This is the seam the tRPC `startTaskSession` handler calls for the home-agent
  * branch: it classifies the registered index once and, per role, roots the agent
  * (architect → parent config, impl → own config) and seeds architect awareness
- * (architect → sub-repo list, everyone else → nothing). If the index can't be
- * read it degrades to the workspace's own path with no preamble — the
- * pre-architect behavior — so a transient index miss never blocks starting an
- * agent.
+ * (architect → sub-repo list + fleet tools, everyone else → nothing). If the
+ * index can't be read it degrades to the workspace's own path with no preamble —
+ * the pre-architect behavior — so a transient index miss never blocks starting
+ * an agent. If the fleet CLI can't be resolved the architect still starts with
+ * the sub-repo list, and `fleetToolsWarning` carries the reason to show the user.
  */
-export async function resolveHomeAgentContext(input: ResolveHomeAgentCwdInput): Promise<HomeAgentContext> {
+export async function resolveHomeAgentContext(
+	input: ResolveHomeAgentCwdInput,
+	runFleetAgentHelp: FleetAgentHelpRunner = runFleetAgentHelpViaCli,
+): Promise<HomeAgentContext> {
 	let workspaces: RegisteredWorkspace[];
 	try {
 		workspaces = await input.listWorkspaces();
 	} catch {
-		return { cwd: input.workspacePath, architectContextPreamble: "" };
+		return { cwd: input.workspacePath, architectContextPreamble: "", fleetToolsWarning: null };
 	}
 	const classification = classifyArchitectWorkspace(workspaces);
 	const cwd = resolveAgentConfigRoot({
@@ -192,17 +221,26 @@ export async function resolveHomeAgentContext(input: ResolveHomeAgentCwdInput): 
 		repoPath: input.workspacePath,
 		classification,
 	});
-	const architectContextPreamble =
-		input.workspaceId === classification.architectWorkspaceId
-			? buildArchitectContextPreamble(classification, workspaces)
-			: "";
-	return { cwd, architectContextPreamble };
+
+	if (input.workspaceId !== classification.architectWorkspaceId) {
+		return { cwd, architectContextPreamble: "", fleetToolsWarning: null };
+	}
+
+	const fleet = await runFleetAgentHelp(cwd);
+	const architectContextPreamble = buildArchitectContextPreamble(
+		classification,
+		workspaces,
+		fleet.ok ? fleet.instructions : null,
+	);
+	const fleetToolsWarning = fleet.ok ? null : describeMissingFleetTools(fleet.error);
+	return { cwd, architectContextPreamble, fleetToolsWarning };
 }
 
 /**
  * The cwd a home/workspace agent should launch in. Thin accessor over
- * {@link resolveHomeAgentContext} for callers that only need the directory.
+ * {@link resolveHomeAgentContext} for callers that only need the directory; it
+ * skips the fleet CLI (empty instructions) since the cwd never depends on it.
  */
 export async function resolveHomeAgentCwd(input: ResolveHomeAgentCwdInput): Promise<string> {
-	return (await resolveHomeAgentContext(input)).cwd;
+	return (await resolveHomeAgentContext(input, async () => ({ ok: true, instructions: "" }))).cwd;
 }

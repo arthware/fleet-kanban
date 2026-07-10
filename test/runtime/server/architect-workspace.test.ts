@@ -183,6 +183,35 @@ describe("buildArchitectContextPreamble", () => {
 
 		expect(buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces)).toBe("");
 	});
+
+	it("appends the fleet tool instructions below the sub-repo list when they are provided", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+		const fleetTools = "You drive the board via the `fleet` CLI.\nfleet task ls — production-line overview.";
+
+		const preamble = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces, fleetTools);
+
+		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		expect(preamble).toContain("fleet task ls — production-line overview.");
+		// The tool instructions sit below the sub-repo list, not above it.
+		expect(preamble.indexOf("fleet-kanban (/home/user/code/tools/fleet-kanban)")).toBeLessThan(
+			preamble.indexOf("fleet task ls — production-line overview."),
+		);
+	});
+
+	it("returns only the sub-repo list when no fleet tools are provided", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		const preamble = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces, null);
+
+		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		expect(preamble).not.toContain("fleet task ls");
+	});
 });
 
 describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
@@ -190,52 +219,92 @@ describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
 		{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
 		{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
 	];
+	const fleetTools = "You drive the board via the `fleet` CLI.\nfleet task ls — production-line overview.";
+	const provideFleetTools = async () => ({ ok: true as const, instructions: fleetTools });
+	const fleetUnavailable = async () => ({ ok: false as const, error: "the fleet CLI was not found on PATH" });
 
-	it("seeds the architect's home agent with awareness of its overseen sub-repos", async () => {
-		const context = await resolveHomeAgentContext({
-			workspaceId: "tools",
-			workspacePath: "/home/user/code/tools",
-			listWorkspaces: async () => registeredIndex,
-		});
+	it("seeds the architect's home agent with both its sub-repos and its fleet tools", async () => {
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "tools",
+				workspacePath: "/home/user/code/tools",
+				listWorkspaces: async () => registeredIndex,
+			},
+			provideFleetTools,
+		);
 
 		expect(context.cwd).toBe("/home/user/code/tools");
 		expect(context.architectContextPreamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		expect(context.architectContextPreamble).toContain("fleet task ls — production-line overview.");
+		expect(context.fleetToolsWarning).toBeNull();
 	});
 
-	it("injects no architect context for an impl workspace's home agent", async () => {
-		const context = await resolveHomeAgentContext({
-			workspaceId: "fleet-kanban",
-			workspacePath: "/home/user/code/tools/fleet-kanban",
-			listWorkspaces: async () => registeredIndex,
-		});
+	it("still seeds the sub-repo list and surfaces a warning when the fleet CLI is unavailable", async () => {
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "tools",
+				workspacePath: "/home/user/code/tools",
+				listWorkspaces: async () => registeredIndex,
+			},
+			fleetUnavailable,
+		);
+
+		expect(context.architectContextPreamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		expect(context.architectContextPreamble).not.toContain("fleet task ls");
+		expect(context.fleetToolsWarning).toContain("the fleet CLI was not found on PATH");
+	});
+
+	it("does not run the fleet CLI, or warn, for an impl workspace's home agent", async () => {
+		let fleetInvocations = 0;
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "fleet-kanban",
+				workspacePath: "/home/user/code/tools/fleet-kanban",
+				listWorkspaces: async () => registeredIndex,
+			},
+			async () => {
+				fleetInvocations += 1;
+				return { ok: true as const, instructions: fleetTools };
+			},
+		);
 
 		expect(context.cwd).toBe("/home/user/code/tools/fleet-kanban");
 		expect(context.architectContextPreamble).toBe("");
+		expect(context.fleetToolsWarning).toBeNull();
+		expect(fleetInvocations).toBe(0);
 	});
 
 	it("injects no architect context when the layout is flat with no architect", async () => {
-		const context = await resolveHomeAgentContext({
-			workspaceId: "repo1",
-			workspacePath: "/home/user/code/repo1",
-			listWorkspaces: async () => [
-				{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
-				{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
-			],
-		});
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "repo1",
+				workspacePath: "/home/user/code/repo1",
+				listWorkspaces: async () => [
+					{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+					{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+				],
+			},
+			provideFleetTools,
+		);
 
 		expect(context.architectContextPreamble).toBe("");
+		expect(context.fleetToolsWarning).toBeNull();
 	});
 
 	it("degrades to no architect context when the registry cannot be read", async () => {
-		const context = await resolveHomeAgentContext({
-			workspaceId: "tools",
-			workspacePath: "/home/user/code/tools",
-			listWorkspaces: async () => {
-				throw new Error("index unavailable");
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "tools",
+				workspacePath: "/home/user/code/tools",
+				listWorkspaces: async () => {
+					throw new Error("index unavailable");
+				},
 			},
-		});
+			provideFleetTools,
+		);
 
 		expect(context.cwd).toBe("/home/user/code/tools");
 		expect(context.architectContextPreamble).toBe("");
+		expect(context.fleetToolsWarning).toBeNull();
 	});
 });

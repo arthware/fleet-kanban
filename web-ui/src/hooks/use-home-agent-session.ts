@@ -7,7 +7,7 @@ import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "@run
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef } from "react";
 
-import { notifyError } from "@/components/app-toaster";
+import { notifyError, showAppToast } from "@/components/app-toaster";
 import { getRuntimeClineProviderSettings, isNativeClineAgentSelected } from "@/runtime/native-agent";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
@@ -342,6 +342,17 @@ export function useHomeAgentSession({
 
 				startedSessionKeysRef.current.add(sessionKey);
 				upsertSessionSummary(response.summary);
+
+				// The terminal home-agent panel doesn't render `warningMessage` inline,
+				// so surface a start-time warning (e.g. the architect's fleet tools
+				// failed to resolve) as a toast — otherwise it goes unseen.
+				const startWarning = response.summary.warningMessage?.trim();
+				if (startWarning) {
+					showAppToast(
+						{ intent: "warning", message: startWarning, timeout: Number.POSITIVE_INFINITY },
+						`home-agent-warning:${session.workspaceId}:${session.taskId}`,
+					);
+				}
 			} catch (error) {
 				if (pendingStartRequestIdsRef.current.get(sessionKey) !== requestId) {
 					return;
