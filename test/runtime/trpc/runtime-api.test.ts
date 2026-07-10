@@ -1479,6 +1479,96 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(terminalManager.stopTaskSession).not.toHaveBeenCalled();
 	});
 
+	it("wraps PTY steering input in a bracketed-paste submission (fleet task say)", async () => {
+		const summary = createSummary({ agentId: "claude", pid: 4242 });
+		const terminalManager = {
+			writeInput: vi.fn(() => summary),
+			stopTaskSession: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		// Not a cline session: cline routing returns null so we fall through to PTY.
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const submitResponse = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "focus on the failing test", bracketedPaste: true, submit: true },
+		);
+		expect(submitResponse.ok).toBe(true);
+		expect(terminalManager.writeInput).toHaveBeenCalledWith(
+			"task-1",
+			Buffer.from("[200~focus on the failing test[201~\r", "utf8"),
+		);
+
+		terminalManager.writeInput.mockClear();
+		const stageResponse = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "draft steering", bracketedPaste: true, submit: false },
+		);
+		expect(stageResponse.ok).toBe(true);
+		expect(terminalManager.writeInput).toHaveBeenCalledWith(
+			"task-1",
+			Buffer.from("[200~draft steering[201~", "utf8"),
+		);
+	});
+
+	it("sends cline steering input as a plain message, ignoring bracketed-paste framing", async () => {
+		const summary = createSummary({ agentId: "cline", pid: null });
+		const terminalManager = { writeInput: vi.fn(), stopTaskSession: vi.fn() };
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(summary);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "answer the question", bracketedPaste: true, submit: true },
+		);
+		expect(response.ok).toBe(true);
+		expect(clineTaskSessionService.sendTaskSessionInput).toHaveBeenCalledWith("task-1", "answer the question");
+		expect(terminalManager.writeInput).not.toHaveBeenCalled();
+	});
+
+	it("reports an ended (non-running) session so the caller can surface a resume hint", async () => {
+		const terminalManager = { writeInput: vi.fn(() => null), stopTaskSession: vi.fn() };
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "hello", bracketedPaste: true, submit: true },
+		);
+		expect(response.ok).toBe(false);
+		expect(response.error).toBeTruthy();
+	});
+
 	it("returns cline chat messages and sends chat message through cline service", async () => {
 		const summary = createSummary({ agentId: "cline", pid: null });
 		const latestMessage = {

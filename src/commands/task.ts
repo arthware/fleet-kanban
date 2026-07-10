@@ -759,6 +759,46 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	};
 }
 
+async function sendTaskInput(input: {
+	cwd: string;
+	taskId: string;
+	text: string;
+	projectPath?: string;
+	submit: boolean;
+}): Promise<JsonRecord> {
+	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
+	const runtimeClient = createRuntimeTrpcClient(workspaceId);
+
+	// Bracketed paste so a mid-turn PTY agent buffers the steering text cleanly; the
+	// Cline path ignores the framing and takes it as a message. `submit` decides
+	// whether the text is sent or just staged in the prompt.
+	const result = await runtimeClient.runtime.sendTaskSessionInput.mutate({
+		taskId: input.taskId,
+		text: input.text,
+		bracketedPaste: true,
+		submit: input.submit,
+	});
+
+	if (!result.ok) {
+		return {
+			ok: false,
+			taskId: input.taskId,
+			error: result.error ?? "Task session is not running.",
+			// Liveness guard: an ended/awaiting-review-and-exited card has no live
+			// session to steer. Resuming it starts one, then `say` reaches it.
+			hint: `Session is not live — resume it first: task start --task-id ${input.taskId}`,
+		};
+	}
+
+	return {
+		ok: true,
+		taskId: input.taskId,
+		submitted: input.submit,
+		state: result.summary?.state ?? null,
+	};
+}
+
 interface TrashTaskExecutionResult {
 	task: JsonRecord;
 	taskId: string;
@@ -1341,6 +1381,26 @@ export function registerTaskCommand(program: Command): void {
 						cwd: process.cwd(),
 						taskId: options.taskId,
 						projectPath: options.projectPath,
+					}),
+			);
+		});
+
+	task
+		.command("send-input")
+		.description("Send steering input into a running task session (architect → agent).")
+		.requiredOption("--task-id <id>", "Task ID.")
+		.requiredOption("--text <text>", "Text to inject into the session.")
+		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
+		.option("--no-submit", "Stage the text in the prompt without submitting it (default: submit).")
+		.action(async (options: { taskId: string; text: string; projectPath?: string; submit?: boolean }) => {
+			await runTaskCommand(
+				async () =>
+					await sendTaskInput({
+						cwd: process.cwd(),
+						taskId: options.taskId,
+						text: options.text,
+						projectPath: options.projectPath,
+						submit: options.submit !== false,
 					}),
 			);
 		});

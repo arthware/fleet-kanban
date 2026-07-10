@@ -607,8 +607,15 @@ function withPrompt(args: string[], prompt: string, mode: "append" | "flag", fla
 	};
 }
 
-function toBracketedPasteSubmission(command: string): string {
-	return `\u001b[200~${command}\u001b[201~\r`;
+/**
+ * Wrap text in bracketed-paste markers so an interactive agent CLI buffers it as
+ * a single paste instead of interleaving it into whatever it is generating. When
+ * `submit` is true (the default) a trailing carriage return submits the pasted
+ * text; `submit: false` stages it in the prompt without sending — used by
+ * `fleet task say --no-submit` to compose multi-line steering before submitting.
+ */
+export function toBracketedPasteSubmission(command: string, submit = true): string {
+	return `\u001b[200~${command}\u001b[201~${submit ? "\r" : ""}`;
 }
 
 const claudeAdapter: AgentSessionAdapter = {

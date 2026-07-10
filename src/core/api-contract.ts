@@ -1028,6 +1028,15 @@ export const runtimeTaskSessionInputRequestSchema = z.object({
 	taskId: z.string(),
 	text: z.string(),
 	appendNewline: z.boolean().optional(),
+	// Steering (`fleet task say`): wrap the payload in bracketed-paste markers so a
+	// mid-generation PTY agent buffers it as one paste instead of interleaving it
+	// into its current turn. Ignored on the Cline path, which takes input as a
+	// discrete message. Additive/optional so existing callers (live terminal typing)
+	// keep raw-byte behavior.
+	bracketedPaste: z.boolean().optional(),
+	// Only meaningful with bracketedPaste: append the paste terminator + carriage
+	// return to submit the staged text. false stages it without submitting.
+	submit: z.boolean().optional(),
 });
 export type RuntimeTaskSessionInputRequest = z.infer<typeof runtimeTaskSessionInputRequestSchema>;
 

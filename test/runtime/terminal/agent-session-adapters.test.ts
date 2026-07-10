@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { prepareAgentLaunch } from "../../../src/terminal/agent-session-adapters";
+import { prepareAgentLaunch, toBracketedPasteSubmission } from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
 const originalAppData = process.env.APPDATA;
@@ -919,5 +919,21 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(kiroLaunch.args).toContain("--trust-all-tools");
+	});
+});
+
+describe("toBracketedPasteSubmission", () => {
+	it("wraps text in bracketed-paste markers and submits with a carriage return by default", () => {
+		expect(toBracketedPasteSubmission("hello there")).toBe("[200~hello there[201~\r");
+	});
+
+	it("submits when submit is explicitly true", () => {
+		expect(toBracketedPasteSubmission("do the thing", true)).toBe("[200~do the thing[201~\r");
+	});
+
+	it("stages text without a trailing carriage return when submit is false", () => {
+		// --no-submit: the text is pasted into the prompt but NOT sent, so the
+		// architect can stage multi-line steering before submitting.
+		expect(toBracketedPasteSubmission("line one", false)).toBe("[200~line one[201~");
 	});
 });

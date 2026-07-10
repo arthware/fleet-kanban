@@ -49,6 +49,7 @@ import { resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
+import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
@@ -388,17 +389,26 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		sendTaskSessionInput: async (workspaceScope, input) => {
 			try {
 				const body = parseTaskSessionInputRequest(input);
-				const payloadText = body.appendNewline ? `${body.text}\n` : body.text;
+				// Cline sessions accept input as a discrete message, so bracketed-paste
+				// framing (a PTY concern) doesn't apply — send the plain text.
+				const clineText = body.appendNewline ? `${body.text}\n` : body.text;
 				const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
-				const clineSummary = await clineTaskSessionService.sendTaskSessionInput(body.taskId, payloadText);
+				const clineSummary = await clineTaskSessionService.sendTaskSessionInput(body.taskId, clineText);
 				if (clineSummary) {
 					return {
 						ok: true,
 						summary: clineSummary,
 					};
 				}
+				// PTY path: `fleet task say` wraps steering in a bracketed paste so a
+				// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
+				const ptyPayload = body.bracketedPaste
+					? toBracketedPasteSubmission(body.text, body.submit ?? true)
+					: body.appendNewline
+						? `${body.text}\n`
+						: body.text;
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
-				const summary = terminalManager.writeInput(body.taskId, Buffer.from(payloadText, "utf8"));
+				const summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
 				if (!summary) {
 					return {
 						ok: false,
