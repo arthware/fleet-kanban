@@ -20,27 +20,32 @@ exploration-mode — no unit tests there**; don't run this flow for CLI-only cha
 - **BDD surface layer** = render a component/hook (`react-dom` + `act`, see
   `web-ui/src/hooks/use-workspace-sync.test.tsx`) or call a tRPC procedure, and assert its contract.
   **Unit layer** = pure functions, reducers, helpers, path/serialization logic.
-- `npm run build` typechecks test files too — keep them compiling.
+- The **real, test-inclusive typecheck is `npm run typecheck`** (`tsc -p tsconfig.json`, which
+  includes `test/**`) — this is what the pre-commit hook runs. `npm run build` only *bundles*
+  (vite + esbuild via `scripts/build.mjs`); it runs **no `tsc`**, so a green build does **not** mean
+  the tests typecheck. Run `npm run typecheck` to confirm test files compile.
 
-### Pragmatic testing (exploration phase) — and one hard safety rule
+### Pragmatic testing (exploration phase)
 
 We're still exploring, so be pragmatic: **if a test is too dangerous or too complicated to run
-safely, don't — skip it, say so, and lean on the targeted units + `npm run build`.** Chase coverage
-of the logic you changed, not the whole suite.
+safely, don't — skip it, say so, and lean on the targeted units + `npm run typecheck`.** Chase
+coverage of the logic you changed, not the whole suite.
 
-- Run only the **targeted unit tests for the code you touched** (`vitest run <path>`), and **isolate
-  `CLINE_HOME` *and* `HOME`** in the test's setup (`clineHomeDir()` prefers `CLINE_HOME` over `HOME`,
-  so overriding only `HOME` is not enough).
-- **NEVER run the full or integration suite in this dogfood setup.** Those tests manage
-  `$CLINE_HOME/worktrees`, and because your task worktree lives *under* `CLINE_HOME`, a full run
-  **deletes your own worktree** (wipes tracked files, `node_modules`, and the `.git` pointer). This
-  already destroyed a worktree once. Targeted units + build are enough for confidence here.
+- Prefer the **targeted unit tests for the code you touched** (`vitest run <path>`) for a fast loop.
+- **The old "a test run deletes your worktree" hazard is fixed.** Every server test now boots
+  through `test/setup/isolated-home.ts` (wired in `vitest.config.ts`), which strips any inherited
+  `CLINE_HOME` and points `HOME` at a throwaway dir — so `clineHomeDir()` can never resolve to the
+  dogfood board home whose `worktrees/` holds your worktree. The fast suite, the integration suite,
+  and the pre-commit hook are all safe to run in the dogfood worktree now, so **let the hook run —
+  don't `--no-verify`.** (This bit us once, before the isolation existed.)
 
 ## Build / lint
 
-- Build: `cd fleet-kanban && npm run build` — runs `tsc --noEmit` (typechecks tests), vite, esbuild.
+- Build: `cd fleet-kanban && npm run build` — bundles (vite + esbuild via `scripts/build.mjs`). It
+  does **not** typecheck; use `npm run typecheck` for the type gate.
 - Lint / format: **biome** — `./node_modules/.bin/biome check --write`. The husky pre-commit hook
-  runs biome + typecheck + the fast test suite, so keep all three green.
+  runs biome + `npm run typecheck` + the fast test suite; keep all three green and let the hook run
+  (it's safe here — see the home-isolation note above).
 
 ## House rules
 
