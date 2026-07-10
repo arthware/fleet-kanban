@@ -43,7 +43,9 @@ import {
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { resolveTaskTitle } from "../core/task-title.js";
+import { resolveHomeAgentCwd } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
+import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
@@ -174,7 +176,15 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const requestedClineTaskMode = body.mode ?? "act";
 				const scopedRuntimeConfig = await deps.loadScopedRuntimeConfig(workspaceScope);
 				const taskCwd = isHomeAgentSessionId(body.taskId)
-					? workspaceScope.workspacePath
+					? // The home/workspace agent roots at its repo, but which repo's config it
+						// loads depends on its role: the architect workspace (parent of other
+						// registered repos) loads parent-level config; an impl workspace loads its
+						// own. Route through architect classification so this is explicit.
+						await resolveHomeAgentCwd({
+							workspaceId: workspaceScope.workspaceId,
+							workspacePath: workspaceScope.workspacePath,
+							listWorkspaces: listWorkspaceIndexEntries,
+						})
 					: await resolveExistingTaskCwdOrEnsure({
 							cwd: workspaceScope.workspacePath,
 							taskId: body.taskId,
