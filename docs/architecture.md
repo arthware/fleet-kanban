@@ -1,5 +1,9 @@
 # Architecture Overview
 
+> **Looking for which file to edit for a task?** See `docs/architecture/component-overview.md` — a terse
+> component map + a master "to change X, edit Y" index. This document is the *conceptual* companion: the
+> mental model, ownership, design rules, and main flows (the **why**, not the **where**).
+
 Kanban is a local Node runtime plus a React app for running many coding-agent tasks in parallel.
 
 There are three big ideas to hold in your head:

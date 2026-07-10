@@ -1,3 +1,10 @@
+**Architecture docs — read before grepping:**
+- `docs/architecture/component-overview.md` — *which file to edit* for a given task (component map +
+  "to change X, edit Y" index + gotchas). Start here instead of searching the whole tree.
+- `docs/architecture.md` — the *conceptual* map (mental model, ownership, design rules, main flows).
+
+---
+
 This file captures tribal knowledge-the nuanced, non-obvious patterns that make the difference between a quick fix and hours of debugging.
 When to add to this file:
 - User had to intervene, correct, or hand-hold
