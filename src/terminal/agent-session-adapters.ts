@@ -44,6 +44,8 @@ export interface AgentAdapterLaunchInput {
 	resumeSession?: boolean;
 	env?: Record<string, string | undefined>;
 	workspaceId?: string;
+	/** Architect awareness appended to the home-agent system prompt; empty/omitted for non-architect workspaces. */
+	architectContextPreamble?: string;
 }
 
 export type AgentOutputTransitionDetector = (
@@ -615,7 +617,9 @@ const claudeAdapter: AgentSessionAdapter = {
 		const env: Record<string, string | undefined> = {
 			FORCE_HYPERLINK: "1",
 		};
-		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+			architectContextPreamble: input.architectContextPreamble,
+		});
 		if (input.autonomousModeEnabled) {
 			// Auto mode is gated behind this env var on Bedrock/Vertex/Foundry; the Anthropic API ignores it.
 			env.CLAUDE_CODE_ENABLE_AUTO_MODE = "1";
@@ -758,7 +762,9 @@ const codexAdapter: AgentSessionAdapter = {
 		const env: Record<string, string | undefined> = {};
 		const binary = input.binary;
 		let deferredStartupInput: string | undefined;
-		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+			architectContextPreamble: input.architectContextPreamble,
+		});
 
 		if (!hasCodexConfigOverride(codexArgs, "check_for_update_on_startup")) {
 			codexArgs.push("-c", "check_for_update_on_startup=false");
@@ -1266,7 +1272,9 @@ const droidAdapter: AgentSessionAdapter = {
 			}
 		}
 
-		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+			architectContextPreamble: input.architectContextPreamble,
+		});
 		if (
 			appendedSystemPrompt &&
 			!hasCliOption(args, "--append-system-prompt") &&
@@ -1300,7 +1308,9 @@ const kiroAdapter: AgentSessionAdapter = {
 		}
 
 		const hooks = resolveHookContext(input);
-		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+			architectContextPreamble: input.architectContextPreamble,
+		});
 		if (hooks || appendedSystemPrompt) {
 			const configPath = getKiroAgentConfigPath();
 			const config: Record<string, unknown> = {

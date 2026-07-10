@@ -84,6 +84,23 @@ describe("renderAppendSystemPrompt", () => {
 		expect(rendered).not.toContain("claude mcp add --transport http --scope user linear https://mcp.linear.app/mcp");
 		expect(rendered).not.toContain("droid mcp add linear https://mcp.linear.app/mcp --type http");
 	});
+
+	it("appends the architect-context section when an architect preamble is provided", () => {
+		const rendered = renderAppendSystemPrompt("kanban", {
+			architectContextPreamble:
+				"You are the architect overseeing these sub-repositories:\n- fleet-kanban (/repo/fleet-kanban)",
+		});
+
+		expect(rendered).toContain("Kanban sidebar agent");
+		expect(rendered).toContain("architect overseeing these sub-repositories");
+		expect(rendered).toContain("fleet-kanban (/repo/fleet-kanban)");
+	});
+
+	it("omits the architect-context section when no preamble is provided", () => {
+		const rendered = renderAppendSystemPrompt("kanban");
+
+		expect(rendered).not.toContain("architect overseeing these sub-repositories");
+	});
 });
 
 describe("resolveHomeAgentAppendSystemPrompt", () => {
@@ -92,6 +109,13 @@ describe("resolveHomeAgentAppendSystemPrompt", () => {
 	});
 
 	it("returns the appended prompt for current home sidebar sessions", () => {
+		const architectPrompt = resolveHomeAgentAppendSystemPrompt("__home_agent__:tools:claude", {
+			architectContextPreamble:
+				"You are the architect overseeing these sub-repositories:\n- fleet-kanban (/repo/fleet-kanban)",
+		});
+		expect(architectPrompt).toContain("architect overseeing these sub-repositories");
+		expect(architectPrompt).toContain("fleet-kanban (/repo/fleet-kanban)");
+
 		const prompt = resolveHomeAgentAppendSystemPrompt("__home_agent__:workspace-1:codex", {
 			currentVersion: "0.1.10",
 			cwd: "/Users/example/repo",

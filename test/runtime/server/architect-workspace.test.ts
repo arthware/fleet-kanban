@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	buildArchitectContextPreamble,
 	classifyArchitectWorkspace,
 	resolveAgentConfigRoot,
+	resolveHomeAgentContext,
 	resolveHomeAgentCwd,
 } from "../../../src/server/architect-workspace";
 
@@ -145,5 +147,95 @@ describe("resolveHomeAgentCwd (home-agent launch seam)", () => {
 		});
 
 		expect(cwd).toBe("/home/user/code/tools");
+	});
+});
+
+describe("buildArchitectContextPreamble", () => {
+	it("lists each overseen sub-repo's id and path when a workspace is the architect", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet", repoPath: "/home/user/code/tools/fleet" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+		const preamble = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces);
+
+		expect(preamble).toContain("fleet (/home/user/code/tools/fleet)");
+		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		// The architect's own repo is not one of its overseen sub-repositories.
+		expect(preamble).not.toContain("tools (/home/user/code/tools)");
+	});
+
+	it("names a lone child when the architect oversees exactly one sub-repo", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+		const preamble = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces);
+
+		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+	});
+
+	it("injects nothing when the layout is flat with no architect", () => {
+		const workspaces = [
+			{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+			{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+		];
+
+		expect(buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces)).toBe("");
+	});
+});
+
+describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
+	const registeredIndex = [
+		{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+		{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+	];
+
+	it("seeds the architect's home agent with awareness of its overseen sub-repos", async () => {
+		const context = await resolveHomeAgentContext({
+			workspaceId: "tools",
+			workspacePath: "/home/user/code/tools",
+			listWorkspaces: async () => registeredIndex,
+		});
+
+		expect(context.cwd).toBe("/home/user/code/tools");
+		expect(context.architectContextPreamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+	});
+
+	it("injects no architect context for an impl workspace's home agent", async () => {
+		const context = await resolveHomeAgentContext({
+			workspaceId: "fleet-kanban",
+			workspacePath: "/home/user/code/tools/fleet-kanban",
+			listWorkspaces: async () => registeredIndex,
+		});
+
+		expect(context.cwd).toBe("/home/user/code/tools/fleet-kanban");
+		expect(context.architectContextPreamble).toBe("");
+	});
+
+	it("injects no architect context when the layout is flat with no architect", async () => {
+		const context = await resolveHomeAgentContext({
+			workspaceId: "repo1",
+			workspacePath: "/home/user/code/repo1",
+			listWorkspaces: async () => [
+				{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+				{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+			],
+		});
+
+		expect(context.architectContextPreamble).toBe("");
+	});
+
+	it("degrades to no architect context when the registry cannot be read", async () => {
+		const context = await resolveHomeAgentContext({
+			workspaceId: "tools",
+			workspacePath: "/home/user/code/tools",
+			listWorkspaces: async () => {
+				throw new Error("index unavailable");
+			},
+		});
+
+		expect(context.cwd).toBe("/home/user/code/tools");
+		expect(context.architectContextPreamble).toBe("");
 	});
 });

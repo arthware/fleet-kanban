@@ -85,6 +85,39 @@ export function classifyArchitectWorkspace(workspaces: RegisteredWorkspace[]): A
 	};
 }
 
+/**
+ * Initial-context section that makes the architect's home agent aware of the
+ * sub-repositories it oversees. Pure over the classification + workspace index:
+ * lists each impl workspace's id and repo path so the overseer knows, straight
+ * from the board's live index, which sub-repos it spans. They are subdirectories
+ * of its cwd, so it already reads across them with normal file tools — this only
+ * seeds awareness, it grants no new capability.
+ *
+ * Returns `""` when there is no architect (flat/peer layout) or the architect
+ * oversees nothing, so a non-architect workspace injects nothing.
+ */
+export function buildArchitectContextPreamble(
+	classification: ArchitectClassification,
+	workspaces: RegisteredWorkspace[],
+): string {
+	if (classification.architectWorkspaceId === null) {
+		return "";
+	}
+	const overseen = classification.implWorkspaceIds
+		.map((id) => workspaces.find((ws) => ws.workspaceId === id))
+		.filter((ws): ws is RegisteredWorkspace => ws !== undefined);
+	if (overseen.length === 0) {
+		return "";
+	}
+	const list = overseen.map((ws) => `- ${ws.workspaceId} (${ws.repoPath})`).join("\n");
+	return `# Architect Workspace
+
+You are the architect overseeing these sub-repositories:
+${list}
+
+They live as subdirectories of your workspace, so you can read across them with your normal file tools.`;
+}
+
 export interface ResolveAgentConfigRootInput {
 	workspaceId: string;
 	/** The workspace's own registered repo path. */
@@ -123,27 +156,53 @@ export interface ResolveHomeAgentCwdInput {
 	listWorkspaces: () => Promise<RegisteredWorkspace[]>;
 }
 
+export interface HomeAgentContext {
+	/** Directory the home agent launches in (parent config for the architect, own repo otherwise). */
+	cwd: string;
+	/**
+	 * Architect awareness to seed as the home agent's initial context, or `""`
+	 * when this workspace is not the architect (impl/peer/flat).
+	 */
+	architectContextPreamble: string;
+}
+
 /**
- * The cwd a home/workspace agent should launch in, routed through architect
- * classification.
+ * The launch context for a home/workspace agent, routed through architect
+ * classification: the cwd it roots at and — only for the architect workspace —
+ * the awareness preamble naming the sub-repositories it oversees.
  *
  * This is the seam the tRPC `startTaskSession` handler calls for the home-agent
- * branch: it classifies the registered index and roots the agent per role
- * (architect → parent config, impl → own config). If the index can't be read it
- * degrades to the workspace's own path — the pre-architect behavior — so a
- * transient index miss never blocks starting an agent.
+ * branch: it classifies the registered index once and, per role, roots the agent
+ * (architect → parent config, impl → own config) and seeds architect awareness
+ * (architect → sub-repo list, everyone else → nothing). If the index can't be
+ * read it degrades to the workspace's own path with no preamble — the
+ * pre-architect behavior — so a transient index miss never blocks starting an
+ * agent.
  */
-export async function resolveHomeAgentCwd(input: ResolveHomeAgentCwdInput): Promise<string> {
+export async function resolveHomeAgentContext(input: ResolveHomeAgentCwdInput): Promise<HomeAgentContext> {
 	let workspaces: RegisteredWorkspace[];
 	try {
 		workspaces = await input.listWorkspaces();
 	} catch {
-		return input.workspacePath;
+		return { cwd: input.workspacePath, architectContextPreamble: "" };
 	}
 	const classification = classifyArchitectWorkspace(workspaces);
-	return resolveAgentConfigRoot({
+	const cwd = resolveAgentConfigRoot({
 		workspaceId: input.workspaceId,
 		repoPath: input.workspacePath,
 		classification,
 	});
+	const architectContextPreamble =
+		input.workspaceId === classification.architectWorkspaceId
+			? buildArchitectContextPreamble(classification, workspaces)
+			: "";
+	return { cwd, architectContextPreamble };
+}
+
+/**
+ * The cwd a home/workspace agent should launch in. Thin accessor over
+ * {@link resolveHomeAgentContext} for callers that only need the directory.
+ */
+export async function resolveHomeAgentCwd(input: ResolveHomeAgentCwdInput): Promise<string> {
+	return (await resolveHomeAgentContext(input)).cwd;
 }

@@ -43,7 +43,7 @@ import {
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { resolveTaskTitle } from "../core/task-title.js";
-import { resolveHomeAgentCwd } from "../server/architect-workspace";
+import { resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
@@ -175,21 +175,28 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				const requestedClineTaskMode = body.mode ?? "act";
 				const scopedRuntimeConfig = await deps.loadScopedRuntimeConfig(workspaceScope);
-				const taskCwd = isHomeAgentSessionId(body.taskId)
-					? // The home/workspace agent roots at its repo, but which repo's config it
-						// loads depends on its role: the architect workspace (parent of other
-						// registered repos) loads parent-level config; an impl workspace loads its
-						// own. Route through architect classification so this is explicit.
-						await resolveHomeAgentCwd({
-							workspaceId: workspaceScope.workspaceId,
-							workspacePath: workspaceScope.workspacePath,
-							listWorkspaces: listWorkspaceIndexEntries,
-						})
-					: await resolveExistingTaskCwdOrEnsure({
-							cwd: workspaceScope.workspacePath,
-							taskId: body.taskId,
-							baseRef: body.baseRef,
-						});
+				// The home/workspace agent roots at its repo, but which repo's config it
+				// loads depends on its role: the architect workspace (parent of other
+				// registered repos) loads parent-level config; an impl workspace loads its
+				// own. The same classification also seeds the architect's initial context
+				// with awareness of the sub-repos it oversees (empty for everyone else).
+				let architectContextPreamble = "";
+				let taskCwd: string;
+				if (isHomeAgentSessionId(body.taskId)) {
+					const homeAgentContext = await resolveHomeAgentContext({
+						workspaceId: workspaceScope.workspaceId,
+						workspacePath: workspaceScope.workspacePath,
+						listWorkspaces: listWorkspaceIndexEntries,
+					});
+					taskCwd = homeAgentContext.cwd;
+					architectContextPreamble = homeAgentContext.architectContextPreamble;
+				} else {
+					taskCwd = await resolveExistingTaskCwdOrEnsure({
+						cwd: workspaceScope.workspacePath,
+						taskId: body.taskId,
+						baseRef: body.baseRef,
+					});
+				}
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
 
 				// Per-task config source-of-truth precedence:
@@ -253,6 +260,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
 						reasoningEffort: clineLaunchConfig.reasoningEffort,
+						architectContextPreamble,
 					});
 
 					let nextSummary = summary;
@@ -311,6 +319,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					cols: body.cols,
 					rows: body.rows,
 					workspaceId: workspaceScope.workspaceId,
+					architectContextPreamble,
 				});
 
 				let nextSummary = summary;

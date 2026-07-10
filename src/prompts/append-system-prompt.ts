@@ -22,6 +22,12 @@ export interface ResolveAppendSystemPromptCommandPrefixOptions {
 
 export interface RenderAppendSystemPromptOptions {
 	agentId?: RuntimeAgentId | null;
+	/**
+	 * Extra initial-context section appended to the home-agent system prompt.
+	 * Set for the architect workspace's home agent to make it aware of the
+	 * sub-repositories it oversees; empty/omitted for every other workspace.
+	 */
+	architectContextPreamble?: string;
 }
 
 const APPEND_PROMPT_AGENT_IDS: readonly RuntimeAgentId[] = [
@@ -127,7 +133,8 @@ export function resolveAppendSystemPromptCommandPrefix(
 export function renderAppendSystemPrompt(commandPrefix: string, options: RenderAppendSystemPromptOptions = {}): string {
 	const kanbanCommand = commandPrefix.trim() || DEFAULT_COMMAND_PREFIX;
 	const selectedAgentId = options.agentId ?? null;
-	return `# Kanban Sidebar
+	const architectContext = options.architectContextPreamble?.trim();
+	const basePrompt = `# Kanban Sidebar
 
 You are the Kanban sidebar agent for this workspace. Help the user interact with their Kanban board directly from this side panel. When the user asks to add tasks, create tasks, break work down, link tasks, or start tasks, prefer using the Kanban CLI yourself instead of describing manual steps.
 
@@ -301,16 +308,18 @@ Parameters:
 - Prefer \`task list\` first when task IDs or dependency IDs are needed.
 - To create multiple linked tasks, create tasks first, then call \`task link\` for each dependency edge.
 `;
+	return architectContext ? `${basePrompt}\n${architectContext}\n` : basePrompt;
 }
 
 export function resolveHomeAgentAppendSystemPrompt(
 	taskId: string,
-	options: ResolveAppendSystemPromptCommandPrefixOptions = {},
+	options: ResolveAppendSystemPromptCommandPrefixOptions & { architectContextPreamble?: string } = {},
 ): string | null {
 	if (!isHomeAgentSessionId(taskId)) {
 		return null;
 	}
 	return renderAppendSystemPrompt(resolveAppendSystemPromptCommandPrefix(options), {
 		agentId: resolveHomeAgentId(taskId),
+		architectContextPreamble: options.architectContextPreamble,
 	});
 }

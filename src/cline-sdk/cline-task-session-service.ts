@@ -74,6 +74,8 @@ export interface StartClineTaskSessionRequest {
 	baseUrl?: string | null;
 	reasoningEffort?: RuntimeClineReasoningEffort | null;
 	systemPrompt?: string | null;
+	/** Architect awareness appended to the home-agent system prompt; empty/omitted for non-architect workspaces. */
+	architectContextPreamble?: string | null;
 }
 
 export interface ClineTaskSessionService {
@@ -410,7 +412,9 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 						providerId,
 						rules: runtimeSetup.loadRules(),
 					}));
-				const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(request.taskId);
+				const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(request.taskId, {
+					architectContextPreamble: request.architectContextPreamble ?? undefined,
+				});
 				if (appendedSystemPrompt) {
 					systemPrompt = `${systemPrompt}\n\n${appendedSystemPrompt}`;
 				}

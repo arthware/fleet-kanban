@@ -98,6 +98,8 @@ export interface StartTaskSessionRequest {
 	rows?: number;
 	env?: Record<string, string | undefined>;
 	workspaceId?: string;
+	/** Architect awareness appended to the home-agent system prompt; empty/omitted for non-architect workspaces. */
+	architectContextPreamble?: string;
 }
 
 export interface StartShellSessionRequest {
@@ -372,6 +374,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			resumeSession,
 			env: request.env,
 			workspaceId: request.workspaceId,
+			architectContextPreamble: request.architectContextPreamble,
 		});
 
 		const env = buildTerminalEnvironment(request.env, launch.env);
