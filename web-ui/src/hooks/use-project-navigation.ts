@@ -47,6 +47,7 @@ export interface UseProjectNavigationResult {
 	pendingNativeGitInitPath: string | null;
 	currentProjectId: string | null;
 	projects: ReturnType<typeof useRuntimeStateStream>["projects"];
+	architectWorkspaceId: ReturnType<typeof useRuntimeStateStream>["architectWorkspaceId"];
 	workspaceState: ReturnType<typeof useRuntimeStateStream>["workspaceState"];
 	workspaceMetadata: ReturnType<typeof useRuntimeStateStream>["workspaceMetadata"];
 	latestTaskChatMessage: ReturnType<typeof useRuntimeStateStream>["latestTaskChatMessage"];
@@ -81,6 +82,7 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 	const {
 		currentProjectId,
 		projects,
+		architectWorkspaceId,
 		workspaceState,
 		workspaceMetadata,
 		latestTaskChatMessage,
@@ -270,6 +272,7 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 		pendingNativeGitInitPath: pendingGitInitPath,
 		currentProjectId,
 		projects,
+		architectWorkspaceId,
 		workspaceState,
 		workspaceMetadata,
 		latestTaskChatMessage,

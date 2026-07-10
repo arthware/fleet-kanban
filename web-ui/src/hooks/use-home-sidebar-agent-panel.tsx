@@ -24,7 +24,12 @@ import type {
 import { useTerminalThemeColors } from "@/terminal/theme-colors";
 
 interface UseHomeSidebarAgentPanelInput {
-	currentProjectId: string | null;
+	/**
+	 * The workspace that hosts the sidebar agent chat — the pinned architect when
+	 * the board has one, otherwise the selected project. Kept stable across
+	 * project-selector changes so the architect chat is never torn down or swapped.
+	 */
+	agentWorkspaceId: string | null;
 	hasNoProjects: boolean;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
 	clineSessionContextVersion: number;
@@ -45,7 +50,7 @@ async function stopHomeSidebarTaskSession(workspaceId: string, taskId: string): 
 }
 
 export function useHomeSidebarAgentPanel({
-	currentProjectId,
+	agentWorkspaceId,
 	hasNoProjects,
 	runtimeProjectConfig,
 	clineSessionContextVersion,
@@ -81,7 +86,7 @@ export function useHomeSidebarAgentPanel({
 		return mergedSessionSummaries;
 	}, [sessionSummaries, taskSessions]);
 	const { panelMode, taskId } = useHomeAgentSession({
-		currentProjectId,
+		currentProjectId: agentWorkspaceId,
 		runtimeProjectConfig,
 		workspaceGit,
 		clineSessionContextVersion,
@@ -95,7 +100,7 @@ export function useHomeSidebarAgentPanel({
 		currentTaskIdRef.current = taskId;
 	}, [taskId]);
 	const { sendTaskChatMessage, loadTaskChatMessages, cancelTaskChatTurn } = useClineChatRuntimeActions({
-		currentProjectId,
+		currentProjectId: agentWorkspaceId,
 		onSessionSummary: upsertSessionSummary,
 	});
 
@@ -119,14 +124,14 @@ export function useHomeSidebarAgentPanel({
 			if (!result.ok) {
 				return result;
 			}
-			if (currentProjectId) {
+			if (agentWorkspaceId) {
 				if (currentTaskIdRef.current !== messageTaskId) {
-					await stopHomeSidebarTaskSession(currentProjectId, messageTaskId);
+					await stopHomeSidebarTaskSession(agentWorkspaceId, messageTaskId);
 				}
 			}
 			return result;
 		},
-		[currentProjectId, sendTaskChatMessage],
+		[agentWorkspaceId, sendTaskChatMessage],
 	);
 
 	const handleLoadHomeClineChatMessages = useCallback(
@@ -139,7 +144,7 @@ export function useHomeSidebarAgentPanel({
 		[cancelTaskChatTurn],
 	);
 
-	if (hasNoProjects || !currentProjectId) {
+	if (hasNoProjects || !agentWorkspaceId) {
 		return null;
 	}
 
@@ -159,7 +164,7 @@ export function useHomeSidebarAgentPanel({
 				summary={homeAgentPanelSummary ?? createIdleTaskSession(taskId)}
 				defaultMode="act"
 				showComposerModeToggle={false}
-				workspaceId={currentProjectId}
+				workspaceId={agentWorkspaceId}
 				runtimeConfig={runtimeProjectConfig}
 				onSendMessage={handleSendHomeClineChatMessage}
 				onCancelTurn={handleCancelHomeClineChatTurn}
@@ -176,7 +181,7 @@ export function useHomeSidebarAgentPanel({
 			<AgentTerminalPanel
 				key={taskId}
 				taskId={taskId}
-				workspaceId={currentProjectId}
+				workspaceId={agentWorkspaceId}
 				summary={homeAgentPanelSummary}
 				onSummary={upsertSessionSummary}
 				showSessionToolbar={false}

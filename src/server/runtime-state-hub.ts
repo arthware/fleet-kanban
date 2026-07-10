@@ -111,6 +111,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					type: "projects_updated",
 					currentProjectId: payload.currentProjectId,
 					projects: payload.projects,
+					architectWorkspaceId: payload.architectWorkspaceId,
 				} satisfies RuntimeStateStreamProjectsMessage);
 			}
 		} catch {
@@ -395,6 +396,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				let projectsPayload: {
 					currentProjectId: string | null;
 					projects: RuntimeStateStreamProjectsMessage["projects"];
+					architectWorkspaceId: string | null;
 				};
 				let workspaceState: RuntimeStateStreamSnapshotMessage["workspaceState"];
 				let workspaceMetadata: RuntimeStateStreamSnapshotMessage["workspaceMetadata"];
@@ -426,6 +428,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					type: "snapshot",
 					currentProjectId: projectsPayload.currentProjectId,
 					projects: projectsPayload.projects,
+					architectWorkspaceId: projectsPayload.architectWorkspaceId,
 					workspaceState,
 					workspaceMetadata,
 					clineSessionContextVersion,

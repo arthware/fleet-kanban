@@ -58,6 +58,7 @@ import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { LayoutCustomizationsProvider } from "@/resize/layout-customizations";
 import { ResizableBottomPane } from "@/resize/resizable-bottom-pane";
 import { useProjectNavigationLayout } from "@/resize/use-project-navigation-layout";
+import { resolveAgentChatWorkspace } from "@/runtime/agent-chat-workspace";
 import {
 	getTaskAgentNavbarHint,
 	isTaskAgentSetupSatisfied,
@@ -66,6 +67,7 @@ import {
 } from "@/runtime/native-agent";
 import type { RuntimeClineReasoningEffort, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
+import { useRuntimeStateStream } from "@/runtime/use-runtime-state-stream";
 import { useTerminalConnectionReady } from "@/runtime/use-terminal-connection-ready";
 import { useWorkspacePersistence } from "@/runtime/use-workspace-persistence";
 import { saveWorkspaceState } from "@/runtime/workspace-state-query";
@@ -101,6 +103,7 @@ export default function App(): ReactElement {
 	const {
 		currentProjectId,
 		projects,
+		architectWorkspaceId,
 		workspaceState: streamedWorkspaceState,
 		workspaceMetadata,
 		latestTaskChatMessage,
@@ -136,6 +139,29 @@ export default function App(): ReactElement {
 		isLoading: isRuntimeProjectConfigLoading,
 		refresh: refreshRuntimeProjectConfig,
 	} = useRuntimeProjectConfig(currentProjectId);
+	// The sidebar agent chat is the operator's single steering seat — the pinned
+	// architect when the board has one, otherwise the selected project. Anchoring
+	// it to a STABLE workspace id keeps its session and conversation intact when
+	// the project selector changes (only the board columns follow the selector).
+	const { agentChatWorkspaceId, isArchitectChatDetached } = resolveAgentChatWorkspace({
+		architectWorkspaceId,
+		currentProjectId,
+	});
+	// When the architect is a different workspace than the selected board, its live
+	// chat can't ride the board's per-workspace stream, so open a dedicated one.
+	// When they coincide (or there's no architect), the board stream already
+	// carries it — keep this one inert to avoid a redundant socket.
+	const architectChatStream = useRuntimeStateStream(agentChatWorkspaceId, {
+		enabled: isArchitectChatDetached,
+		pinned: true,
+	});
+	const { config: agentChatRuntimeConfig } = useRuntimeProjectConfig(agentChatWorkspaceId);
+	const agentChatLatestTaskChatMessage = isArchitectChatDetached
+		? architectChatStream.latestTaskChatMessage
+		: latestTaskChatMessage;
+	const agentChatMessagesByTaskId = isArchitectChatDetached
+		? architectChatStream.taskChatMessagesByTaskId
+		: taskChatMessagesByTaskId;
 	const { isBlocked: isKanbanAccessBlocked, refresh: refreshKanbanAccess } = useKanbanAccessGate({
 		workspaceId: currentProjectId,
 	});
@@ -431,14 +457,14 @@ export default function App(): ReactElement {
 	});
 	const homeTerminalSummary = sessions[homeTerminalTaskId] ?? null;
 	const homeSidebarAgentPanel = useHomeSidebarAgentPanel({
-		currentProjectId,
+		agentWorkspaceId: agentChatWorkspaceId,
 		hasNoProjects,
-		runtimeProjectConfig,
+		runtimeProjectConfig: agentChatRuntimeConfig,
 		clineSessionContextVersion,
-		taskSessions: sessions,
+		taskSessions: isArchitectChatDetached ? (architectChatStream.workspaceState?.sessions ?? {}) : sessions,
 		workspaceGit,
-		latestTaskChatMessage,
-		taskChatMessagesByTaskId,
+		latestTaskChatMessage: agentChatLatestTaskChatMessage,
+		taskChatMessagesByTaskId: agentChatMessagesByTaskId,
 	});
 	const { runningShortcutLabel, handleSelectShortcutLabel, handleRunShortcut, handleCreateShortcut } =
 		useShortcutActions({

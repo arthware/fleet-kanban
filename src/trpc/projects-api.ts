@@ -53,6 +53,7 @@ export interface CreateProjectsApiDependencies {
 	buildProjectsPayload: (preferredCurrentProjectId: string | null) => Promise<{
 		currentProjectId: string | null;
 		projects: RuntimeProjectSummary[];
+		architectWorkspaceId: string | null;
 	}>;
 	pickDirectoryPathFromSystemDialog: () => string | null;
 	serverCwd: string;
@@ -67,6 +68,7 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 			return {
 				currentProjectId: payload.currentProjectId,
 				projects: payload.projects,
+				architectWorkspaceId: payload.architectWorkspaceId,
 			};
 		},
 		addProject: async (preferredWorkspaceId, input) => {

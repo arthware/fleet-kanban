@@ -6,6 +6,7 @@ import {
 	resolveAgentConfigRoot,
 	resolveHomeAgentContext,
 	resolveHomeAgentCwd,
+	selectArchitectAwareProjects,
 } from "../../../src/server/architect-workspace";
 
 describe("classifyArchitectWorkspace", () => {
@@ -65,6 +66,80 @@ describe("classifyArchitectWorkspace", () => {
 			architectWorkspaceId: null,
 			implWorkspaceIds: [],
 		});
+	});
+});
+
+describe("selectArchitectAwareProjects", () => {
+	const architectBoard = [
+		{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+		{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+	];
+
+	it("reports the architect and hides it from the selectable project list", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: architectBoard,
+			activeWorkspaceId: "fleet-kanban",
+			preferredCurrentProjectId: "fleet-kanban",
+		});
+
+		expect(selection.architectWorkspaceId).toBe("tools");
+		expect(selection.selectableWorkspaceIds).toEqual(["fleet-kanban"]);
+		expect(selection.currentProjectId).toBe("fleet-kanban");
+	});
+
+	it("never selects the architect as the current project, even when it is requested", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: architectBoard,
+			activeWorkspaceId: "tools",
+			preferredCurrentProjectId: "tools",
+		});
+
+		// The architect is not a selectable board, so the current project falls
+		// through to the only impl repo rather than the overseer.
+		expect(selection.currentProjectId).toBe("fleet-kanban");
+		expect(selection.selectableWorkspaceIds).not.toContain("tools");
+	});
+
+	it("leaves a flat/peer board unchanged with no architect", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: [
+				{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+				{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+			],
+			activeWorkspaceId: "repo2",
+			preferredCurrentProjectId: "repo2",
+		});
+
+		expect(selection.architectWorkspaceId).toBeNull();
+		expect(selection.selectableWorkspaceIds).toEqual(["repo1", "repo2"]);
+		expect(selection.currentProjectId).toBe("repo2");
+	});
+
+	it("falls back to the first impl repo when no preference resolves", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: architectBoard,
+			activeWorkspaceId: null,
+			preferredCurrentProjectId: null,
+		});
+
+		expect(selection.currentProjectId).toBe("fleet-kanban");
+	});
+
+	it("yields no current project when the architect is the only registered workspace", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: [
+				{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+				{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+			].slice(0, 1),
+			activeWorkspaceId: "tools",
+			preferredCurrentProjectId: "tools",
+		});
+
+		// A lone workspace is a flat board (it contains nothing), so it stays a
+		// normal selectable project rather than becoming a hidden architect.
+		expect(selection.architectWorkspaceId).toBeNull();
+		expect(selection.selectableWorkspaceIds).toEqual(["tools"]);
+		expect(selection.currentProjectId).toBe("tools");
 	});
 });
 

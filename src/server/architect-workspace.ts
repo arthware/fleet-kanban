@@ -128,6 +128,59 @@ They live as subdirectories of your workspace, so you can read across them with 
 	return tools ? `${subRepos}\n\n${tools}` : subRepos;
 }
 
+export interface SelectArchitectAwareProjectsInput {
+	/** Registered workspace index entries, in the order the board should list them. */
+	workspaces: RegisteredWorkspace[];
+	/** The registry's currently active workspace, used as the current-project fallback. */
+	activeWorkspaceId: string | null;
+	/** The client's requested current project, honored only when it is selectable. */
+	preferredCurrentProjectId: string | null;
+}
+
+export interface ArchitectAwareProjectsSelection {
+	/** The overseer workspace, or `null` for a flat/peer board. */
+	architectWorkspaceId: string | null;
+	/** Workspace ids the board may show as projects — index order, architect removed. */
+	selectableWorkspaceIds: string[];
+	/** The resolved current project. Never the architect (it is not a selectable board). */
+	currentProjectId: string | null;
+}
+
+/**
+ * Decide which registered workspaces are selectable board projects and which one
+ * (if any) is the overseeing architect.
+ *
+ * The architect is the operator's pinned steering seat, not a board of its own,
+ * so it is removed from the selectable list and can never be resolved as the
+ * current project. The current-project fallback (preferred → active → first)
+ * mirrors {@link RegisteredWorkspace} ordering but runs over the architect-free
+ * set, so switching the board never lands on the overseer. A flat/peer board has
+ * no architect and passes through unchanged — preserving today's behavior.
+ */
+export function selectArchitectAwareProjects(
+	input: SelectArchitectAwareProjectsInput,
+): ArchitectAwareProjectsSelection {
+	const { architectWorkspaceId } = classifyArchitectWorkspace(input.workspaces);
+	const selectable = input.workspaces.filter((ws) => ws.workspaceId !== architectWorkspaceId);
+	const selectableWorkspaceIds = selectable.map((ws) => ws.workspaceId);
+
+	const fallbackProjectId =
+		selectable.find((ws) => ws.workspaceId === input.activeWorkspaceId)?.workspaceId ??
+		selectableWorkspaceIds[0] ??
+		null;
+	const currentProjectId =
+		(input.preferredCurrentProjectId &&
+			selectableWorkspaceIds.includes(input.preferredCurrentProjectId) &&
+			input.preferredCurrentProjectId) ||
+		fallbackProjectId;
+
+	return {
+		architectWorkspaceId,
+		selectableWorkspaceIds,
+		currentProjectId,
+	};
+}
+
 export interface ResolveAgentConfigRootInput {
 	workspaceId: string;
 	/** The workspace's own registered repo path. */

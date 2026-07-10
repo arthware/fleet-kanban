@@ -390,6 +390,8 @@ export const runtimeStateStreamSnapshotMessageSchema = z.object({
 	type: z.literal("snapshot"),
 	currentProjectId: z.string().nullable(),
 	projects: z.array(runtimeProjectSummarySchema),
+	/** The pinned overseer workspace (excluded from `projects`), or `null` for a flat board. */
+	architectWorkspaceId: z.string().nullable(),
 	workspaceState: runtimeWorkspaceStateResponseSchema.nullable(),
 	workspaceMetadata: runtimeWorkspaceMetadataSchema.nullable(),
 	clineSessionContextVersion: z.number().int().nonnegative(),
@@ -414,6 +416,8 @@ export const runtimeStateStreamProjectsMessageSchema = z.object({
 	type: z.literal("projects_updated"),
 	currentProjectId: z.string().nullable(),
 	projects: z.array(runtimeProjectSummarySchema),
+	/** The pinned overseer workspace (excluded from `projects`), or `null` for a flat board. */
+	architectWorkspaceId: z.string().nullable(),
 });
 export type RuntimeStateStreamProjectsMessage = z.infer<typeof runtimeStateStreamProjectsMessageSchema>;
 
@@ -489,6 +493,8 @@ export type RuntimeStateStreamMessage = z.infer<typeof runtimeStateStreamMessage
 export const runtimeProjectsResponseSchema = z.object({
 	currentProjectId: z.string().nullable(),
 	projects: z.array(runtimeProjectSummarySchema),
+	/** The pinned overseer workspace (excluded from `projects`), or `null` for a flat board. */
+	architectWorkspaceId: z.string().nullable(),
 });
 export type RuntimeProjectsResponse = z.infer<typeof runtimeProjectsResponseSchema>;
 

@@ -49,6 +49,8 @@ function getRuntimeStreamUrl(workspaceId: string | null): string {
 export interface UseRuntimeStateStreamResult {
 	currentProjectId: string | null;
 	projects: RuntimeProjectSummary[];
+	/** The pinned overseer workspace (never in `projects`), or `null` for a flat board. */
+	architectWorkspaceId: string | null;
 	workspaceState: RuntimeWorkspaceStateResponse | null;
 	workspaceMetadata: RuntimeWorkspaceMetadata | null;
 	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null;
@@ -64,6 +66,7 @@ export interface UseRuntimeStateStreamResult {
 interface RuntimeStateStreamStore {
 	currentProjectId: string | null;
 	projects: RuntimeProjectSummary[];
+	architectWorkspaceId: string | null;
 	workspaceState: RuntimeWorkspaceStateResponse | null;
 	workspaceMetadata: RuntimeWorkspaceMetadata | null;
 	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null;
@@ -100,6 +103,7 @@ function createInitialRuntimeStateStreamStore(requestedWorkspaceId: string | nul
 	return {
 		currentProjectId: requestedWorkspaceId,
 		projects: [],
+		architectWorkspaceId: null,
 		workspaceState: null,
 		workspaceMetadata: null,
 		latestTaskChatMessage: null,
@@ -184,6 +188,7 @@ function runtimeStateStreamReducer(
 		return {
 			currentProjectId: action.payload.currentProjectId,
 			projects: action.payload.projects,
+			architectWorkspaceId: action.payload.architectWorkspaceId,
 			workspaceState: nextWorkspaceState,
 			workspaceMetadata: action.payload.workspaceMetadata,
 			latestTaskChatMessage: null,
@@ -202,6 +207,7 @@ function runtimeStateStreamReducer(
 			...state,
 			currentProjectId: action.nextProjectId,
 			projects: action.payload.projects,
+			architectWorkspaceId: action.payload.architectWorkspaceId,
 			workspaceState: didProjectChange ? null : state.workspaceState,
 			workspaceMetadata: didProjectChange ? null : state.workspaceMetadata,
 			latestTaskChatMessage: didProjectChange ? null : state.latestTaskChatMessage,
@@ -297,13 +303,41 @@ function runtimeStateStreamReducer(
 	return state;
 }
 
-export function useRuntimeStateStream(requestedWorkspaceId: string | null): UseRuntimeStateStreamResult {
+export interface UseRuntimeStateStreamOptions {
+	/**
+	 * When `false`, the hook opens no socket and stays inert. Use this for a
+	 * secondary architect stream that must be silent while the architect is the
+	 * selected workspace (its live data already rides the primary board stream).
+	 * Passing `null` as the workspace id does NOT disable — the server treats a
+	 * null id as "the active workspace" — so an explicit guard is required.
+	 */
+	enabled?: boolean;
+	/**
+	 * Pin the stream's message-filter identity to `requestedWorkspaceId` instead of
+	 * following the snapshot's reported current project. The architect is excluded
+	 * from the selectable project list, so a stream opened for it reports a
+	 * *different* current project — without pinning, the client would drop the
+	 * architect's own `task_chat_message`/`workspace_state_updated` events. A
+	 * pinned stream also never re-homes on `projects_updated`.
+	 */
+	pinned?: boolean;
+}
+
+export function useRuntimeStateStream(
+	requestedWorkspaceId: string | null,
+	options: UseRuntimeStateStreamOptions = {},
+): UseRuntimeStateStreamResult {
+	const enabled = options.enabled ?? true;
+	const pinned = options.pinned ?? false;
 	const [state, dispatch] = useReducer(
 		runtimeStateStreamReducer,
 		requestedWorkspaceId,
 		createInitialRuntimeStateStreamStore,
 	);
 	useEffect(() => {
+		if (!enabled) {
+			return;
+		}
 		let cancelled = false;
 		let socket: WebSocket | null = null;
 		let reconnectTimer: number | null = null;
@@ -365,11 +399,24 @@ export function useRuntimeStateStream(requestedWorkspaceId: string | null): UseR
 				try {
 					const payload = JSON.parse(String(event.data)) as RuntimeStateStreamMessage;
 					if (payload.type === "snapshot") {
-						activeWorkspaceId = payload.currentProjectId;
+						// A pinned stream keeps filtering by its requested workspace, so it
+						// keeps its own events even though the snapshot reports a different
+						// selectable current project (the architect is excluded from the list).
+						if (!pinned) {
+							activeWorkspaceId = payload.currentProjectId;
+						}
 						dispatch({ type: "snapshot", payload });
 						return;
 					}
 					if (payload.type === "projects_updated") {
+						if (pinned) {
+							dispatch({
+								type: "projects_updated",
+								payload,
+								nextProjectId: activeWorkspaceId,
+							});
+							return;
+						}
 						const previousWorkspaceId = activeWorkspaceId;
 						const nextProjectId = resolveProjectIdAfterProjectsUpdate(activeWorkspaceId, payload);
 						activeWorkspaceId = nextProjectId;
@@ -499,11 +546,12 @@ export function useRuntimeStateStream(requestedWorkspaceId: string | null): UseR
 			}
 			cleanupSocket();
 		};
-	}, [requestedWorkspaceId]);
+	}, [requestedWorkspaceId, enabled, pinned]);
 
 	return {
 		currentProjectId: state.currentProjectId,
 		projects: state.projects,
+		architectWorkspaceId: state.architectWorkspaceId,
 		workspaceState: state.workspaceState,
 		workspaceMetadata: state.workspaceMetadata,
 		latestTaskChatMessage: state.latestTaskChatMessage,

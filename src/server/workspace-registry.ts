@@ -15,6 +15,7 @@ import {
 	type RuntimeWorkspaceIndexEntry,
 } from "../state/workspace-state";
 import { TerminalSessionManager } from "../terminal/session-manager";
+import { selectArchitectAwareProjects } from "./architect-workspace";
 
 export interface WorkspaceRegistryScope {
 	workspaceId: string;
@@ -68,6 +69,7 @@ export interface WorkspaceRegistry {
 	buildProjectsPayload: (preferredCurrentProjectId: string | null) => Promise<{
 		currentProjectId: string | null;
 		projects: RuntimeProjectSummary[];
+		architectWorkspaceId: string | null;
 	}>;
 	resolveWorkspaceForStream: (requestedWorkspaceId: string | null) => Promise<ResolvedWorkspaceStreamTarget>;
 	isWorkspaceUnavailable: (workspaceId: string) => boolean;
@@ -331,29 +333,31 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 	};
 
 	const buildProjectsPayload = async (preferredCurrentProjectId: string | null) => {
-		const projects = await listWorkspaceIndexEntries();
-		const fallbackProjectId =
-			projects.find((project) => project.workspaceId === activeWorkspaceId)?.workspaceId ??
-			projects[0]?.workspaceId ??
-			null;
-		const resolvedCurrentProjectId =
-			(preferredCurrentProjectId &&
-				projects.some((project) => project.workspaceId === preferredCurrentProjectId) &&
-				preferredCurrentProjectId) ||
-			fallbackProjectId;
+		const workspaces = await listWorkspaceIndexEntries();
+		// The architect (the overseer whose repo contains the others) is the pinned
+		// steering seat, not a selectable board — hide it from the project list and
+		// never resolve it as the current project.
+		const selection = selectArchitectAwareProjects({
+			workspaces,
+			activeWorkspaceId,
+			preferredCurrentProjectId,
+		});
+		const repoPathById = new Map(workspaces.map((workspace) => [workspace.workspaceId, workspace.repoPath]));
 		const projectSummaries = await Promise.all(
-			projects.map(async (project) => {
-				const taskCounts = await summarizeProjectTaskCounts(project.workspaceId, project.repoPath);
+			selection.selectableWorkspaceIds.map(async (workspaceId) => {
+				const repoPath = repoPathById.get(workspaceId) ?? "";
+				const taskCounts = await summarizeProjectTaskCounts(workspaceId, repoPath);
 				return toProjectSummary({
-					workspaceId: project.workspaceId,
-					repoPath: project.repoPath,
+					workspaceId,
+					repoPath,
 					taskCounts,
 				});
 			}),
 		);
 		return {
-			currentProjectId: resolvedCurrentProjectId,
+			currentProjectId: selection.currentProjectId,
 			projects: projectSummaries,
+			architectWorkspaceId: selection.architectWorkspaceId,
 		};
 	};
 

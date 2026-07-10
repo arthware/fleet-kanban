@@ -1,8 +1,8 @@
 import { act, useCallback, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
+import { resolveAgentChatWorkspace } from "@/runtime/agent-chat-workspace";
 import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
 
 const startTaskSessionMutateMock = vi.hoisted(() => vi.fn());
@@ -847,6 +847,42 @@ describe("useHomeAgentSession", () => {
 			[workspaceOneTaskId, workspaceTwoTaskId].sort(),
 		);
 		expect(startTaskSessionMutateMock).toHaveBeenCalledTimes(2);
+		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
+	});
+
+	it("keeps the architect home chat session intact when the displayed project changes", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+		const architectConfig = createRuntimeConfig({ selectedAgentId: "cline", effectiveCommand: "cline" });
+
+		// The sidebar chat is fed the workspace the operator's steering agent runs
+		// in — the architect — resolved the same way App does. Switching which
+		// project's board is displayed must not move, reset, or stop that chat.
+		const renderForSelectedProject = async (selectedProjectId: string) => {
+			const { agentChatWorkspaceId } = resolveAgentChatWorkspace({
+				architectWorkspaceId: "tools",
+				currentProjectId: selectedProjectId,
+			});
+			await act(async () => {
+				root.render(
+					<HookHarness
+						config={architectConfig}
+						currentProjectId={agentChatWorkspaceId}
+						onSnapshot={(snapshot) => {
+							latestSnapshot = snapshot;
+						}}
+					/>,
+				);
+				await createFlushPromises();
+			});
+		};
+
+		await renderForSelectedProject("fleet-kanban");
+		const architectTaskId = requireTaskId(requireSnapshot(latestSnapshot).taskId);
+		expect(architectTaskId).toMatch(/^__home_agent__:tools:cline$/);
+
+		await renderForSelectedProject("docs-site");
+		const afterSwitch = requireSnapshot(latestSnapshot);
+		expect(afterSwitch.taskId).toBe(architectTaskId);
 		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
 	});
 });
