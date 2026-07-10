@@ -1,10 +1,38 @@
 import type { IncomingMessage } from "node:http";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+	DEFAULT_KANBAN_RUNTIME_HOST,
+	DEFAULT_KANBAN_RUNTIME_PORT,
+	getKanbanRuntimeHost,
+	getKanbanRuntimePort,
+	setKanbanRuntimeHost,
+	setKanbanRuntimePort,
+} from "../../../src/core/runtime-endpoint";
 import { evaluateCors, evaluateHost, handleSocketUpgrade } from "../../../src/server/middleware";
 
 const ALLOWED_ORIGIN = "http://127.0.0.1:3484";
 const ALLOWED_HOSTS = new Set(["localhost:3484", "127.0.0.1:3484"]);
+
+// `handleSocketUpgrade` derives its allowed origin and host allowlist from the
+// runtime-endpoint module state, which is seeded from KANBAN_RUNTIME_PORT/HOST at load.
+// The live board leaks those env vars (e.g. port 3500) into the sessions it spawns, which
+// would shift the allowed origin off :3484 and fail these assertions. Pin the runtime
+// endpoint to its defaults so the suite is deterministic regardless of the ambient env.
+let originalRuntimePort: number;
+let originalRuntimeHost: string;
+
+beforeAll(() => {
+	originalRuntimePort = getKanbanRuntimePort();
+	originalRuntimeHost = getKanbanRuntimeHost();
+	setKanbanRuntimePort(DEFAULT_KANBAN_RUNTIME_PORT);
+	setKanbanRuntimeHost(DEFAULT_KANBAN_RUNTIME_HOST);
+});
+
+afterAll(() => {
+	setKanbanRuntimePort(originalRuntimePort);
+	setKanbanRuntimeHost(originalRuntimeHost);
+});
 
 function makeFakeRequest(headers: Partial<IncomingMessage["headers"]>, method = "GET"): IncomingMessage {
 	return { method, headers } as IncomingMessage;

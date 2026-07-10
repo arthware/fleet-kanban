@@ -1,5 +1,11 @@
 #!/bin/sh
 
+# The live board leaks KANBAN_RUNTIME_PORT (e.g. 3500) into every session it spawns.
+# Runtime tests assert against the default port (3484), so an inherited value makes the
+# pre-commit test suite fail for any agent the board launched. Scrub it so the checks
+# always run on a clean env regardless of which board launched this shell.
+unset KANBAN_RUNTIME_PORT
+
 STAGED_FILES=$(git diff --cached --name-only)
 
 echo "Running biome check on staged files..."
