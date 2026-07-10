@@ -1071,6 +1071,22 @@ export const runtimeTaskChatMessagesResponseSchema = z.object({
 });
 export type RuntimeTaskChatMessagesResponse = z.infer<typeof runtimeTaskChatMessagesResponseSchema>;
 
+export const runtimeTaskTranscriptRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeTaskTranscriptRequest = z.infer<typeof runtimeTaskTranscriptRequestSchema>;
+
+export const runtimeTaskTranscriptResponseSchema = z.object({
+	ok: z.boolean(),
+	// True when a transcript file was located on disk. `false` with an empty
+	// `messages` list is the graceful "conversation no longer on disk" signal —
+	// never a silently-started fresh session.
+	present: z.boolean(),
+	messages: z.array(runtimeTaskChatMessageSchema),
+	error: z.string().optional(),
+});
+export type RuntimeTaskTranscriptResponse = z.infer<typeof runtimeTaskTranscriptResponseSchema>;
+
 export const runtimeTaskChatSendRequestSchema = z.object({
 	taskId: z.string(),
 	text: z.string(),

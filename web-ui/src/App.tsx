@@ -79,7 +79,7 @@ import {
 	resetWorkspaceMetadataStore,
 } from "@/stores/workspace-metadata-store";
 import { useTerminalThemeColors } from "@/terminal/theme-colors";
-import type { BoardData } from "@/types";
+import type { BoardCard, BoardData } from "@/types";
 
 export default function App(): ReactElement {
 	const terminalThemeColors = useTerminalThemeColors();
@@ -225,6 +225,7 @@ export default function App(): ReactElement {
 		sendTaskChatMessage,
 		cancelTaskChatTurn,
 		fetchTaskChatMessages,
+		fetchTaskTranscript,
 		cleanupTaskWorkspace,
 		fetchTaskWorkspaceInfo,
 	} = useTaskSessions({
@@ -640,6 +641,19 @@ export default function App(): ReactElement {
 		handleStartAllBacklogTasks,
 		setSelectedTaskId,
 	});
+
+	// Resume an ended (dead-PTY) task from its detail pane: relaunch by the stored
+	// CLI session id so the live terminal path repopulates the prior conversation.
+	const handleResumeEndedTask = useCallback(
+		(card: BoardCard) => {
+			void startTaskSession(card, { resumeMode: "resume" }).then((result) => {
+				if (!result.ok) {
+					notifyError(result.message ?? "Could not resume the session.");
+				}
+			});
+		},
+		[startTaskSession],
+	);
 
 	useAppHotkeys({
 		selectedCard,
@@ -1078,6 +1092,8 @@ export default function App(): ReactElement {
 									onSendClineChatMessage={sendTaskChatMessage}
 									onCancelClineChatTurn={cancelTaskChatTurn}
 									onLoadClineChatMessages={fetchTaskChatMessages}
+									onLoadTaskTranscript={fetchTaskTranscript}
+									onResumeTask={handleResumeEndedTask}
 									latestClineChatMessage={latestSelectedTaskChatMessage}
 									streamedClineChatMessages={selectedTaskChatMessages}
 									onMoveToTrash={handleMoveToTrash}

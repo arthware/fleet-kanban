@@ -39,6 +39,11 @@ interface SendTaskSessionInputResult {
 	message?: string;
 }
 
+export interface TaskTranscriptResult {
+	present: boolean;
+	messages: RuntimeTaskChatMessage[];
+}
+
 interface StartTaskSessionResult {
 	ok: boolean;
 	message?: string;
@@ -67,6 +72,7 @@ export interface UseTaskSessionsResult {
 	abortTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	cancelTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	fetchTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
+	fetchTaskTranscript: (taskId: string) => Promise<TaskTranscriptResult | null>;
 	cleanupTaskWorkspace: (taskId: string) => Promise<RuntimeWorktreeDeleteResponse | null>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
 }
@@ -265,6 +271,24 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 		[currentProjectId],
 	);
 
+	const fetchTaskTranscript = useCallback(
+		async (taskId: string): Promise<TaskTranscriptResult | null> => {
+			if (!currentProjectId) {
+				return null;
+			}
+			try {
+				const payload = await getRuntimeTrpcClient(currentProjectId).runtime.getTaskTranscript.query({ taskId });
+				if (!payload.ok) {
+					return null;
+				}
+				return { present: payload.present, messages: payload.messages };
+			} catch {
+				return null;
+			}
+		},
+		[currentProjectId],
+	);
+
 	const fetchTaskWorkspaceInfo = useCallback(
 		async (task: BoardCard): Promise<RuntimeTaskWorkspaceInfoResponse | null> => {
 			if (!currentProjectId) {
@@ -295,6 +319,7 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 		abortTaskChatTurn,
 		cancelTaskChatTurn,
 		fetchTaskChatMessages,
+		fetchTaskTranscript,
 		cleanupTaskWorkspace,
 		fetchTaskWorkspaceInfo,
 	};

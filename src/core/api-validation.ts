@@ -26,6 +26,7 @@ import {
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
+	type RuntimeTaskTranscriptRequest,
 	type RuntimeTaskWorkspaceInfoRequest,
 	type RuntimeTerminalWsClientMessage,
 	type RuntimeWorkspaceChangesRequest,
@@ -58,6 +59,7 @@ import {
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
+	runtimeTaskTranscriptRequestSchema,
 	runtimeTaskWorkspaceInfoRequestSchema,
 	runtimeTerminalWsClientMessageSchema,
 	runtimeWorkspaceChangesRequestSchema,
@@ -263,6 +265,17 @@ export function parseTaskChatMessagesRequest(value: unknown): RuntimeTaskChatMes
 	const taskId = parsed.taskId.trim();
 	if (!taskId) {
 		throw new Error("Task chat taskId cannot be empty.");
+	}
+	return {
+		taskId,
+	};
+}
+
+export function parseTaskTranscriptRequest(value: unknown): RuntimeTaskTranscriptRequest {
+	const parsed = parseWithSchema(runtimeTaskTranscriptRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Task transcript taskId cannot be empty.");
 	}
 	return {
 		taskId,

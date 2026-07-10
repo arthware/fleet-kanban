@@ -4,6 +4,10 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
+import {
+	type AgentTranscriptLoadResult,
+	AgentTranscriptPanel,
+} from "@/components/detail-panels/agent-transcript-panel";
 import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/components/detail-panels/cline-agent-chat-panel";
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
@@ -345,6 +349,8 @@ export function CardDetailView({
 	onSendClineChatMessage,
 	onCancelClineChatTurn,
 	onLoadClineChatMessages,
+	onLoadTaskTranscript,
+	onResumeTask,
 	latestClineChatMessage,
 	streamedClineChatMessages,
 	onMoveToTrash,
@@ -407,6 +413,8 @@ export function CardDetailView({
 	) => Promise<ClineChatActionResult>;
 	onCancelClineChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
 	onLoadClineChatMessages?: (taskId: string) => Promise<ClineChatMessage[] | null>;
+	onLoadTaskTranscript?: (taskId: string) => Promise<AgentTranscriptLoadResult | null>;
+	onResumeTask?: (card: BoardCard) => void;
 	latestClineChatMessage?: ClineChatMessage | null;
 	streamedClineChatMessages?: ClineChatMessage[] | null;
 	onMoveToTrash: () => void;
@@ -521,6 +529,14 @@ export function CardDetailView({
 		hasLiveTerminalSession(sessionSummary);
 	const effectiveTaskAgentId = sessionSummary?.agentId ?? selection.card.agentId ?? selectedAgentId;
 	const showClineAgentChatPanel = isNativeClineAgentSelected(effectiveTaskAgentId);
+	// A non-Cline task whose PTY has exited but that captured a CLI session id is an
+	// *ended, durable* session: render its persisted transcript read-only instead of
+	// the blank dead terminal. `agentSessionId` gates out never-started backlog cards.
+	const showEndedTranscript =
+		!showClineAgentChatPanel &&
+		Boolean(onLoadTaskTranscript) &&
+		Boolean(sessionSummary?.agentSessionId) &&
+		!hasLiveTerminalSession(sessionSummary);
 	const availablePaths = useMemo(() => {
 		if (!runtimeFiles || runtimeFiles.length === 0) {
 			return [];
@@ -674,6 +690,13 @@ export function CardDetailView({
 					? getTaskAutoReviewCancelButtonLabel(selection.card.autoReviewMode)
 					: null
 			}
+		/>
+	) : showEndedTranscript && onLoadTaskTranscript ? (
+		<AgentTranscriptPanel
+			taskId={selection.card.id}
+			summary={sessionSummary ?? null}
+			onLoadTranscript={onLoadTaskTranscript}
+			onResume={onResumeTask ? () => onResumeTask(selection.card) : undefined}
 		/>
 	) : (
 		<AgentTerminalPanel

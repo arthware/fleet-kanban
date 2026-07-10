@@ -4,6 +4,7 @@
 // should stay in focused services instead of accumulating here.
 
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { TRPCError } from "@trpc/server";
 import { createClineMcpRuntimeService } from "../cline-sdk/cline-mcp-runtime-service";
@@ -40,6 +41,7 @@ import {
 	parseTaskSessionInputRequest,
 	parseTaskSessionStartRequest,
 	parseTaskSessionStopRequest,
+	parseTaskTranscriptRequest,
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { resolveTaskTitle } from "../core/task-title.js";
@@ -47,6 +49,7 @@ import { resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
+import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
 import { captureTaskTurnCheckpoint } from "../workspace/turn-checkpoints";
@@ -440,6 +443,30 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					messages: [],
 					error: message,
 				};
+			}
+		},
+		getTaskTranscript: async (workspaceScope, input) => {
+			try {
+				const body = parseTaskTranscriptRequest(input);
+				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const summary = terminalManager.getSummary(body.taskId);
+				if (!summary?.agentId || !summary.agentSessionId) {
+					// No captured CLI session id → nothing durable to read back.
+					return { ok: true, present: false, messages: [] };
+				}
+				const transcript = await readAgentTranscript({
+					agentId: summary.agentId,
+					sessionId: summary.agentSessionId,
+					homePath: homedir(),
+				});
+				return {
+					ok: true,
+					present: transcript.present,
+					messages: transcript.messages,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, present: false, messages: [], error: message };
 			}
 		},
 		getClineSlashCommands: async (workspaceScope) => {
