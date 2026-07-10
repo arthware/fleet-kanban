@@ -46,6 +46,7 @@ interface StartTaskSessionResult {
 
 interface StartTaskSessionOptions {
 	resumeFromTrash?: boolean;
+	resumeMode?: "resume" | "fresh";
 }
 
 export interface UseTaskSessionsResult {
@@ -161,6 +162,7 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 					images: options?.resumeFromTrash ? undefined : task.images,
 					startInPlanMode: options?.resumeFromTrash ? undefined : task.startInPlanMode,
 					resumeFromTrash: options?.resumeFromTrash,
+					resumeMode: options?.resumeMode,
 					baseRef: task.baseRef,
 					cols: geometry.cols,
 					rows: geometry.rows,

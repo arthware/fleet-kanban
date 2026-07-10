@@ -266,6 +266,50 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("~/.cline/worktrees/trash-task-1/kanban");
 	});
 
+	it("shows Resume for resumable trashed sessions", async () => {
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard
+						card={createCard()}
+						index={0}
+						columnId="trash"
+						sessionSummary={createSummary("idle", {
+							agentSessionId: "session-to-resume",
+							agentSessionLifecycle: "resumable",
+						})}
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		const resumeButton = container.querySelector('button[aria-label="Resume task from done"]');
+		expect(resumeButton).toBeInstanceOf(HTMLButtonElement);
+		expect(resumeButton?.textContent?.trim()).toBe("Resume");
+	});
+
+	it("shows Start fresh for gone trashed sessions", async () => {
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard
+						card={createCard()}
+						index={0}
+						columnId="trash"
+						sessionSummary={createSummary("idle", {
+							agentSessionId: "dead-session",
+							agentSessionLifecycle: "gone",
+						})}
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		const startFreshButton = container.querySelector('button[aria-label="Start fresh task from done"]');
+		expect(startFreshButton).toBeInstanceOf(HTMLButtonElement);
+		expect(startFreshButton?.textContent?.trim()).toBe("Start fresh");
+	});
+
 	it("shows formatted agent override details with model name and reasoning effort", async () => {
 		mockWorkspaceSnapshot = {
 			taskId: "task-1",

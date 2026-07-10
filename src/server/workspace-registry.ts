@@ -306,7 +306,8 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			}
 			const liveSessionsByTaskId: RuntimeWorkspaceStateResponse["sessions"] = {};
 			for (const summary of terminalManager.listSummaries()) {
-				liveSessionsByTaskId[summary.taskId] = summary;
+				liveSessionsByTaskId[summary.taskId] =
+					(await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
 			}
 			const nextCounts = applyLiveSessionStateToProjectTaskCounts(persistedCounts, board, liveSessionsByTaskId);
 			projectTaskCountsByWorkspaceId.set(workspaceId, nextCounts);
@@ -323,7 +324,8 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		const response = await loadWorkspaceState(workspacePath);
 		const terminalManager = await ensureTerminalManagerForWorkspace(workspaceId, workspacePath);
 		for (const summary of terminalManager.listSummaries()) {
-			response.sessions[summary.taskId] = summary;
+			response.sessions[summary.taskId] =
+				(await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
 		}
 		return response;
 	};

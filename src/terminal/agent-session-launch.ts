@@ -16,6 +16,8 @@ export interface ResolveLaunchSessionIdInput {
 	readonly agentId: RuntimeAgentId;
 	/** The session id already persisted for this task, if any. */
 	readonly storedSessionId: string | null;
+	/** Whether lifecycle routing says to resume the stored id or start clean. */
+	readonly resumeMode: "resume" | "fresh";
 	/** Mints a fresh session id for agents that accept one at spawn time. */
 	readonly mintSessionId: () => string;
 }
@@ -23,7 +25,8 @@ export interface ResolveLaunchSessionIdInput {
 /**
  * Decide the session id and fresh-vs-resume mode for a task launch.
  *
- * - A task that already has a stored id resumes that session by id.
+ * - A resumable task resumes its stored id.
+ * - A gone task starts fresh even if an old id is still persisted.
  * - A fresh Claude start mints a new id so the session can be resumed later.
  * - Codex assigns its own id (discovered post-spawn), so a fresh start carries
  *   none; other agents have no id-based resume and fall back to their own
@@ -31,7 +34,7 @@ export interface ResolveLaunchSessionIdInput {
  */
 export function resolveLaunchSessionId(input: ResolveLaunchSessionIdInput): LaunchSessionIdResult {
 	const stored = input.storedSessionId?.trim() || null;
-	if (stored) {
+	if (stored && input.resumeMode === "resume") {
 		return { agentSessionId: stored, resumeSession: true };
 	}
 	if (input.agentId === "claude") {

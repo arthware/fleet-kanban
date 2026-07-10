@@ -184,6 +184,7 @@ describe("useTaskSessions", () => {
 			images: undefined,
 			startInPlanMode: true,
 			resumeFromTrash: undefined,
+			resumeMode: undefined,
 			baseRef: "main",
 			cols: 120,
 			rows: 40,
@@ -231,6 +232,64 @@ describe("useTaskSessions", () => {
 						mimeType: "image/png",
 					},
 				],
+			}),
+		);
+	});
+
+	it("forwards resume mode for resumable restored cards", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession(createTask(), { resumeFromTrash: true, resumeMode: "resume" });
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				resumeFromTrash: true,
+				resumeMode: "resume",
+			}),
+		);
+	});
+
+	it("forwards fresh mode for gone restored cards", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession(createTask(), { resumeFromTrash: true, resumeMode: "fresh" });
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				resumeFromTrash: true,
+				resumeMode: "fresh",
 			}),
 		);
 	});

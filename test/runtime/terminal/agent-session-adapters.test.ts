@@ -771,6 +771,26 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("--continue");
 	});
 
+	it("starts a fresh Claude trash restore under a minted session id instead of continuing by heuristic", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-fresh-trash-id",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			agentSessionId: "fresh-trash-session",
+			resumeFromTrash: true,
+		});
+
+		const sessionIdIndex = launch.args.indexOf("--session-id");
+		expect(sessionIdIndex).toBeGreaterThan(-1);
+		expect(launch.args[sessionIdIndex + 1]).toBe("fresh-trash-session");
+		expect(launch.args).not.toContain("--resume");
+		expect(launch.args).not.toContain("--continue");
+	});
+
 	it("resumes a Claude session by its stored session id", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({

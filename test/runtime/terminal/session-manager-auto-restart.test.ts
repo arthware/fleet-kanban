@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prepareAgentLaunchMock = vi.hoisted(() => vi.fn());
 const ptySessionSpawnMock = vi.hoisted(() => vi.fn());
+const locateAgentTranscriptMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../src/terminal/agent-session-adapters.js", () => ({
 	prepareAgentLaunch: prepareAgentLaunchMock,
@@ -11,6 +12,10 @@ vi.mock("../../../src/terminal/pty-session.js", () => ({
 	PtySession: {
 		spawn: ptySessionSpawnMock,
 	},
+}));
+
+vi.mock("../../../src/terminal/agent-transcript-locator.js", () => ({
+	locateAgentTranscript: locateAgentTranscriptMock,
 }));
 
 import { TerminalSessionManager } from "../../../src/terminal/session-manager";
@@ -42,6 +47,8 @@ describe("TerminalSessionManager auto-restart", () => {
 	beforeEach(() => {
 		prepareAgentLaunchMock.mockReset();
 		ptySessionSpawnMock.mockReset();
+		locateAgentTranscriptMock.mockReset();
+		locateAgentTranscriptMock.mockResolvedValue({ present: false });
 		prepareAgentLaunchMock.mockImplementation(async (input: { args: string[]; binary?: string }) => ({
 			binary: input.binary,
 			args: [...input.args],
@@ -81,6 +88,108 @@ describe("TerminalSessionManager auto-restart", () => {
 		});
 		expect(manager.getSummary("task-1")?.state).toBe("running");
 		expect(manager.getSummary("task-1")?.pid).toBe(222);
+	});
+
+	it("resumes by stored id when the transcript is present", async () => {
+		locateAgentTranscriptMock.mockResolvedValue({ present: true, path: "/tmp/session.jsonl" });
+		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => createMockPtySession(111, request));
+
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "idle",
+				agentId: "claude",
+				workspacePath: null,
+				pid: null,
+				startedAt: null,
+				updatedAt: 1,
+				lastOutputAt: null,
+				reviewReason: null,
+				exitCode: null,
+				agentSessionId: "stored-session",
+				lastHookAt: null,
+				latestHookActivity: null,
+				latestTurnCheckpoint: null,
+				previousTurnCheckpoint: null,
+			},
+		});
+
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp/task-1",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+
+		expect(prepareAgentLaunchMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentSessionId: "stored-session",
+				resumeSession: true,
+			}),
+		);
+	});
+
+	it("starts fresh instead of resuming a gone stored id during automatic restart", async () => {
+		const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
+		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {
+			const session = createMockPtySession(spawnedSessions.length === 0 ? 111 : 222, request);
+			spawnedSessions.push(session);
+			return session;
+		});
+
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "idle",
+				agentId: "claude",
+				workspacePath: null,
+				pid: null,
+				startedAt: null,
+				updatedAt: 1,
+				lastOutputAt: null,
+				reviewReason: null,
+				exitCode: null,
+				agentSessionId: "dead-session",
+				lastHookAt: null,
+				latestHookActivity: null,
+				latestTurnCheckpoint: null,
+				previousTurnCheckpoint: null,
+			},
+		});
+		manager.attach("task-1", {
+			onState: vi.fn(),
+			onOutput: vi.fn(),
+			onExit: vi.fn(),
+		});
+
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp/task-1",
+			prompt: "",
+			resumeFromTrash: true,
+			resumeMode: "resume",
+		});
+		spawnedSessions[0]?.triggerExit(1);
+
+		await vi.waitFor(() => {
+			expect(prepareAgentLaunchMock).toHaveBeenCalledTimes(2);
+		});
+
+		const restartLaunch = prepareAgentLaunchMock.mock.calls[1]?.[0];
+		expect(restartLaunch).toEqual(
+			expect.objectContaining({
+				resumeSession: false,
+			}),
+		);
+		expect(restartLaunch?.agentSessionId).not.toBe("dead-session");
 	});
 
 	it("does not restart an attached agent session after an explicit stop", async () => {

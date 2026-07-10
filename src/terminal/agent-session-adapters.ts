@@ -633,8 +633,6 @@ const claudeAdapter: AgentSessionAdapter = {
 		if (input.resumeSession && claudeSessionId && !claudeHasResumeFlag) {
 			// Resume the exact prior session by id instead of Claude's cwd/recency guess.
 			args.push("--resume", claudeSessionId);
-		} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
-			args.push("--continue");
 		} else if (
 			!input.resumeSession &&
 			claudeSessionId &&
@@ -643,6 +641,8 @@ const claudeAdapter: AgentSessionAdapter = {
 		) {
 			// Fresh start under a known id so the session can be resumed later.
 			args.push("--session-id", claudeSessionId);
+		} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
+			args.push("--continue");
 		}
 		if (input.startInPlanMode) {
 			const withoutImmediateBypass = args.filter((arg) => arg !== "--dangerously-skip-permissions");

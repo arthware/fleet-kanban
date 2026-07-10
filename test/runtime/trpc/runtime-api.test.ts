@@ -802,6 +802,124 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(broadcastTaskChatCleared).toHaveBeenCalledWith("workspace-1", "task-1");
 	});
 
+	it("passes resume intent when a stored terminal session is resumable", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+
+		const terminalManager = {
+			getSummary: vi.fn(() => createSummary({ agentId: "claude", state: "idle", pid: null })),
+			refreshAgentSessionLifecycle: vi.fn(async () =>
+				createSummary({
+					agentId: "claude",
+					state: "idle",
+					pid: null,
+					agentSessionId: "stored-session",
+					agentSessionLifecycle: "resumable",
+				}),
+			),
+			startTaskSession: vi.fn(async () => createSummary({ agentId: "claude" })),
+			applyTurnCheckpoint: vi.fn(),
+		};
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Resume task",
+				resumeFromTrash: true,
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.refreshAgentSessionLifecycle).toHaveBeenCalledWith("task-1");
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId: "task-1",
+				resumeFromTrash: true,
+				resumeMode: "resume",
+			}),
+		);
+	});
+
+	it("passes fresh intent when a stored terminal session is gone", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+
+		const terminalManager = {
+			getSummary: vi.fn(() => createSummary({ agentId: "claude", state: "idle", pid: null })),
+			refreshAgentSessionLifecycle: vi.fn(async () =>
+				createSummary({
+					agentId: "claude",
+					state: "idle",
+					pid: null,
+					agentSessionId: "dead-session",
+					agentSessionLifecycle: "gone",
+				}),
+			),
+			startTaskSession: vi.fn(async () => createSummary({ agentId: "claude" })),
+			applyTurnCheckpoint: vi.fn(),
+		};
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Resume task",
+				resumeFromTrash: true,
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.refreshAgentSessionLifecycle).toHaveBeenCalledWith("task-1");
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId: "task-1",
+				resumeFromTrash: true,
+				resumeMode: "fresh",
+			}),
+		);
+	});
+
 	it("probes cline persisted sessions on resumeFromTrash when no terminal agent summary exists", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 		agentRegistryMocks.resolveAgentCommand.mockReturnValue({

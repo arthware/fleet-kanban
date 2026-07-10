@@ -260,6 +260,9 @@ export const runtimeTaskSessionReviewReasonSchema = z
 	.nullable();
 export type RuntimeTaskSessionReviewReason = z.infer<typeof runtimeTaskSessionReviewReasonSchema>;
 
+export const runtimeAgentSessionLifecycleSchema = z.enum(["attached", "resumable", "gone"]);
+export type RuntimeAgentSessionLifecycle = z.infer<typeof runtimeAgentSessionLifecycleSchema>;
+
 export const runtimeTaskHookActivitySchema = z.object({
 	activityText: z.string().nullable().default(null),
 	toolName: z.string().nullable().default(null),
@@ -295,6 +298,7 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	// board load can resume the exact same session by id. Defaults to null so a
 	// sessions.json written before this field existed still parses.
 	agentSessionId: z.string().nullable().default(null),
+	agentSessionLifecycle: runtimeAgentSessionLifecycleSchema.optional(),
 	lastHookAt: z.number().nullable().default(null),
 	latestHookActivity: runtimeTaskHookActivitySchema.nullable().default(null),
 	warningMessage: z.string().nullable().optional(),
@@ -986,6 +990,7 @@ export const runtimeTaskSessionStartRequestSchema = z.object({
 	startInPlanMode: z.boolean().optional(),
 	mode: runtimeTaskSessionModeSchema.optional(),
 	resumeFromTrash: z.boolean().optional(),
+	resumeMode: z.enum(["resume", "fresh"]).optional(),
 	baseRef: z.string(),
 	cols: z.number().int().positive().optional(),
 	rows: z.number().int().positive().optional(),

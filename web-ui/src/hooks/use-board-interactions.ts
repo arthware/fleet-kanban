@@ -559,7 +559,11 @@ export function useBoardInteractions({
 					timeout: 7000,
 				});
 			}
-			const resumed = await startTaskSession(task, { resumeFromTrash: true });
+			const sessionLifecycle = sessions[taskId]?.agentSessionLifecycle;
+			const resumed = await startTaskSession(task, {
+				resumeFromTrash: true,
+				resumeMode: sessionLifecycle === "resumable" ? "resume" : "fresh",
+			});
 			if (resumed.ok) {
 				setBoard((currentBoard) => {
 					const disabledAutoReview = disableTaskAutoReview(currentBoard, taskId);
@@ -583,7 +587,7 @@ export function useBoardInteractions({
 				return reverted.moved ? reverted.board : currentBoard;
 			});
 		},
-		[ensureTaskWorkspace, setBoard, startTaskSession],
+		[ensureTaskWorkspace, sessions, setBoard, startTaskSession],
 	);
 
 	const handleDragEnd = useCallback(

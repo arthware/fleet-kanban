@@ -2,8 +2,10 @@
 // It owns process lifecycle, terminal protocol filtering, and summary updates
 // for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 
 import type {
+	RuntimeAgentSessionLifecycle,
 	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
 	RuntimeTaskSessionReviewReason,
@@ -17,7 +19,8 @@ import {
 	type AgentOutputTransitionInspectionPredicate,
 	prepareAgentLaunch,
 } from "./agent-session-adapters";
-import { resolveLaunchSessionId } from "./agent-session-launch";
+import { classifyAgentSessionLifecycle, resolveLaunchSessionId } from "./agent-session-launch";
+import { locateAgentTranscript } from "./agent-transcript-locator";
 import {
 	hasClaudeWorkspaceTrustPrompt,
 	shouldAutoConfirmClaudeWorkspaceTrust,
@@ -90,6 +93,7 @@ export interface StartTaskSessionRequest {
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
+	resumeMode?: "resume" | "fresh";
 	cols?: number;
 	rows?: number;
 	env?: Record<string, string | undefined>;
@@ -272,6 +276,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 		return Array.from(this.entries.values()).map((entry) => cloneSummary(entry.summary));
 	}
 
+	async refreshAgentSessionLifecycle(taskId: string): Promise<RuntimeTaskSessionSummary | null> {
+		const entry = this.entries.get(taskId);
+		if (!entry) {
+			return null;
+		}
+		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry);
+		if (entry.summary.agentSessionLifecycle === lifecycle) {
+			return cloneSummary(entry.summary);
+		}
+		return cloneSummary(updateSummary(entry, { agentSessionLifecycle: lifecycle }));
+	}
+
 	attach(taskId: string, listener: TerminalSessionListener): (() => void) | null {
 		const entry = this.ensureEntry(taskId);
 
@@ -326,12 +342,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 			},
 		});
 
-		// Resume by the task's stored session id when it has one; otherwise start
-		// fresh (minting an id for agents that accept one at spawn). This is the
-		// one datum that lets a later start reattach to the same agent session.
+		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
+		const requestedResumeMode = request.resumeMode ?? (lifecycle === "resumable" ? "resume" : "fresh");
+		const resumeMode = requestedResumeMode === "resume" && lifecycle === "resumable" ? "resume" : "fresh";
+		updateSummary(entry, { agentSessionLifecycle: lifecycle });
+
+		// Resume by the task's stored session id only when lifecycle routing says
+		// it is resumable. A gone transcript starts fresh even if an old id remains
+		// persisted.
 		const { agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
 			agentId: request.agentId,
 			storedSessionId: entry.summary.agentSessionId,
+			resumeMode,
 			mintSessionId: () => randomUUID(),
 		});
 
@@ -556,6 +578,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			reviewReason: request.resumeFromTrash ? "attention" : null,
 			exitCode: null,
 			agentSessionId: launchSessionId,
+			agentSessionLifecycle: "attached",
 			lastHookAt: null,
 			latestHookActivity: null,
 			warningMessage: null,
@@ -773,8 +796,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 		// Preserve agentId so the server can route to the correct agent type
 		// (Cline SDK vs terminal PTY) when a task is restored from trash. Also
-		// keep agentSessionId (omitted from this patch): a stale, dead session is
-		// still resumable by id if its transcript survives, so we must not wipe it.
+		// keep agentSessionId: a stale, dead session may still be resumable by id
+		// if its transcript survives, so we must not wipe it.
 		const summary = updateSummary(entry, {
 			state: "idle",
 			workspacePath: null,
@@ -783,6 +806,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			lastOutputAt: null,
 			reviewReason: null,
 			exitCode: null,
+			agentSessionLifecycle: entry.summary.agentSessionId ? "resumable" : "gone",
 			lastHookAt: null,
 			latestHookActivity: null,
 			latestTurnCheckpoint: null,
@@ -794,6 +818,26 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 		this.emitSummary(summary);
 		return cloneSummary(summary);
+	}
+
+	private async classifyEntryAgentSessionLifecycle(
+		entry: SessionEntry,
+		agentIdOverride?: StartTaskSessionRequest["agentId"],
+	): Promise<RuntimeAgentSessionLifecycle> {
+		const agentSessionId = entry.summary.agentSessionId;
+		const agentId = agentIdOverride ?? entry.summary.agentId;
+		const transcript = agentSessionId
+			? await locateAgentTranscript({
+					agentId: agentId ?? "",
+					sessionId: agentSessionId,
+					homePath: homedir(),
+				})
+			: { present: false as const };
+		return classifyAgentSessionLifecycle({
+			hasLiveProcess: Boolean(entry.active),
+			agentSessionId,
+			transcriptPresent: transcript.present,
+		});
 	}
 
 	writeInput(taskId: string, data: Buffer): RuntimeTaskSessionSummary | null {

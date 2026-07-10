@@ -278,6 +278,14 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						error: "No runnable agent command is configured. Open Settings, install a supported CLI, and select it.",
 					};
 				}
+				const previousSummary =
+					typeof terminalManager.refreshAgentSessionLifecycle === "function"
+						? await terminalManager.refreshAgentSessionLifecycle(body.taskId)
+						: typeof terminalManager.getSummary === "function"
+							? terminalManager.getSummary(body.taskId)
+							: null;
+				const resumeMode =
+					body.resumeMode ?? (previousSummary?.agentSessionLifecycle === "resumable" ? "resume" : "fresh");
 				const summary = await terminalManager.startTaskSession({
 					taskId: body.taskId,
 					agentId: resolved.agentId,
@@ -289,6 +297,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					images: body.images,
 					startInPlanMode: body.startInPlanMode,
 					resumeFromTrash: body.resumeFromTrash,
+					resumeMode,
 					cols: body.cols,
 					rows: body.rows,
 					workspaceId: workspaceScope.workspaceId,

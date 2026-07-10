@@ -438,6 +438,12 @@ export function BoardCard({
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
 	const cancelAutomaticActionLabel =
 		!isTrashCard && card.autoReviewEnabled ? getTaskAutoReviewCancelButtonLabel(card.autoReviewMode) : null;
+	const trashRestoreLabel =
+		sessionSummary?.agentSessionLifecycle === "gone"
+			? "Start fresh"
+			: sessionSummary?.agentSessionLifecycle === "resumable"
+				? "Resume"
+				: "Restore";
 	const agentOverrideLabel = useMemo(
 		() => (card.agentId ? (getRuntimeAgentCatalogEntry(card.agentId)?.label ?? card.agentId) : null),
 		[card.agentId],
@@ -640,23 +646,31 @@ export function BoardCard({
 										side="bottom"
 										content={
 											<>
-												Restore session
+												{trashRestoreLabel}
 												<br />
 												in new worktree
 											</>
 										}
 									>
 										<Button
-											icon={<RotateCcw size={12} />}
+											icon={
+												sessionSummary?.agentSessionLifecycle === "gone" ? (
+													<Play size={12} />
+												) : (
+													<RotateCcw size={12} />
+												)
+											}
 											variant="ghost"
 											size="sm"
-											aria-label="Restore task from done"
+											aria-label={`${trashRestoreLabel} task from done`}
 											onMouseDown={stopEvent}
 											onClick={(event) => {
 												stopEvent(event);
 												onRestoreFromTrash?.(card.id);
 											}}
-										/>
+										>
+											{trashRestoreLabel}
+										</Button>
 									</Tooltip>
 								) : null}
 							</div>

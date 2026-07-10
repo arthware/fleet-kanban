@@ -7,6 +7,7 @@ describe("resolveLaunchSessionId", () => {
 		const result = resolveLaunchSessionId({
 			agentId: "claude",
 			storedSessionId: null,
+			resumeMode: "fresh",
 			mintSessionId: () => "minted-id",
 		});
 
@@ -17,16 +18,29 @@ describe("resolveLaunchSessionId", () => {
 		const result = resolveLaunchSessionId({
 			agentId: "claude",
 			storedSessionId: "stored-id",
+			resumeMode: "resume",
 			mintSessionId: () => "should-not-be-used",
 		});
 
 		expect(result).toEqual({ agentSessionId: "stored-id", resumeSession: true });
 	});
 
+	it("starts fresh instead of resuming a gone stored session id", () => {
+		const result = resolveLaunchSessionId({
+			agentId: "claude",
+			storedSessionId: "dead-stored-id",
+			resumeMode: "fresh",
+			mintSessionId: () => "minted-id",
+		});
+
+		expect(result).toEqual({ agentSessionId: "minted-id", resumeSession: false });
+	});
+
 	it("does not mint an id for a fresh Codex start, since Codex assigns its own", () => {
 		const result = resolveLaunchSessionId({
 			agentId: "codex",
 			storedSessionId: null,
+			resumeMode: "fresh",
 			mintSessionId: () => "should-not-be-used",
 		});
 
@@ -37,6 +51,7 @@ describe("resolveLaunchSessionId", () => {
 		const result = resolveLaunchSessionId({
 			agentId: "gemini",
 			storedSessionId: null,
+			resumeMode: "fresh",
 			mintSessionId: () => "should-not-be-used",
 		});
 
