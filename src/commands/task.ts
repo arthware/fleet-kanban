@@ -26,6 +26,7 @@ import {
 import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
+import { renderTranscriptTailLines, selectTranscriptTail } from "./task-transcript-tail";
 
 const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "trash"] as const;
 type ListTaskColumn = (typeof LIST_TASK_COLUMNS)[number];
@@ -799,6 +800,51 @@ async function sendTaskInput(input: {
 	};
 }
 
+async function tailTask(input: {
+	cwd: string;
+	taskId: string;
+	projectPath?: string;
+	lines?: number;
+	sinceMinutes?: number;
+}): Promise<JsonRecord> {
+	// Read-only: resolve the workspace without registering it (mirrors `list`),
+	// then derive the tail from the agent CLI's own transcript via the existing
+	// reader/locator — the board never re-streams or re-persists the session.
+	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd);
+	const runtimeClient = createRuntimeTrpcClient(workspace.workspaceId);
+
+	const transcript = await runtimeClient.runtime.getTaskTranscript.query({ taskId: input.taskId });
+	if (!transcript.ok) {
+		return {
+			ok: false,
+			taskId: input.taskId,
+			error: transcript.error ?? "Could not read the task transcript.",
+		};
+	}
+
+	const tail = selectTranscriptTail(renderTranscriptTailLines(transcript.messages), {
+		lines: input.lines,
+		sinceMinutes: input.sinceMinutes,
+	});
+
+	return {
+		ok: true,
+		taskId: input.taskId,
+		// `present: false` = no transcript on disk for a captured session — the
+		// card isn't live, or its agent hasn't written a turn yet.
+		present: transcript.present,
+		count: tail.length,
+		tail,
+		...(tail.length === 0
+			? {
+					hint: transcript.present
+						? "The agent hasn't written any conversation yet."
+						: `No live transcript for "${input.taskId}" — resume it first: task start --task-id ${input.taskId}`,
+				}
+			: {}),
+	};
+}
+
 interface TrashTaskExecutionResult {
 	task: JsonRecord;
 	taskId: string;
@@ -1120,6 +1166,17 @@ function parseOptionalBooleanOption(value: unknown, flagName: string): boolean |
 	throw new Error(`Invalid boolean value for ${flagName}: "${value}". Use true or false.`);
 }
 
+function parsePositiveIntOption(value: string | undefined, flagName: string): number | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	const parsed = Number(value.trim());
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(`Invalid value for ${flagName}: "${value}". Use a positive whole number.`);
+	}
+	return parsed;
+}
+
 async function runTaskCommand(handler: () => Promise<JsonRecord>): Promise<void> {
 	try {
 		printJson(await handler());
@@ -1401,6 +1458,30 @@ export function registerTaskCommand(program: Command): void {
 						text: options.text,
 						projectPath: options.projectPath,
 						submit: options.submit !== false,
+					}),
+			);
+		});
+
+	task
+		.command("tail")
+		.description("Read-only tail of a running task's agent conversation (architect observe).")
+		.requiredOption("--task-id <id>", "Task ID.")
+		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
+		.option("--lines <n>", "Show only the last N rendered lines.", (value) =>
+			parsePositiveIntOption(value, "--lines"),
+		)
+		.option("--since <mins>", "Show only turns from the last M minutes.", (value) =>
+			parsePositiveIntOption(value, "--since"),
+		)
+		.action(async (options: { taskId: string; projectPath?: string; lines?: number; since?: number }) => {
+			await runTaskCommand(
+				async () =>
+					await tailTask({
+						cwd: process.cwd(),
+						taskId: options.taskId,
+						projectPath: options.projectPath,
+						lines: options.lines,
+						sinceMinutes: options.since,
 					}),
 			);
 		});
