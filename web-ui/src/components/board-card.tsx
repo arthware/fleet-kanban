@@ -6,12 +6,12 @@ import {
 	AlertCircle,
 	AlertTriangle,
 	Bot,
+	CheckCircle2,
 	GitBranch,
 	MessageCircleQuestion,
 	Pencil,
 	Play,
 	RotateCcw,
-	Trash2,
 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -318,6 +318,7 @@ export function BoardCard({
 	const [descriptionFont, setDescriptionFont] = useState(DEFAULT_TEXT_MEASURE_FONT);
 	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 	const reviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(card.id);
+	const isDoneCard = columnId === "done";
 	const isTrashCard = columnId === "trash";
 	const isCardInteractive = !isTrashCard;
 	const descriptionWidth = descriptionRect.width > 0 ? descriptionRect.width : descriptionWidthFallback;
@@ -459,7 +460,7 @@ export function BoardCard({
 		return null;
 	};
 	const statusMarker = renderStatusMarker();
-	const showWorkspaceStatus = columnId === "in_progress" || columnId === "review" || isTrashCard;
+	const showWorkspaceStatus = columnId === "in_progress" || columnId === "review" || isDoneCard || isTrashCard;
 	const reviewWorkspacePath = reviewWorkspaceSnapshot
 		? formatPathForDisplay(reviewWorkspaceSnapshot.path)
 		: isTrashCard
@@ -666,9 +667,12 @@ export function BoardCard({
 						<div
 							className={cn(
 								"rounded-md border border-border-bright bg-surface-2 p-2.5",
+								isDoneCard && "border-status-green/50 bg-status-green/5",
 								isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
+								isDoneCard && isCardInteractive && "hover:border-status-green/60 hover:bg-status-green/10",
 								isDragging && "shadow-lg",
 								isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
+								isDoneCard && isHovered && isCardInteractive && "border-status-green/60 bg-status-green/10",
 								isDependencySource && "kb-board-card-dependency-source",
 								isDependencyTarget && "kb-board-card-dependency-target",
 							)}
@@ -748,7 +752,7 @@ export function BoardCard({
 									/>
 								) : columnId === "review" ? (
 									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <CheckCircle2 size={13} />}
 										variant="ghost"
 										size="sm"
 										disabled={isMoveToTrashLoading}
@@ -759,7 +763,7 @@ export function BoardCard({
 											onMoveToTrash?.(card.id);
 										}}
 									/>
-								) : columnId === "trash" ? (
+								) : isTrashCard ? (
 									<Tooltip
 										side="bottom"
 										content={

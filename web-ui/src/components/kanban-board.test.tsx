@@ -188,7 +188,8 @@ describe("KanbanBoard", () => {
 					],
 				},
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [] },
 			],
 			dependencies: [],
 		};
@@ -224,5 +225,37 @@ describe("KanbanBoard", () => {
 		});
 
 		expect(boardElement?.dataset.programmaticCardMove).toBe("true");
+	});
+
+	it("renders visible columns in board order while keeping trash hidden", async () => {
+		const board: BoardData = {
+			columns: [
+				{ id: "trash", title: "Trash", cards: [] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "backlog", title: "Backlog", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		await act(async () => {
+			root.render(
+				<KanbanBoard
+					data={board}
+					taskSessions={{}}
+					onCardSelect={() => {}}
+					onCreateTask={() => {}}
+					dependencies={[]}
+					onDragEnd={() => {}}
+				/>,
+			);
+		});
+
+		const columnIds = Array.from(container.querySelectorAll<HTMLElement>("section[data-column-id]")).map(
+			(column) => column.dataset.columnId,
+		);
+		expect(columnIds).toEqual(["backlog", "in_progress", "review", "done"]);
+		expect(columnIds).not.toContain("trash");
 	});
 });

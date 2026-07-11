@@ -57,4 +57,16 @@ describe("drag rules", () => {
 	it("allows manual trash to review drops", () => {
 		expect(isCardDropDisabled("review", "trash")).toBe(false);
 	});
+
+	it("allows manual review to done drops", () => {
+		expect(isCardDropDisabled("done", "review")).toBe(false);
+	});
+
+	it("allows manual done to trash drops", () => {
+		expect(isCardDropDisabled("trash", "done")).toBe(false);
+	});
+
+	it("keeps manual done to review drops disabled", () => {
+		expect(isCardDropDisabled("review", "done")).toBe(true);
+	});
 });

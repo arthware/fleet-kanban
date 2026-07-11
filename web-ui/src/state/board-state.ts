@@ -61,7 +61,7 @@ function withUpdatedColumns(board: BoardData, columns: BoardColumn[]): BoardData
 }
 
 function normalizeColumnId(id: string): BoardColumnId | null {
-	if (id === "backlog" || id === "in_progress" || id === "review" || id === "trash") {
+	if (id === "backlog" || id === "in_progress" || id === "review" || id === "done" || id === "trash") {
 		return id;
 	}
 	return null;
@@ -389,6 +389,13 @@ export function removeTaskDependency(board: BoardData, dependencyId: string): { 
 
 export function getReadyLinkedTaskIdsForTaskInTrash(board: BoardData, taskId: string): string[] {
 	return runtimeTaskState.getReadyLinkedTaskIdsForTaskInTrash(board, taskId);
+}
+
+export function completeTaskAndGetReadyLinkedTaskIds(
+	board: BoardData,
+	taskId: string,
+): { board: BoardData; moved: boolean; readyTaskIds: string[] } {
+	return runtimeTaskState.completeTaskAndGetReadyLinkedTaskIds(board, taskId);
 }
 
 export function trashTaskAndGetReadyLinkedTaskIds(

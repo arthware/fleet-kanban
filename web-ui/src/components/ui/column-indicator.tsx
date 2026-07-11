@@ -34,6 +34,26 @@ export function ColumnIndicator({ columnId, size = 14 }: { columnId: string; siz
 			</svg>
 		);
 	}
+	if (columnId === "done") {
+		const left = cx - r * 0.7;
+		const midX = cx - r * 0.15;
+		const midY = cy + r * 0.5;
+		const right = cx + r * 0.85;
+		const top = cy - r * 0.55;
+		return (
+			<svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+				<circle cx={cx} cy={cy} r={r + strokeWidth / 2} fill={color} />
+				<path
+					d={`M${left} ${cy} L${midX} ${midY} L${right} ${top}`}
+					fill="none"
+					stroke="var(--color-surface-0)"
+					strokeWidth={strokeWidth * 1.25}
+					strokeLinecap="round"
+					strokeLinejoin="round"
+				/>
+			</svg>
+		);
+	}
 	return (
 		<svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
 			<circle cx={cx} cy={cy} r={r + strokeWidth / 2} fill={color} />
