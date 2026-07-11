@@ -640,6 +640,27 @@ describe("board dependency state", () => {
 		});
 	});
 
+	it("preserves task-level agentModel when updating the title", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "backlog", {
+			prompt: "Task with agent model",
+			agentId: "claude",
+			agentModel: "claude-haiku-4-5",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected backlog task to exist");
+		}
+
+		const updated = updateTaskTitle(board, task.id, "Updated title");
+		expect(updated.updated).toBe(true);
+		const updatedTask = updated.board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(updatedTask?.title).toBe("Updated title");
+		expect(updatedTask?.agentModel).toBe("claude-haiku-4-5");
+	});
+
 	it("preserves model fields when disabling auto-review", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {
@@ -677,6 +698,29 @@ describe("board dependency state", () => {
 			modelId: "my-model",
 			reasoningEffort: "high",
 		});
+	});
+
+	it("preserves agentModel when disabling auto-review", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "review", {
+			prompt: "Task with agent model",
+			autoReviewEnabled: true,
+			autoReviewMode: "commit",
+			agentId: "codex",
+			agentModel: "codex-mini",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected review task to exist");
+		}
+
+		const disabled = disableTaskAutoReview(board, task.id);
+		expect(disabled.updated).toBe(true);
+
+		const updatedTask = disabled.board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(updatedTask?.agentModel).toBe("codex-mini");
 	});
 
 	it("does not create task model overrides for tasks inheriting global agent settings", () => {
@@ -738,6 +782,32 @@ describe("board dependency state", () => {
 			modelId: "anthropic/claude-opus-4.6",
 			reasoningEffort: "high",
 		});
+	});
+
+	it("preserves agentModel when applying a Cline settings selection", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "backlog", {
+			prompt: "Task with agent model",
+			agentId: "cline",
+			agentModel: "claude-haiku-4-5",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected backlog task to exist");
+		}
+
+		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
+			agentId: "cline",
+			clineSettings: {
+				providerId: "openrouter",
+				modelId: "anthropic/claude-opus-4.6",
+			},
+		});
+		expect(result.updated).toBe(true);
+		const updatedTask = result.board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(updatedTask?.agentModel).toBe("claude-haiku-4-5");
 	});
 
 	it("updates reasoning-only task overrides without forcing provider or model overrides", () => {

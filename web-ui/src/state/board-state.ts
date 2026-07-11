@@ -26,6 +26,7 @@ export interface TaskDraft {
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
+	agentModel?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -158,6 +159,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		images?: unknown;
 		baseRef?: unknown;
 		agentId?: unknown;
+		agentModel?: unknown;
 		clineSettings?: unknown;
 		clineProviderId?: unknown;
 		clineModelId?: unknown;
@@ -198,6 +200,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		images: normalizeTaskImages(card.images),
 		baseRef,
 		...(typeof card.agentId === "string" && card.agentId ? { agentId: card.agentId as RuntimeAgentId } : {}),
+		...(typeof card.agentModel === "string" && card.agentModel ? { agentModel: card.agentModel } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,
@@ -345,6 +348,7 @@ export function addTaskToColumnWithResult(
 			autoReviewMode: draft.autoReviewMode,
 			images: draft.images,
 			agentId: draft.agentId,
+			agentModel: draft.agentModel,
 			clineSettings: draft.clineSettings,
 			baseRef: draft.baseRef,
 		},
@@ -543,6 +547,7 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 							? draft.images.map((image) => ({ ...image }))
 							: undefined,
 				agentId: draft.agentId,
+				agentModel: draft.agentModel,
 				clineSettings: draft.clineSettings,
 				baseRef,
 				updatedAt: Date.now(),
@@ -574,6 +579,7 @@ export function updateTaskTitle(
 		autoReviewMode: selection.card.autoReviewMode,
 		images: selection.card.images,
 		agentId: selection.card.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: selection.card.clineSettings,
 		baseRef: selection.card.baseRef,
 	});
@@ -605,6 +611,7 @@ export function applyTaskDetailClineSettingsSelection(
 		autoReviewMode: selection.card.autoReviewMode,
 		images: selection.card.images,
 		agentId: settings.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: settings.clineSettings ?? undefined,
 		baseRef: selection.card.baseRef,
 	});
@@ -663,6 +670,7 @@ export function disableTaskAutoReview(board: BoardData, taskId: string): { board
 		autoReviewMode: DEFAULT_TASK_AUTO_REVIEW_MODE,
 		images: selection.card.images,
 		agentId: selection.card.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: selection.card.clineSettings,
 		baseRef: selection.card.baseRef,
 	});

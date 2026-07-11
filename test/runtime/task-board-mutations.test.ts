@@ -266,6 +266,68 @@ describe("per-task agent/model/provider overrides", () => {
 		expect(updated.task?.clineSettings).toBeUndefined();
 	});
 
+	it("updates agentModel from undefined to a value", () => {
+		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
+		expect(created.task.agentModel).toBeUndefined();
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			agentModel: "claude-haiku-4-5",
+		});
+
+		expect(updated.updated).toBe(true);
+		expect(updated.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("preserves agentModel when update input omits it (undefined)", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Updated prompt",
+			baseRef: "main",
+			// agentModel is undefined, so the existing override should persist
+		});
+
+		expect(updated.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("clears agentModel when update input provides null", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			agentModel: null,
+		});
+
+		expect(updated.task?.agentModel).toBeUndefined();
+	});
+
+	it("preserves agentModel across move operations", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Movable task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "in_progress");
+
+		expect(moved.moved).toBe(true);
+		expect(moved.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
 	it("preserves overrides across move operations", () => {
 		const created = addTaskToColumn(
 			createBoard(),

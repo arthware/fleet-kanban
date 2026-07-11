@@ -542,4 +542,148 @@ describe("source task commands", () => {
 			cleanupHome();
 		}
 	});
+
+	it(
+		"updates and clears a backlog task's agent model, and rejects the override once the task leaves backlog",
+		{ timeout: 60_000 },
+		async () => {
+			const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-agent-model-");
+			const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-agent-model-");
+
+			try {
+				initGitRepository(projectPath);
+				writeFileSync(join(projectPath, "README.md"), "# Task Agent Model Test\n", "utf8");
+				commitAll(projectPath, "init");
+
+				const port = String(await getAvailablePort());
+				const env = createGitTestEnv({
+					HOME: homeDir,
+					USERPROFILE: homeDir,
+					KANBAN_RUNTIME_PORT: port,
+				});
+
+				const serverProcess = spawn(
+					process.execPath,
+					[
+						"--require",
+						resolveShutdownIpcHookPath(),
+						"--import",
+						resolveTsxLoaderImportSpecifier(),
+						resolve(process.cwd(), "src/cli.ts"),
+						"--no-open",
+					],
+					{
+						cwd: projectPath,
+						env,
+						stdio: ["ignore", "pipe", "pipe", "ipc"],
+					},
+				);
+
+				try {
+					await waitForServerStart(serverProcess);
+
+					const created = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"create",
+							"--prompt",
+							"Create a task whose agent model gets updated",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(created.exitCode).toBe(0);
+					const createdPayload = JSON.parse(created.stdout) as { ok?: boolean; task?: { id?: string } };
+					const taskId = createdPayload.task?.id ?? "";
+					expect(taskId).not.toBe("");
+
+					const updatedWithModel = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"claude-haiku-4-5",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(
+						updatedWithModel.exitCode,
+						`task update --agent-model failed.\nstdout:\n${updatedWithModel.stdout}\nstderr:\n${updatedWithModel.stderr}`,
+					).toBe(0);
+					const updatedPayload = JSON.parse(updatedWithModel.stdout) as {
+						ok?: boolean;
+						task?: { agentModel?: string };
+					};
+					expect(updatedPayload.task?.agentModel).toBe("claude-haiku-4-5");
+
+					const listed = await runCliCommandAndCollectOutput({
+						args: ["task", "list", "--column", "backlog", "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(listed.exitCode).toBe(0);
+					expect(listed.stdout).toContain('"agentModel": "claude-haiku-4-5"');
+
+					const clearedModel = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"default",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(clearedModel.exitCode).toBe(0);
+					const clearedPayload = JSON.parse(clearedModel.stdout) as { task?: { agentModel?: string } };
+					expect(clearedPayload.task?.agentModel).toBeUndefined();
+
+					const trashed = await runCliCommandAndCollectOutput({
+						args: ["task", "trash", "--task-id", taskId, "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(trashed.exitCode).toBe(0);
+
+					const rejectedUpdate = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"claude-haiku-4-5",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(rejectedUpdate.exitCode).not.toBe(0);
+					expect(rejectedUpdate.stdout).toContain("can only be changed while a task is in backlog");
+				} finally {
+					await requestGracefulShutdown(serverProcess);
+					const stopped = await waitForExit(serverProcess, 5_000);
+					if (!stopped) {
+						serverProcess.kill("SIGKILL");
+						await waitForExit(serverProcess, 5_000);
+					}
+				}
+			} finally {
+				cleanupProject();
+				cleanupHome();
+			}
+		},
+	);
 });
