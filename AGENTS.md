@@ -11,6 +11,22 @@ exploration when that primed context genuinely doesn't cover what you need, and 
 (what was missing) so the next card's prompt can be primed better. Broad Opus-driven sweeps on every
 card are the cost spiral we're closing, not the default.
 
+**Prior-art commits — cite them, then read them first.** A card may carry an optional, well-known
+`## Prior art` section that names the commit(s) of similar past work. It is the manual, per-card
+precursor to the automated change-index (see `docs/design/architect-console.md` §6) — until that
+ledger exists, the operator hand-cites the SHAs. The shape is exactly:
+
+```
+## Prior art (read with `git show <sha>` before starting)
+- <sha> — <one line: what it did / why it's similar>
+```
+
+It is **optional** — most cards won't have it, and you never add it to fill space. But **when a card
+does list Prior art, treat it as a required first step: before writing any code, run `git show <sha>`
+(and `git log -p -1 <sha>` for the fuller diff) on each cited commit and match the pattern it
+established.** Reading the actual prior diff is cheaper and more consistent than re-deriving the tree,
+and it is the primed-context path that replaces a broad codebase sweep.
+
 ---
 
 This file captures tribal knowledge-the nuanced, non-obvious patterns that make the difference between a quick fix and hours of debugging.
