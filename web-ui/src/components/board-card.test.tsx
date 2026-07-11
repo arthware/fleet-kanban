@@ -821,6 +821,79 @@ describe("BoardCard", () => {
 		expect(usageChip?.textContent).not.toContain("claude-haiku-4-5");
 	});
 
+	it("appends an estimated cost to the token chip when cost is known", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-4-8" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 1_100_000,
+						outputTokens: 100_000,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: 3.4,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("1.2M tok"),
+		);
+		expect(usageChip?.textContent).toBe("1.2M tok · $3.40");
+	});
+
+	it("shows a sub-cent estimate as a less-than marker on the chip", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-haiku-4-5" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 2_345,
+						outputTokens: 0,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: 0.004,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("2.3K tok"),
+		);
+		expect(usageChip?.textContent).toBe("2.3K tok · <$0.01");
+	});
+
+	it("shows only tokens, no cost segment, when cost is unknown", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "codex" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 1_100_000,
+						outputTokens: 100_000,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("1.2M tok"),
+		);
+		expect(usageChip?.textContent).toBe("1.2M tok");
+		expect(usageChip?.textContent).not.toContain("$");
+	});
+
 	it("does not render a token-usage chip when usage is absent", async () => {
 		await act(async () => {
 			root.render(

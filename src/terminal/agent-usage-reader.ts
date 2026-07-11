@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import type { ClineSdkAccumulatedUsage } from "../cline-sdk/sdk-runtime-boundary";
 import type { RuntimeAgentId, RuntimeTaskTokenUsage } from "../core/api-contract";
+import { estimateClaudeCostUsd } from "../core/claude-model-pricing";
 import { locateAgentTranscript } from "./agent-transcript-locator";
 
 /**
@@ -110,7 +111,9 @@ function parseJsonlRecords(raw: string): Record<string, unknown>[] {
  * bookkeeping records and records without a `message.usage` block are skipped.
  *
  * Returns `null` when no usage-bearing record was found (a fresh/empty session).
- * `costUsd` is always `null` here — pricing lands in a later card.
+ * `costUsd` is priced from the static Claude table (`estimateClaudeCostUsd`)
+ * keyed by the transcript's own `message.model`; a model absent from the table
+ * leaves it `null` (tokens only, never a wrong number).
  */
 export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
 	const seen = new Set<string>();
@@ -119,6 +122,9 @@ export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTa
 	let cacheReadTokens = 0;
 	let cacheCreationTokens = 0;
 	let counted = 0;
+	// A session doesn't switch model mid-run, but we read it from the records
+	// rather than assume — the last counted record's model keys the price table.
+	let modelId: string | null = null;
 
 	for (const record of records) {
 		if (readString(record, "type") !== "assistant" || record.isSidechain === true || record.isMeta === true) {
@@ -140,13 +146,15 @@ export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTa
 		outputTokens += readNumber(usage, "output_tokens");
 		cacheReadTokens += readNumber(usage, "cache_read_input_tokens");
 		cacheCreationTokens += readNumber(usage, "cache_creation_input_tokens");
+		modelId = readString(message, "model") ?? modelId;
 		counted += 1;
 	}
 
 	if (counted === 0) {
 		return null;
 	}
-	return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd: null };
+	const totals = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
+	return { ...totals, costUsd: estimateClaudeCostUsd(totals, modelId) };
 }
 
 /**
