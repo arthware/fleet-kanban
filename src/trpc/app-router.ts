@@ -75,6 +75,8 @@ import type {
 	RuntimeTaskChatReloadResponse,
 	RuntimeTaskChatSendRequest,
 	RuntimeTaskChatSendResponse,
+	RuntimeTaskDurabilityRequest,
+	RuntimeTaskDurabilityResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
@@ -168,6 +170,8 @@ import {
 	runtimeTaskChatReloadResponseSchema,
 	runtimeTaskChatSendRequestSchema,
 	runtimeTaskChatSendResponseSchema,
+	runtimeTaskDurabilityRequestSchema,
+	runtimeTaskDurabilityResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -334,6 +338,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorktreeDeleteRequest,
 		) => Promise<RuntimeWorktreeDeleteResponse>;
+		assessTaskDurability: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskDurabilityRequest,
+		) => Promise<RuntimeTaskDurabilityResponse>;
 		loadTaskContext: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskWorkspaceInfoRequest,
@@ -655,6 +663,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeWorktreeDeleteResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.deleteWorktree(ctx.workspaceScope, input);
+			}),
+		assessTaskDurability: workspaceProcedure
+			.input(runtimeTaskDurabilityRequestSchema)
+			.output(runtimeTaskDurabilityResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.assessTaskDurability(ctx.workspaceScope, input);
 			}),
 		getTaskContext: workspaceProcedure
 			.input(runtimeTaskWorkspaceInfoRequestSchema)
