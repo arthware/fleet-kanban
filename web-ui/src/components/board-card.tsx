@@ -923,7 +923,6 @@ export function BoardCard({
 										</span>
 									) : reviewWorkspaceSnapshot ? (
 										<>
-											<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewWorkspacePath}</span>
 											<GitBranch
 												size={10}
 												style={{
