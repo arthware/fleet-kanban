@@ -213,6 +213,44 @@ describe("BoardCard", () => {
 		expect(trashButton?.querySelector("svg.animate-spin")).toBeTruthy();
 	});
 
+	it("renders done cards as proud interactive cards without archived restore styling", async () => {
+		const onClick = vi.fn();
+		const onRestoreFromTrash = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						id: "done-task-1",
+						title: "Ship the feature",
+						prompt: "Ship the feature||Completed implementation details",
+						agentId: "claude",
+					})}
+					index={0}
+					columnId="done"
+					onClick={onClick}
+					onRestoreFromTrash={onRestoreFromTrash}
+				/>,
+			);
+		});
+
+		const title = Array.from(container.querySelectorAll("p")).find((element) =>
+			element.textContent?.includes("Ship the feature"),
+		);
+		expect(title?.className).not.toContain("line-through");
+		expect(container.querySelector('button[aria-label*="task from done"]')).toBeNull();
+		expect(container.textContent).not.toContain("Restore");
+		expect(container.textContent).not.toContain("Start fresh");
+
+		const cardShell = container.querySelector<HTMLElement>('[data-task-id="done-task-1"]');
+		await act(async () => {
+			cardShell?.click();
+		});
+
+		expect(onClick).toHaveBeenCalledTimes(1);
+		expect(onRestoreFromTrash).not.toHaveBeenCalled();
+	});
+
 	it("shows inline see more and less controls for long descriptions", async () => {
 		const description =
 			"Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau final hidden segment";
@@ -893,7 +931,7 @@ describe("BoardCard", () => {
 							prNumber: 42,
 						})}
 						index={0}
-						columnId="trash"
+						columnId="done"
 					/>
 				</TooltipProvider>,
 			);

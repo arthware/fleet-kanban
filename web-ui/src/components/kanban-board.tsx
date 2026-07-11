@@ -20,7 +20,7 @@ import { canCreateTaskDependency } from "@/state/board-state";
 import { findCardColumnId, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard, BoardColumnId, BoardData, BoardDependency } from "@/types";
 
-const BOARD_COLUMN_ORDER: BoardColumnId[] = ["backlog", "in_progress", "review", "trash"];
+const BOARD_COLUMN_ORDER: BoardColumnId[] = ["backlog", "in_progress", "review", "done"];
 
 export type RequestProgrammaticCardMove = (move: ProgrammaticCardMoveInFlight) => boolean;
 
@@ -374,6 +374,9 @@ export function KanbanBoard({
 	const activeTaskEffectiveColumnId =
 		programmaticCardMoveInFlight?.toColumnId ??
 		(activeDragTaskId !== null && activeDragSourceColumnId === "backlog" ? "in_progress" : null);
+	const visibleColumns = BOARD_COLUMN_ORDER.map((columnId) =>
+		data.columns.find((column) => column.id === columnId),
+	).filter((column): column is BoardData["columns"][number] => column !== undefined);
 
 	return (
 		<DragDropContext
@@ -387,7 +390,7 @@ export function KanbanBoard({
 				className="kb-board kb-dependency-surface"
 				data-programmatic-card-move={programmaticCardMoveInFlight ? "true" : undefined}
 			>
-				{data.columns.map((column) => (
+				{visibleColumns.map((column) => (
 					<BoardColumn
 						key={column.id}
 						column={column}

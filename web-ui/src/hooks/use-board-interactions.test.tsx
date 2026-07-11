@@ -53,7 +53,8 @@ function createBoard(): BoardData {
 			},
 			{ id: "in_progress", title: "In Progress", cards: [] },
 			{ id: "review", title: "Review", cards: [] },
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies: [],
 	};
@@ -69,6 +70,7 @@ interface HookSnapshot {
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleStartTask: (taskId: string) => void;
 	handleCardSelect: (taskId: string) => void;
+	handleMoveReviewCardToTrash: (taskId: string) => void;
 }
 
 function createRect(width: number, height: number): DOMRect {
@@ -98,7 +100,7 @@ function HookHarness({
 	setBoard: Dispatch<SetStateAction<BoardData>>;
 	ensureTaskWorkspace: UseTaskSessionsResult["ensureTaskWorkspace"];
 	startTaskSession: UseTaskSessionsResult["startTaskSession"];
-	selectedCard?: { card: BoardCard; column: { id: "backlog" | "in_progress" | "review" | "trash" } } | null;
+	selectedCard?: { card: BoardCard; column: { id: "backlog" | "in_progress" | "review" | "done" | "trash" } } | null;
 	setSelectedTaskIdOverride?: Dispatch<SetStateAction<string | null>>;
 	onSnapshot?: (snapshot: HookSnapshot) => void;
 }): null {
@@ -134,8 +136,15 @@ function HookHarness({
 			handleRestoreTaskFromTrash: actions.handleRestoreTaskFromTrash,
 			handleStartTask: actions.handleStartTask,
 			handleCardSelect: actions.handleCardSelect,
+			handleMoveReviewCardToTrash: actions.handleMoveReviewCardToTrash,
 		});
-	}, [actions.handleCardSelect, actions.handleRestoreTaskFromTrash, actions.handleStartTask, onSnapshot]);
+	}, [
+		actions.handleCardSelect,
+		actions.handleMoveReviewCardToTrash,
+		actions.handleRestoreTaskFromTrash,
+		actions.handleStartTask,
+		onSnapshot,
+	]);
 
 	return null;
 }
@@ -453,7 +462,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -507,7 +517,10 @@ describe("useBoardInteractions", () => {
 			createdAt: trashTask.createdAt,
 		});
 		expect(ensureTaskWorkspace).toHaveBeenCalledWith(expectedTask);
-		expect(startTaskSession).toHaveBeenCalledWith(expectedTask, { resumeFromTrash: true });
+		expect(startTaskSession).toHaveBeenCalledWith(expectedTask, {
+			resumeFromTrash: true,
+			resumeMode: "fresh",
+		});
 		expect(showAppToastMock).toHaveBeenCalledWith({
 			intent: "warning",
 			icon: "warning-sign",
@@ -559,7 +572,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -646,7 +660,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -676,5 +691,77 @@ describe("useBoardInteractions", () => {
 		});
 
 		expect(setSelectedTaskId).not.toHaveBeenCalled();
+	});
+
+	it("moves a review card to done without invoking the trash cleanup workflow", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		useProgrammaticCardMovesMock.mockReturnValue({
+			handleProgrammaticCardMoveReady: () => {},
+			setRequestMoveTaskToTrashHandler: () => {},
+			tryProgrammaticCardMove: () => "unavailable",
+			consumeProgrammaticCardMove: () => ({}),
+			resolvePendingProgrammaticTrashMove: () => {},
+			waitForProgrammaticCardMoveAvailability: async () => {},
+			resetProgrammaticCardMoves: () => {},
+			requestMoveTaskToTrashWithAnimation: async () => {},
+			programmaticCardMoveCycle: 0,
+		});
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		useLinkedBacklogTaskActionsMock.mockReturnValue({
+			handleCreateDependency: () => {},
+			handleDeleteDependency: () => {},
+			confirmMoveTaskToTrash: async () => {},
+			requestMoveTaskToTrash,
+		});
+
+		const reviewTask = createTask("task-review", "Review task", 2);
+		let currentBoard: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [reviewTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		};
+		const setBoard = vi.fn<Dispatch<SetStateAction<BoardData>>>((nextBoard) => {
+			if (typeof nextBoard === "function") {
+				currentBoard = nextBoard(currentBoard);
+				return;
+			}
+			currentBoard = nextBoard;
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={currentBoard}
+					setBoard={setBoard}
+					ensureTaskWorkspace={async () => ({ ok: true as const })}
+					startTaskSession={async () => ({ ok: true as const })}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (!latestSnapshot) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			latestSnapshot!.handleMoveReviewCardToTrash("task-review");
+			await Promise.resolve();
+		});
+
+		expect(currentBoard.columns.find((column) => column.id === "review")?.cards).toEqual([]);
+		expect(currentBoard.columns.find((column) => column.id === "done")?.cards.map((card) => card.id)).toEqual([
+			"task-review",
+		]);
+		expect(currentBoard.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
 	});
 });
