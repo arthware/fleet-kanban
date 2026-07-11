@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeTaskTokenUsage } from "@/runtime/types";
-import { formatTokenCount, totalTokenCount } from "@/utils/format-token-count";
+import { formatCostUsd, formatTokenCount, totalTokenCount } from "@/utils/format-token-count";
 
 describe("formatTokenCount", () => {
 	it("humanizes millions with one decimal", () => {
@@ -22,6 +22,25 @@ describe("formatTokenCount", () => {
 
 	it("renders a bare count below one thousand", () => {
 		expect(formatTokenCount(512)).toBe("512 tok");
+	});
+});
+
+describe("formatCostUsd", () => {
+	it("shows a dollars-and-cents estimate with two decimals", () => {
+		expect(formatCostUsd(3.4)).toBe("$3.40");
+	});
+
+	it("rounds to the nearest cent", () => {
+		expect(formatCostUsd(3.395)).toBe("$3.40");
+		expect(formatCostUsd(12.344)).toBe("$12.34");
+	});
+
+	it("collapses a sub-cent estimate to a less-than marker", () => {
+		expect(formatCostUsd(0.004)).toBe("<$0.01");
+	});
+
+	it("shows exactly one cent at the sub-cent boundary", () => {
+		expect(formatCostUsd(0.01)).toBe("$0.01");
 	});
 });
 

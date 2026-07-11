@@ -17,6 +17,17 @@ const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
 const codexFixturePath = join(fixtureDir, "codex-usage-rollout.jsonl");
 
+// The three real records in claude-usage-transcript.jsonl are all
+// claude-opus-4-8, so the reader now prices them from the static table: input
+// $5 / output $25 / cache-write $6.25 / cache-read $0.50 per MTok, each lane
+// billed independently. This duplicates the reader's arithmetic (same operands,
+// same order) so the derived cost matches to the last bit.
+const CLAUDE_FIXTURE_COST_USD =
+	((11106 + 367 + 129) / 1_000_000) * 5.0 +
+	((1398 + 345 + 209) / 1_000_000) * 25.0 +
+	((14697 + 27930 + 710) / 1_000_000) * 6.25 +
+	((18664 + 18492 + 46422) / 1_000_000) * 0.5;
+
 /** Parse a JSONL blob the same way the reader does, so tests feed it real records. */
 function parseJsonl(raw: string): Record<string, unknown>[] {
 	return raw
@@ -46,10 +57,10 @@ describe("deriveClaudeUsage", () => {
 		cacheCreationTokens: 14697 + 27930 + 710,
 	};
 
-	it("sums each usage field across every assistant record, leaving cost unpriced", async () => {
+	it("sums each usage field across every assistant record and prices the total from the model table", async () => {
 		const usage = deriveClaudeUsage(await loadFixtureRecords());
 
-		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: null });
+		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: CLAUDE_FIXTURE_COST_USD });
 	});
 
 	it("counts a resent assistant record once, keyed by message id and request id", async () => {
@@ -60,7 +71,7 @@ describe("deriveClaudeUsage", () => {
 
 		const usage = deriveClaudeUsage([...records, duplicate]);
 
-		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: null });
+		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: CLAUDE_FIXTURE_COST_USD });
 	});
 
 	it("counts records that share a message id but differ in request id", async () => {
@@ -85,7 +96,7 @@ describe("deriveClaudeUsage", () => {
 
 		const usage = deriveClaudeUsage([...records, withoutUsage]);
 
-		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: null });
+		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: CLAUDE_FIXTURE_COST_USD });
 	});
 
 	it("ignores sidechain and meta records so only the main agent's turns count", async () => {
@@ -105,6 +116,21 @@ describe("deriveClaudeUsage", () => {
 		};
 
 		const usage = deriveClaudeUsage([...records, sidechain, meta]);
+
+		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: CLAUDE_FIXTURE_COST_USD });
+	});
+
+	it("leaves cost null when the transcript's model is absent from the price table", async () => {
+		const records = await loadFixtureRecords();
+		// A future/unknown Claude model id is not in the static table, so we report
+		// tokens with no dollar figure rather than guessing a wrong number.
+		const unpricedModel = records.map((record) => {
+			const clone = structuredClone(record) as { message: { model: string } };
+			clone.message.model = "claude-opus-9-9";
+			return clone;
+		});
+
+		const usage = deriveClaudeUsage(unpricedModel);
 
 		expect(usage).toEqual({ ...FIXTURE_TOTALS, costUsd: null });
 	});
@@ -216,7 +242,7 @@ describe("readAgentUsage — claude", () => {
 			outputTokens: 1398 + 345 + 209,
 			cacheReadTokens: 18664 + 18492 + 46422,
 			cacheCreationTokens: 14697 + 27930 + 710,
-			costUsd: null,
+			costUsd: CLAUDE_FIXTURE_COST_USD,
 		});
 	});
 

@@ -26,3 +26,15 @@ export function formatTokenCount(count: number): string {
 	}
 	return `${Math.round(count)} tok`;
 }
+
+/**
+ * Format an estimated per-card cost for the board-card chip: two decimals
+ * (`3.4 → "$3.40"`), collapsing a sub-cent estimate to `"<$0.01"` so a tiny but
+ * non-zero burn never reads as free.
+ */
+export function formatCostUsd(costUsd: number): string {
+	if (costUsd < 0.01) {
+		return "<$0.01";
+	}
+	return `$${costUsd.toFixed(2)}`;
+}
