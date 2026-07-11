@@ -496,10 +496,13 @@ export function BoardCard({
 			showReasoningEffort: Boolean(inheritedReasoningEffort),
 		});
 	}, [card.clineSettings, defaultClineModelId]);
+	const agentModelLabel = card.agentModel || null;
 	const taskAgentSettingsLabel = useMemo(() => {
-		const parts = [agentOverrideLabel, modelOverrideLabel].filter((value): value is string => Boolean(value));
+		const parts = [agentOverrideLabel, modelOverrideLabel, agentModelLabel].filter((value): value is string =>
+			Boolean(value),
+		);
 		return parts.length > 0 ? parts.join(" · ") : null;
-	}, [agentOverrideLabel, modelOverrideLabel]);
+	}, [agentOverrideLabel, modelOverrideLabel, agentModelLabel]);
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
 
@@ -600,6 +603,9 @@ export function BoardCard({
 										/>
 									) : onSaveTitle ? (
 										<div className="flex items-center gap-1 min-w-0">
+											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+												{card.id}
+											</span>
 											<p
 												className={cn(
 													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
@@ -626,14 +632,19 @@ export function BoardCard({
 											</button>
 										</div>
 									) : (
-										<p
-											className={cn(
-												"kb-line-clamp-1 m-0 font-medium text-sm",
-												isTrashCard && "line-through text-text-tertiary",
-											)}
-										>
-											{displayTitle}
-										</p>
+										<div className="flex items-center gap-1 min-w-0">
+											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+												{card.id}
+											</span>
+											<p
+												className={cn(
+													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
+													isTrashCard && "line-through text-text-tertiary",
+												)}
+											>
+												{displayTitle}
+											</p>
+										</div>
 									)}
 								</div>
 								{columnId === "backlog" ? (

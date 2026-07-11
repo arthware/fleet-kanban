@@ -310,6 +310,36 @@ describe("BoardCard", () => {
 		expect(startFreshButton?.textContent?.trim()).toBe("Start fresh");
 	});
 
+	it("shows the card's short id near the title", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ id: "cc618" })} index={0} columnId="backlog" />);
+		});
+
+		expect(container.textContent).toContain("cc618");
+	});
+
+	it("shows the per-card agent model override", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-haiku-4-5" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("claude-haiku-4-5");
+	});
+
+	it("does not show an agent model chip when no override is set", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
+		});
+
+		expect(container.textContent).not.toContain("claude-haiku-4-5");
+	});
+
 	it("shows formatted agent override details with model name and reasoning effort", async () => {
 		mockWorkspaceSnapshot = {
 			taskId: "task-1",

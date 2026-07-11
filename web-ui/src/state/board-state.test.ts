@@ -568,6 +568,52 @@ describe("board dependency state", () => {
 		]);
 	});
 
+	it("carries agentModel through normalization", () => {
+		const rawBoard = {
+			columns: [
+				{
+					id: "backlog",
+					cards: [
+						{
+							id: "a",
+							prompt: "Task A",
+							startInPlanMode: false,
+							baseRef: "main",
+							agentModel: "claude-haiku-4-5",
+						},
+					],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		const normalized = normalizeBoardData(rawBoard);
+		const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(card?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("leaves agentModel unset for a board.json written before the field existed", () => {
+		const rawBoard = {
+			columns: [
+				{
+					id: "backlog",
+					cards: [{ id: "a", prompt: "Task A", startInPlanMode: false, baseRef: "main" }],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		const normalized = normalizeBoardData(rawBoard);
+		const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(card?.agentModel).toBeUndefined();
+	});
+
 	it("disables auto-review settings for a task", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {
