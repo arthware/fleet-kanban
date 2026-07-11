@@ -403,19 +403,32 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				// PTY path: `fleet task say` wraps steering in a bracketed paste so a
 				// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
+				const wantsSubmit = body.submit ?? true;
+				// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
+				// treats a carriage return fused onto the paste-end marker (…[201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
 				const ptyPayload = body.bracketedPaste
-					? toBracketedPasteSubmission(body.text, body.submit ?? true)
+					? toBracketedPasteSubmission(body.text, false)
 					: body.appendNewline
 						? `${body.text}\n`
 						: body.text;
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
-				const summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
+				let summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
 				if (!summary) {
 					return {
 						ok: false,
 						summary: null,
 						error: "Task session is not running.",
 					};
+				}
+				// Send the Enter as a SEPARATE write so paste-mode has closed and the
+				// carriage return registers as a submit keypress. `--no-submit` skips this,
+				// leaving the text staged in the prompt.
+				if (body.bracketedPaste && wantsSubmit) {
+					const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
+					if (afterSubmit) {
+						summary = afterSubmit;
+					}
 				}
 				return {
 					ok: true,

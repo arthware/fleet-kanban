@@ -1504,10 +1504,15 @@ describe("createRuntimeApi startTaskSession", () => {
 			{ taskId: "task-1", text: "focus on the failing test", bracketedPaste: true, submit: true },
 		);
 		expect(submitResponse.ok).toBe(true);
-		expect(terminalManager.writeInput).toHaveBeenCalledWith(
+		// Bracketed paste lands first WITHOUT a fused Enter, then a separate \r submits —
+		// Claude's Ink TUI ignores a carriage return glued onto the paste-end marker.
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(
+			1,
 			"task-1",
-			Buffer.from("[200~focus on the failing test[201~\r", "utf8"),
+			Buffer.from("[200~focus on the failing test[201~", "utf8"),
 		);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(2, "task-1", Buffer.from("\r", "utf8"));
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(2);
 
 		terminalManager.writeInput.mockClear();
 		const stageResponse = await api.sendTaskSessionInput(
