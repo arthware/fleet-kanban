@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-
 import type { TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
+import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { findCardSelection } from "@/state/board-state";
 import { getTaskWorkspaceSnapshot, subscribeToAnyTaskMetadata } from "@/stores/workspace-metadata-store";
 import type { BoardCard, BoardColumnId, BoardData, TaskAutoReviewMode } from "@/types";
@@ -10,6 +10,18 @@ const AUTO_REVIEW_ACTION_DELAY_MS = 500;
 
 function isTaskAutoReviewEnabled(task: BoardCard): boolean {
 	return task.autoReviewEnabled === true;
+}
+
+// Auto-review must never advance a card whose session is blocked — a card
+// waiting on the user (needs_input, e.g. stalled at a `git commit` permission
+// prompt) or one that errored still has uncommitted work. Acting on it would
+// re-prompt a blocked agent and, worse, march the card toward Done. Its work is
+// not durably saved, so it must stay put until a human intervenes.
+function isSessionBlockedForAutoReview(summary: RuntimeTaskSessionSummary | undefined): boolean {
+	if (!summary) {
+		return false;
+	}
+	return summary.reviewReason === "needs_input" || summary.reviewReason === "error";
 }
 
 interface TaskGitActionLoadingStateLike {
@@ -23,6 +35,7 @@ interface RequestMoveTaskToTrashOptions {
 
 interface UseReviewAutoActionsOptions {
 	board: BoardData;
+	sessionsByTaskId: Record<string, RuntimeTaskSessionSummary>;
 	taskGitActionLoadingByTaskId: Record<string, TaskGitActionLoadingStateLike>;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
 	requestMoveTaskToTrash: (
@@ -35,12 +48,14 @@ interface UseReviewAutoActionsOptions {
 
 export function useReviewAutoActions({
 	board,
+	sessionsByTaskId,
 	taskGitActionLoadingByTaskId,
 	runAutoReviewGitAction,
 	requestMoveTaskToTrash,
 	resetKey,
 }: UseReviewAutoActionsOptions): void {
 	const boardRef = useRef<BoardData>(board);
+	const sessionsByTaskIdRef = useRef<Record<string, RuntimeTaskSessionSummary>>(sessionsByTaskId);
 	const runAutoReviewGitActionRef = useRef(runAutoReviewGitAction);
 	const requestMoveTaskToTrashRef = useRef(requestMoveTaskToTrash);
 	const awaitingCleanActionByTaskIdRef = useRef<Record<string, TaskGitAction>>({});
@@ -52,6 +67,10 @@ export function useReviewAutoActions({
 	useEffect(() => {
 		boardRef.current = board;
 	}, [board]);
+
+	useEffect(() => {
+		sessionsByTaskIdRef.current = sessionsByTaskId;
+	}, [sessionsByTaskId]);
 
 	useEffect(() => {
 		runAutoReviewGitActionRef.current = runAutoReviewGitAction;
@@ -153,6 +172,14 @@ export function useReviewAutoActions({
 					continue;
 				}
 
+				// Never auto-advance a blocked/needs-input card: its work is not
+				// durably saved, so let it wait for a human instead of marching it
+				// toward Done (or re-prompting the stalled agent).
+				if (isSessionBlockedForAutoReview(sessionsByTaskIdRef.current[reviewTask.id])) {
+					clearAutoReviewTimer(reviewTask.id);
+					continue;
+				}
+
 				const autoReviewMode = resolveTaskAutoReviewMode(reviewTask.autoReviewMode);
 				const loadingState = taskGitActionLoadingByTaskId[reviewTask.id];
 				const isGitActionInFlight =
@@ -235,7 +262,7 @@ export function useReviewAutoActions({
 		evaluateAutoReview({
 			source: "board_or_loading_change",
 		});
-	}, [board, evaluateAutoReview, taskGitActionLoadingByTaskId]);
+	}, [board, evaluateAutoReview, sessionsByTaskId, taskGitActionLoadingByTaskId]);
 
 	useEffect(() => {
 		return subscribeToAnyTaskMetadata((taskId) => {

@@ -585,17 +585,57 @@ export const runtimeWorktreeEnsureResponseSchema = z.union([
 ]);
 export type RuntimeWorktreeEnsureResponse = z.infer<typeof runtimeWorktreeEnsureResponseSchema>;
 
+// "Is this card's work durably saved?" — the assessment that gates a card
+// becoming Done and its worktree being removed. Mirrors the TaskWorkDurability*
+// types in src/workspace/durable-save.ts, which owns the classification logic.
+export const runtimeTaskWorkDurabilityStatusSchema = z.enum([
+	"no_worktree",
+	"clean_and_landed",
+	"merged",
+	"uncommitted_changes",
+	"unlanded_commits",
+	"awaiting_merge",
+	"indeterminate",
+]);
+export type RuntimeTaskWorkDurabilityStatus = z.infer<typeof runtimeTaskWorkDurabilityStatusSchema>;
+
+export const runtimeTaskWorkDurabilityAssessmentSchema = z.object({
+	durable: z.boolean(),
+	status: runtimeTaskWorkDurabilityStatusSchema,
+	detail: z.string(),
+});
+export type RuntimeTaskWorkDurabilityAssessment = z.infer<typeof runtimeTaskWorkDurabilityAssessmentSchema>;
+
 export const runtimeWorktreeDeleteRequestSchema = z.object({
 	taskId: z.string(),
+	// Explicit Discard: remove the worktree even when its work is not durably
+	// saved. Absent/false means the durability gate is enforced.
+	discard: z.boolean().optional(),
 });
 export type RuntimeWorktreeDeleteRequest = z.infer<typeof runtimeWorktreeDeleteRequestSchema>;
 
 export const runtimeWorktreeDeleteResponseSchema = z.object({
 	ok: z.boolean(),
 	removed: z.boolean(),
+	// True when the delete was refused because the work is not durably saved and
+	// the caller did not explicitly Discard. The worktree is retained.
+	blocked: z.boolean().optional(),
+	durability: runtimeTaskWorkDurabilityAssessmentSchema.optional(),
 	error: z.string().optional(),
 });
 export type RuntimeWorktreeDeleteResponse = z.infer<typeof runtimeWorktreeDeleteResponseSchema>;
+
+export const runtimeTaskDurabilityRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeTaskDurabilityRequest = z.infer<typeof runtimeTaskDurabilityRequestSchema>;
+
+export const runtimeTaskDurabilityResponseSchema = z.object({
+	ok: z.literal(true),
+	taskId: z.string(),
+	durability: runtimeTaskWorkDurabilityAssessmentSchema,
+});
+export type RuntimeTaskDurabilityResponse = z.infer<typeof runtimeTaskDurabilityResponseSchema>;
 
 export const runtimeTaskWorkspaceInfoRequestSchema = z.object({
 	taskId: z.string(),

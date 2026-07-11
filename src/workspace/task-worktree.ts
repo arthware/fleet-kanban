@@ -8,6 +8,11 @@ import type {
 } from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 import { getRuntimeHomePath, getTaskWorktreesHomePath, loadWorkspaceContext } from "../state/workspace-state";
+import {
+	assessTaskWorkDurability,
+	type TaskWorkDurabilityAssessment,
+	type TaskWorkDurabilityMode,
+} from "./durable-save";
 import { getGitCommandErrorMessage, getGitStdout, readGitHeadInfo, runGit } from "./git-utils";
 import { getWorkspaceFolderLabelForWorktreePath, normalizeTaskIdForWorktreePath } from "./task-worktree-path";
 import { listTurbopackNodeModulesSymlinkSkipPaths } from "./task-worktree-turbopack";
@@ -562,9 +567,41 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 	}
 }
 
+/**
+ * Assess whether a task's worktree holds durably-saved work, resolving the
+ * worktree path/existence for the caller. This is the read-only counterpart to
+ * the delete gate below: the web-ui uses it to explain to an operator why a
+ * card cannot silently reach Done.
+ */
+export async function assessTaskWorktreeDurability(options: {
+	repoPath: string;
+	taskId: string;
+	baseRef: string;
+	mode: TaskWorkDurabilityMode;
+}): Promise<TaskWorkDurabilityAssessment> {
+	const taskId = normalizeTaskIdForWorktreePath(options.taskId);
+	const worktreePath = getTaskWorktreePath(options.repoPath, taskId);
+	const worktreeExists = await pathExists(worktreePath);
+	return assessTaskWorkDurability({
+		worktreePath,
+		worktreeExists,
+		baseRef: options.baseRef,
+		mode: options.mode,
+	});
+}
+
 export async function deleteTaskWorktree(options: {
 	repoPath: string;
 	taskId: string;
+	/**
+	 * The card's base branch. When provided, the durability gate is enforced:
+	 * the worktree is not removed unless its work is durably saved (or `discard`
+	 * is set). Legacy callers that omit it get the pre-gate behavior.
+	 */
+	baseRef?: string;
+	mode?: TaskWorkDurabilityMode;
+	/** Explicit Discard — remove even when the work is not durably saved. */
+	discard?: boolean;
 }): Promise<RuntimeWorktreeDeleteResponse> {
 	try {
 		const taskId = normalizeTaskIdForWorktreePath(options.taskId);
@@ -577,6 +614,30 @@ export async function deleteTaskWorktree(options: {
 				ok: true,
 				removed: false,
 			};
+		}
+
+		// Durability gate: this is the single choke point both the CLI (`task
+		// done`) and the web-ui delete through. Refuse to remove a worktree whose
+		// work is not durably saved unless the caller explicitly Discards it — a
+		// card only reaches Done when its work is committed and landed/merged. See
+		// the incident in durable-save.ts: a card stalled at a `git commit` prompt
+		// was advanced to Done and its worktree deleted, throwing away real work.
+		if (options.baseRef !== undefined && options.discard !== true) {
+			const durability = await assessTaskWorkDurability({
+				worktreePath,
+				worktreeExists: true,
+				baseRef: options.baseRef,
+				mode: options.mode ?? "commit",
+			});
+			if (!durability.durable) {
+				return {
+					ok: false,
+					removed: false,
+					blocked: true,
+					durability,
+					error: durability.detail,
+				};
+			}
 		}
 
 		try {

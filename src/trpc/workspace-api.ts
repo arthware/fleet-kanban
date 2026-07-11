@@ -1,11 +1,14 @@
 import { TRPCError } from "@trpc/server";
 import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
 import type {
+	RuntimeBoardCard,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitDiscardResponse,
 	RuntimeGitSummaryResponse,
 	RuntimeGitSyncAction,
 	RuntimeGitSyncResponse,
+	RuntimeTaskAutoReviewMode,
+	RuntimeTaskDurabilityResponse,
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesMode,
 	RuntimeWorkspaceFileSearchResponse,
@@ -13,6 +16,7 @@ import type {
 } from "../core/api-contract";
 import {
 	parseGitCheckoutRequest,
+	parseTaskDurabilityRequest,
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation";
@@ -28,6 +32,7 @@ import { getCommitDiff, getGitLog, getGitRefs } from "../workspace/git-history";
 import { discardGitChanges, getGitSyncSummary, runGitCheckoutAction, runGitSyncAction } from "../workspace/git-sync";
 import { searchWorkspaceFiles } from "../workspace/search-workspace-files";
 import {
+	assessTaskWorktreeDurability,
 	deleteTaskWorktree,
 	ensureTaskWorktreeIfDoesntExist,
 	getTaskWorkspaceInfo,
@@ -44,6 +49,29 @@ export interface CreateWorkspaceApiDependencies {
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void> | void;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void> | void;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
+}
+
+function normalizeAutoReviewMode(mode: RuntimeTaskAutoReviewMode | undefined): "commit" | "pr" {
+	return mode === "pr" ? "pr" : "commit";
+}
+
+async function findBoardCard(
+	deps: CreateWorkspaceApiDependencies,
+	workspaceScope: { workspaceId: string; workspacePath: string },
+	taskId: string,
+): Promise<RuntimeBoardCard | null> {
+	const trimmed = taskId.trim();
+	if (!trimmed) {
+		return null;
+	}
+	const state = await deps.buildWorkspaceStateSnapshot(workspaceScope.workspaceId, workspaceScope.workspacePath);
+	for (const column of state.board.columns) {
+		const card = column.cards.find((candidate) => candidate.id === trimmed);
+		if (card) {
+			return card;
+		}
+	}
+	return null;
 }
 
 function normalizeOptionalTaskWorkspaceScopeInput(
@@ -328,10 +356,31 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 		},
 		deleteWorktree: async (workspaceScope, input) => {
 			const body = parseWorktreeDeleteRequest(input);
+			// Look the card up on the board ourselves so the durability gate is
+			// enforced by construction — callers cannot skip it by omitting context.
+			const card = await findBoardCard(deps, workspaceScope, body.taskId);
 			return await deleteTaskWorktree({
 				repoPath: workspaceScope.workspacePath,
 				taskId: body.taskId,
+				baseRef: card?.baseRef,
+				mode: normalizeAutoReviewMode(card?.autoReviewMode),
+				discard: body.discard === true,
 			});
+		},
+		assessTaskDurability: async (workspaceScope, input) => {
+			const body = parseTaskDurabilityRequest(input);
+			const card = await findBoardCard(deps, workspaceScope, body.taskId);
+			const durability = await assessTaskWorktreeDurability({
+				repoPath: workspaceScope.workspacePath,
+				taskId: body.taskId,
+				baseRef: card?.baseRef ?? "",
+				mode: normalizeAutoReviewMode(card?.autoReviewMode),
+			});
+			return {
+				ok: true,
+				taskId: body.taskId,
+				durability,
+			} satisfies RuntimeTaskDurabilityResponse;
 		},
 		loadTaskContext: async (workspaceScope, input) => {
 			const normalizedInput = normalizeRequiredTaskWorkspaceScopeInput(input);

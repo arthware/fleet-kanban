@@ -23,6 +23,7 @@ import {
 	type RuntimeTaskChatMessagesRequest,
 	type RuntimeTaskChatReloadRequest,
 	type RuntimeTaskChatSendRequest,
+	type RuntimeTaskDurabilityRequest,
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
@@ -56,6 +57,7 @@ import {
 	runtimeTaskChatMessagesRequestSchema,
 	runtimeTaskChatReloadRequestSchema,
 	runtimeTaskChatSendRequestSchema,
+	runtimeTaskDurabilityRequestSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
@@ -170,6 +172,18 @@ export function parseWorktreeDeleteRequest(value: unknown): RuntimeWorktreeDelet
 	const taskId = parsed.taskId.trim();
 	if (!taskId) {
 		throw new Error("Invalid worktree delete payload.");
+	}
+	return {
+		taskId,
+		...(parsed.discard === true ? { discard: true } : {}),
+	};
+}
+
+export function parseTaskDurabilityRequest(value: unknown): RuntimeTaskDurabilityRequest {
+	const parsed = parseWithSchema(runtimeTaskDurabilityRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Invalid task durability payload.");
 	}
 	return {
 		taskId,
