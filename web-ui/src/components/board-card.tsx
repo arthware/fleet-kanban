@@ -25,10 +25,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
+import { formatTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
 import {
@@ -240,6 +241,7 @@ export function BoardCard({
 	index,
 	columnId,
 	sessionSummary,
+	tokenUsage = null,
 	selected = false,
 	onClick,
 	onStart,
@@ -265,6 +267,7 @@ export function BoardCard({
 	index: number;
 	columnId: BoardColumnId;
 	sessionSummary?: RuntimeTaskSessionSummary;
+	tokenUsage?: RuntimeTaskTokenUsage | null;
 	selected?: boolean;
 	onClick?: () => void;
 	onStart?: (taskId: string) => void;
@@ -503,6 +506,25 @@ export function BoardCard({
 		);
 		return parts.length > 0 ? parts.join(" · ") : null;
 	}, [agentOverrideLabel, modelOverrideLabel, agentModelLabel]);
+	// Cumulative token usage, derived on read from the agent's own transcript.
+	// A fresh card (unknown or all-zero usage) shows nothing so the board stays
+	// clean; the chip only appears once there is a real total to report.
+	const tokenUsageChip = useMemo(() => {
+		if (!tokenUsage) {
+			return null;
+		}
+		const total = totalTokenCount(tokenUsage);
+		if (total <= 0) {
+			return null;
+		}
+		return {
+			label: formatTokenCount(total),
+			title:
+				`${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out · ` +
+				`${tokenUsage.cacheReadTokens.toLocaleString()} cache read · ` +
+				`${tokenUsage.cacheCreationTokens.toLocaleString()} cache write`,
+		};
+	}, [tokenUsage]);
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
 
@@ -771,19 +793,29 @@ export function BoardCard({
 									</p>
 								</div>
 							) : null}
-							{taskAgentSettingsLabel ? (
-								<div className="mt-1">
-									<span
-										className={cn(
-											"inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-											isTrashCard
-												? "border-border text-text-tertiary bg-surface-1"
-												: "border-status-blue/30 bg-status-blue/10 text-status-blue",
-										)}
-									>
-										<Bot size={12} className="shrink-0" />
-										<span className="truncate">{taskAgentSettingsLabel}</span>
-									</span>
+							{taskAgentSettingsLabel || tokenUsageChip ? (
+								<div className="mt-1 flex min-w-0 items-center gap-1.5">
+									{taskAgentSettingsLabel ? (
+										<span
+											className={cn(
+												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+												isTrashCard
+													? "border-border text-text-tertiary bg-surface-1"
+													: "border-status-blue/30 bg-status-blue/10 text-status-blue",
+											)}
+										>
+											<Bot size={12} className="shrink-0" />
+											<span className="truncate">{taskAgentSettingsLabel}</span>
+										</span>
+									) : null}
+									{tokenUsageChip ? (
+										<span
+											className="shrink-0 font-mono text-[11px] text-text-tertiary"
+											title={tokenUsageChip.title}
+										>
+											{tokenUsageChip.label}
+										</span>
+									) : null}
 								</div>
 							) : null}
 							{sessionActivity ? (

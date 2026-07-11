@@ -5,6 +5,7 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { BoardCard } from "@/components/board-card";
 import { Button } from "@/components/ui/button";
 import { ColumnIndicator } from "@/components/ui/column-indicator";
+import type { TaskTokenUsageById } from "@/hooks/use-task-token-usage";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { isCardDropDisabled, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard as BoardCardModel, BoardColumnId, BoardColumn as BoardColumnModel } from "@/types";
@@ -12,6 +13,7 @@ import type { BoardCard as BoardCardModel, BoardColumnId, BoardColumn as BoardCo
 export function BoardColumn({
 	column,
 	taskSessions,
+	tokenUsageById,
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
@@ -43,6 +45,7 @@ export function BoardColumn({
 }: {
 	column: BoardColumnModel;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
+	tokenUsageById?: TaskTokenUsageById;
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
@@ -174,6 +177,7 @@ export function BoardColumn({
 											index={draggableIndex}
 											columnId={column.id}
 											sessionSummary={taskSessions[card.id]}
+											tokenUsage={tokenUsageById?.[card.id] ?? null}
 											onStart={onStartTask}
 											onMoveToTrash={onMoveToTrashTask}
 											onRestoreFromTrash={onRestoreFromTrashTask}

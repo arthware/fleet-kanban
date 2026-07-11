@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardColumn } from "@/components/board-column";
 import { DependencyOverlay } from "@/components/dependencies/dependency-overlay";
 import { useDependencyLinking } from "@/components/dependencies/use-dependency-linking";
+import type { TaskTokenUsageById } from "@/hooks/use-task-token-usage";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { canCreateTaskDependency } from "@/state/board-state";
 import { findCardColumnId, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
@@ -30,6 +31,7 @@ function isRectVerticallyVisibleWithinContainer(rect: DOMRect, containerRect: DO
 export function KanbanBoard({
 	data,
 	taskSessions,
+	tokenUsageById,
 	onCardSelect,
 	onCreateTask,
 	onStartTask,
@@ -58,6 +60,7 @@ export function KanbanBoard({
 }: {
 	data: BoardData;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
+	tokenUsageById?: TaskTokenUsageById;
 	onCardSelect: (taskId: string) => void;
 	onCreateTask: () => void;
 	onStartTask?: (taskId: string) => void;
@@ -387,6 +390,7 @@ export function KanbanBoard({
 						key={column.id}
 						column={column}
 						taskSessions={taskSessions}
+						tokenUsageById={tokenUsageById}
 						onCreateTask={column.id === "backlog" ? onCreateTask : undefined}
 						onStartTask={column.id === "backlog" ? onStartTask : undefined}
 						onStartAllTasks={column.id === "backlog" ? onStartAllTasks : undefined}
