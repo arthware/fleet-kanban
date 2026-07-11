@@ -4,6 +4,7 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
+	RuntimeCardPrState,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
@@ -658,4 +659,56 @@ export function updateTask(
 		task: updatedTask,
 		updated: true,
 	};
+}
+
+export interface RuntimeCardPrRef {
+	url: string;
+	state: RuntimeCardPrState;
+	number: number;
+}
+
+/**
+ * Persist the GitHub PR a card's branch led to onto the card. Idempotent: when
+ * the card already stores this exact PR, the board is returned unchanged
+ * (`updated: false`) so the caller can skip the disk write. The workspace
+ * metadata monitor uses this to capture a card's PR once, at detection time,
+ * keeping the `gh` lookup off the render and poll paths.
+ */
+export function setCardPrUrl(
+	board: RuntimeBoardData,
+	taskId: string,
+	pr: RuntimeCardPrRef,
+): { board: RuntimeBoardData; updated: boolean } {
+	const normalizedTaskId = taskId.trim();
+	if (!normalizedTaskId) {
+		return { board, updated: false };
+	}
+
+	let updated = false;
+	const columns = board.columns.map((column) => {
+		let columnUpdated = false;
+		const cards = column.cards.map((card) => {
+			if (card.id !== normalizedTaskId) {
+				return card;
+			}
+			if (card.prUrl === pr.url && card.prState === pr.state && card.prNumber === pr.number) {
+				return card;
+			}
+			columnUpdated = true;
+			updated = true;
+			return {
+				...card,
+				prUrl: pr.url,
+				prState: pr.state,
+				prNumber: pr.number,
+			};
+		});
+		return columnUpdated ? { ...column, cards } : column;
+	});
+
+	if (!updated) {
+		return { board, updated: false };
+	}
+
+	return { board: { ...board, columns }, updated: true };
 }

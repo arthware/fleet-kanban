@@ -1,12 +1,14 @@
 import type {
 	RuntimeAgentId,
 	RuntimeBoardColumnId,
+	RuntimeCardPrState,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
 } from "@/runtime/types";
 
 export type BoardColumnId = RuntimeBoardColumnId;
+export type CardPrState = RuntimeCardPrState;
 
 export type TaskAutoReviewMode = RuntimeTaskAutoReviewMode;
 export type TaskImage = RuntimeTaskImage;
@@ -50,6 +52,12 @@ export interface BoardCard {
 	baseRef: string;
 	createdAt: number;
 	updatedAt: number;
+	// The GitHub PR this card's branch led to, captured once at detection so the
+	// board can link to it without querying gh at render time. See runtime
+	// runtimeBoardCardSchema.
+	prUrl?: string;
+	prState?: CardPrState;
+	prNumber?: number;
 }
 
 export interface BoardColumn {

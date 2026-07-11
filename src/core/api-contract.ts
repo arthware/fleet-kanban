@@ -129,6 +129,11 @@ function normalizeRuntimeTaskClineSettings(input: {
 	};
 }
 
+// The lifecycle state of the GitHub PR a card's branch led to. Mirrors the
+// CardPrState union produced by `resolveCardPrUrl` (src/workspace/card-pr-url).
+export const runtimeCardPrStateSchema = z.enum(["open", "merged", "closed"]);
+export type RuntimeCardPrState = z.infer<typeof runtimeCardPrStateSchema>;
+
 export const runtimeBoardCardSchema = z
 	.object({
 		id: z.string(),
@@ -144,6 +149,14 @@ export const runtimeBoardCardSchema = z
 		// native --model flag so mechanical cards can run a cheaper model. Optional
 		// so a board.json written before this field existed still parses.
 		agentModel: z.string().optional(),
+		// The GitHub PR a review/done card's branch led to. Captured once when the
+		// PR is first detected (see workspace-metadata-monitor) and persisted onto
+		// the card so the board can link to it without querying `gh` at render time
+		// or on every poll. Optional so a board.json written before these fields
+		// existed still parses.
+		prUrl: z.string().optional(),
+		prState: runtimeCardPrStateSchema.optional(),
+		prNumber: z.number().int().optional(),
 		clineSettings: runtimeTaskClineSettingsSchema.optional(),
 		clineProviderId: z.string().optional(),
 		clineModelId: z.string().optional(),
