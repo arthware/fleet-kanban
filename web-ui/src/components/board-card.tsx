@@ -475,6 +475,22 @@ export function BoardCard({
 					deletions: reviewWorkspaceSnapshot.deletions ?? 0,
 				}
 		: null;
+	// The PR a review/done card's branch led to, captured once server-side. Shown
+	// where the worktree path used to sit in the review-status row.
+	const prLinkLabel = card.prUrl ? (card.prNumber != null ? `PR #${card.prNumber}` : "View PR") : null;
+	const prLink = card.prUrl ? (
+		<a
+			href={card.prUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			className="font-mono text-text-tertiary hover:text-text-secondary"
+			style={{ marginLeft: 6, textDecoration: "none" }}
+			onMouseDown={(event) => event.stopPropagation()}
+			onClick={(event) => event.stopPropagation()}
+		>
+			{prLinkLabel}
+		</a>
+	) : null;
 	const showReviewGitActions = columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0;
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
 	const cancelAutomaticActionLabel =
@@ -900,7 +916,7 @@ export function BoardCard({
 									</div>
 								</div>
 							) : null}
-							{showWorkspaceStatus && reviewWorkspacePath ? (
+							{showWorkspaceStatus && (reviewWorkspacePath || prLink) ? (
 								<p
 									className="font-mono"
 									style={{
@@ -913,14 +929,19 @@ export function BoardCard({
 									}}
 								>
 									{isTrashCard ? (
-										<span
-											style={{
-												color: SESSION_ACTIVITY_COLOR.muted,
-												textDecoration: "line-through",
-											}}
-										>
-											{reviewWorkspacePath}
-										</span>
+										<>
+											{reviewWorkspacePath ? (
+												<span
+													style={{
+														color: SESSION_ACTIVITY_COLOR.muted,
+														textDecoration: "line-through",
+													}}
+												>
+													{reviewWorkspacePath}
+												</span>
+											) : null}
+											{prLink}
+										</>
 									) : reviewWorkspaceSnapshot ? (
 										<>
 											<GitBranch
@@ -944,8 +965,11 @@ export function BoardCard({
 													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
 												</>
 											) : null}
+											{prLink}
 										</>
-									) : null}
+									) : (
+										prLink
+									)}
 								</p>
 							) : null}
 							{showReviewGitActions ? (

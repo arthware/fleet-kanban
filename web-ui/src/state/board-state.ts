@@ -160,6 +160,9 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		baseRef?: unknown;
 		agentId?: unknown;
 		agentModel?: unknown;
+		prUrl?: unknown;
+		prState?: unknown;
+		prNumber?: unknown;
 		clineSettings?: unknown;
 		clineProviderId?: unknown;
 		clineModelId?: unknown;
@@ -201,6 +204,11 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		baseRef,
 		...(typeof card.agentId === "string" && card.agentId ? { agentId: card.agentId as RuntimeAgentId } : {}),
 		...(typeof card.agentModel === "string" && card.agentModel ? { agentModel: card.agentModel } : {}),
+		...(typeof card.prUrl === "string" && card.prUrl ? { prUrl: card.prUrl } : {}),
+		...(card.prState === "open" || card.prState === "merged" || card.prState === "closed"
+			? { prState: card.prState }
+			: {}),
+		...(typeof card.prNumber === "number" && Number.isInteger(card.prNumber) ? { prNumber: card.prNumber } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,

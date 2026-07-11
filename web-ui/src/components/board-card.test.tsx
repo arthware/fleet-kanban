@@ -811,6 +811,99 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("-3");
 	});
 
+	it("links to the stored PR on a review card, opening it in a new tab", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "feature/pr-link",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 2,
+			additions: 5,
+			deletions: 1,
+		};
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+					})}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review")}
+				/>,
+			);
+		});
+
+		const link = container.querySelector<HTMLAnchorElement>('a[href="https://github.com/cline/kanban/pull/42"]');
+		expect(link).not.toBeNull();
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toContain("noopener");
+		expect(link?.textContent).toContain("PR #42");
+	});
+
+	it("renders no PR link on a review card without a stored PR", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "feature/pr-link",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 2,
+			additions: 5,
+			deletions: 1,
+		};
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review")}
+				/>,
+			);
+		});
+
+		expect(container.querySelector("a")).toBeNull();
+	});
+
+	it("keeps the PR link on a done card so it survives past review", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "feature/pr-link",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 2,
+			additions: 5,
+			deletions: 1,
+		};
+
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard
+						card={createCard({
+							prUrl: "https://github.com/cline/kanban/pull/42",
+							prState: "merged",
+							prNumber: 42,
+						})}
+						index={0}
+						columnId="trash"
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		const link = container.querySelector<HTMLAnchorElement>('a[href="https://github.com/cline/kanban/pull/42"]');
+		expect(link).not.toBeNull();
+		expect(link?.textContent).toContain("PR #42");
+	});
+
 	it("shows the latest assistant preview on active task cards", async () => {
 		await act(async () => {
 			root.render(
