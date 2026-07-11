@@ -81,6 +81,8 @@ import type {
 	RuntimeTaskSessionStartResponse,
 	RuntimeTaskSessionStopRequest,
 	RuntimeTaskSessionStopResponse,
+	RuntimeTaskTokenUsageRequest,
+	RuntimeTaskTokenUsageResponse,
 	RuntimeTaskTranscriptRequest,
 	RuntimeTaskTranscriptResponse,
 	RuntimeTaskWorkspaceInfoRequest,
@@ -174,6 +176,8 @@ import {
 	runtimeTaskSessionStartResponseSchema,
 	runtimeTaskSessionStopRequestSchema,
 	runtimeTaskSessionStopResponseSchema,
+	runtimeTaskTokenUsageRequestSchema,
+	runtimeTaskTokenUsageResponseSchema,
 	runtimeTaskTranscriptRequestSchema,
 	runtimeTaskTranscriptResponseSchema,
 	runtimeTaskWorkspaceInfoRequestSchema,
@@ -238,6 +242,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskTranscriptRequest,
 		) => Promise<RuntimeTaskTranscriptResponse>;
+		getTaskTokenUsage: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskTokenUsageRequest,
+		) => Promise<RuntimeTaskTokenUsageResponse>;
 		getClineSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
 		sendTaskChatMessage: (
 			scope: RuntimeTrpcWorkspaceScope,
@@ -492,6 +500,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeTaskTranscriptResponseSchema)
 			.query(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.getTaskTranscript(ctx.workspaceScope, input);
+			}),
+		getTaskTokenUsage: workspaceProcedure
+			.input(runtimeTaskTokenUsageRequestSchema)
+			.output(runtimeTaskTokenUsageResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.runtimeApi.getTaskTokenUsage(ctx.workspaceScope, input);
 			}),
 		getClineSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getClineSlashCommands(ctx.workspaceScope);

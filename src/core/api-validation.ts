@@ -26,6 +26,7 @@ import {
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
+	type RuntimeTaskTokenUsageRequest,
 	type RuntimeTaskTranscriptRequest,
 	type RuntimeTaskWorkspaceInfoRequest,
 	type RuntimeTerminalWsClientMessage,
@@ -59,6 +60,7 @@ import {
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
+	runtimeTaskTokenUsageRequestSchema,
 	runtimeTaskTranscriptRequestSchema,
 	runtimeTaskWorkspaceInfoRequestSchema,
 	runtimeTerminalWsClientMessageSchema,
@@ -279,6 +281,16 @@ export function parseTaskTranscriptRequest(value: unknown): RuntimeTaskTranscrip
 	}
 	return {
 		taskId,
+	};
+}
+
+export function parseTaskTokenUsageRequest(value: unknown): RuntimeTaskTokenUsageRequest {
+	const parsed = parseWithSchema(runtimeTaskTokenUsageRequestSchema, value);
+	// Trim and drop blanks so the batch only carries usable ids; duplicates are
+	// harmless (the response is keyed by id) but empty strings never are.
+	const taskIds = parsed.taskIds.map((taskId) => taskId.trim()).filter(Boolean);
+	return {
+		taskIds,
 	};
 }
 

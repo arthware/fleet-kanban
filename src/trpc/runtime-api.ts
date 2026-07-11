@@ -18,6 +18,7 @@ import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtim
 import type {
 	RuntimeCommandRunResponse,
 	RuntimeRunUpdateResponse,
+	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
 } from "../core/api-contract";
 import {
@@ -41,6 +42,7 @@ import {
 	parseTaskSessionInputRequest,
 	parseTaskSessionStartRequest,
 	parseTaskSessionStopRequest,
+	parseTaskTokenUsageRequest,
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
@@ -51,6 +53,7 @@ import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
+import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
 import { captureTaskTurnCheckpoint } from "../workspace/turn-checkpoints";
@@ -491,6 +494,35 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return { ok: false, present: false, messages: [], error: message };
+			}
+		},
+		getTaskTokenUsage: async (workspaceScope, input) => {
+			try {
+				const body = parseTaskTokenUsageRequest(input);
+				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const usage: Record<string, RuntimeTaskTokenUsage | null> = {};
+				// Derive per card, tolerantly: a card with no captured session, or
+				// whose transcript is gone/empty, contributes a `null` entry rather
+				// than failing the whole batch. Callers get one entry per requested id.
+				await Promise.all(
+					body.taskIds.map(async (taskId) => {
+						const summary = terminalManager.getSummary(taskId);
+						if (!summary?.agentId || !summary.agentSessionId) {
+							usage[taskId] = null;
+							return;
+						}
+						const result = await readAgentUsage({
+							agentId: summary.agentId,
+							sessionId: summary.agentSessionId,
+							homePath: homedir(),
+						});
+						usage[taskId] = result.usage;
+					}),
+				);
+				return { ok: true, usage };
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, usage: {}, error: message };
 			}
 		},
 		getClineSlashCommands: async (workspaceScope) => {
