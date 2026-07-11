@@ -90,6 +90,7 @@ describe("ProjectNavigationPanel width persistence", () => {
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		previousAppVersion = (globalThis as typeof globalThis & { __APP_VERSION__?: unknown }).__APP_VERSION__;
 		(globalThis as typeof globalThis & { __APP_VERSION__?: string }).__APP_VERSION__ = "test";
+		(globalThis as typeof globalThis & { __APP_COMMIT__?: string }).__APP_COMMIT__ = "abc1234";
 		previousInnerWidth = window.innerWidth;
 		Object.defineProperty(window, "innerWidth", {
 			value: 1600,
@@ -234,5 +235,11 @@ describe("ProjectNavigationPanel width persistence", () => {
 
 		expect(container.textContent).toContain("Tips");
 		expect(localStorage.getItem(LocalStorageKey.AgentTipsDismissed)).toBeNull();
+	});
+
+	it("renders fleet production line branding with commit SHA", () => {
+		renderPanel();
+		expect(container.textContent).toContain("fleet production line");
+		expect(container.textContent).toContain("abc1234");
 	});
 });
