@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import type { ClineSdkAccumulatedUsage } from "../cline-sdk/sdk-runtime-boundary";
 import type { RuntimeAgentId, RuntimeTaskTokenUsage } from "../core/api-contract";
 import { locateAgentTranscript } from "./agent-transcript-locator";
 
@@ -11,7 +12,9 @@ import { locateAgentTranscript } from "./agent-transcript-locator";
  * reader so the transcript-tail path never pays for a usage pass it doesn't need
  * (and vice-versa).
  *
- * Claude only in this pass; other agents (Codex, Cline) report absent for now.
+ * Claude and Codex derive from their transcripts here. Cline reports usage
+ * through its SDK rather than a transcript file, so it is handled separately
+ * (see `mapClineUsage` and the dispatch note in `readAgentUsage`).
  */
 export interface ReadAgentUsageInput {
 	/** Which agent CLI produced the session. Unknown kinds resolve to absent. */
@@ -32,15 +35,32 @@ export interface AgentUsageResult {
 const ABSENT: AgentUsageResult = { present: false, usage: null };
 
 /**
+ * The transcript-derived agents: each maps its own CLI's JSONL records into the
+ * normalized usage shape. Agents absent from this table (notably Cline, whose
+ * usage is SDK-reported) don't touch disk here.
+ */
+const TRANSCRIPT_USAGE_DERIVERS: Record<string, (records: Record<string, unknown>[]) => RuntimeTaskTokenUsage | null> =
+	{
+		claude: deriveClaudeUsage,
+		codex: deriveCodexUsage,
+	};
+
+/**
  * Locate and total the token usage for an agent session. Pure over the
  * filesystem: any I/O error (missing file, permission, unreadable) collapses to
  * `{ present: false, usage: null }` so callers get a single total signal — the
  * same contract as `readAgentTranscript`, never a throw.
  */
 export async function readAgentUsage(input: ReadAgentUsageInput): Promise<AgentUsageResult> {
-	// Other agents' usage extraction lands in a later card; only Claude derives
-	// today. Bail before touching disk for unknown kinds.
-	if (input.agentId !== "claude") {
+	const derive = TRANSCRIPT_USAGE_DERIVERS[input.agentId];
+	if (!derive) {
+		// Cline's usage is SDK-reported (`ClineCore.getAccumulatedUsage`), not a
+		// transcript we parse — and this derive-on-read path holds no live
+		// `ClineCore` handle to call, while the persisted session record on disk
+		// carries only `totalCost`, not the token breakdown. So Cline (and any
+		// agent without a known transcript layout) reports absent here; Cline
+		// usage lands once a live handle is reachable, mapped through
+		// `mapClineUsage`. Bail before touching disk.
 		return ABSENT;
 	}
 
@@ -56,7 +76,7 @@ export async function readAgentUsage(input: ReadAgentUsageInput): Promise<AgentU
 		return ABSENT;
 	}
 
-	const usage = deriveClaudeUsage(parseJsonlRecords(raw));
+	const usage = derive(parseJsonlRecords(raw));
 	return { present: true, usage };
 }
 
@@ -127,6 +147,72 @@ export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTa
 		return null;
 	}
 	return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd: null };
+}
+
+/**
+ * Derive Codex usage from its rollout JSONL. Codex emits `event_msg` records
+ * with `payload.type:"token_count"`, whose `info.total_token_usage` is a running
+ * CUMULATIVE total for the session — so we take the LAST such record (summing
+ * would multiply-count the same tokens).
+ *
+ * Mapping differs from Claude in two ways: Codex's `input_tokens` INCLUDES
+ * `cached_input_tokens`, so uncached input is the difference; and OpenAI-style
+ * caching bills no separate cache-write, so `cacheCreationTokens` is always 0.
+ * `output_tokens` already includes reasoning tokens. Returns `null` for a
+ * rollout that predates `token_count` reporting. `costUsd` is `null` (pricing
+ * lands in a later card).
+ */
+export function deriveCodexUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
+	let latestTotal: Record<string, unknown> | null = null;
+
+	for (const record of records) {
+		if (readString(record, "type") !== "event_msg") {
+			continue;
+		}
+		const payload = asRecord(record.payload);
+		if (!payload || readString(payload, "type") !== "token_count") {
+			continue;
+		}
+		const info = asRecord(payload.info);
+		const total = info ? asRecord(info.total_token_usage) : null;
+		if (total) {
+			latestTotal = total;
+		}
+	}
+
+	if (!latestTotal) {
+		return null;
+	}
+
+	const cachedInputTokens = readNumber(latestTotal, "cached_input_tokens");
+	return {
+		inputTokens: readNumber(latestTotal, "input_tokens") - cachedInputTokens,
+		outputTokens: readNumber(latestTotal, "output_tokens"),
+		cacheReadTokens: cachedInputTokens,
+		cacheCreationTokens: 0,
+		costUsd: null,
+	};
+}
+
+/**
+ * Map Cline's SDK-reported `SessionAccumulatedUsage` into the normalized shape.
+ * A straight pass-through — the only renames are `cacheWriteTokens →
+ * cacheCreationTokens` (same meaning) and `totalCost → costUsd`. Cline computes
+ * cost itself, so unlike the transcript agents it fills `costUsd` without the
+ * price table.
+ *
+ * Wired into `readAgentUsage` once a live `ClineCore` handle is reachable on the
+ * derive-on-read path; kept here as the ready, SDK-typed mapping so that wiring
+ * is a one-line call, not a re-derivation.
+ */
+export function mapClineUsage(usage: ClineSdkAccumulatedUsage): RuntimeTaskTokenUsage {
+	return {
+		inputTokens: usage.inputTokens,
+		outputTokens: usage.outputTokens,
+		cacheReadTokens: usage.cacheReadTokens,
+		cacheCreationTokens: usage.cacheWriteTokens,
+		costUsd: usage.totalCost,
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

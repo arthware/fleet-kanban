@@ -5,9 +5,17 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { deriveClaudeUsage, readAgentUsage } from "../../../src/terminal/agent-usage-reader";
+import type { ClineSdkAccumulatedUsage } from "../../../src/cline-sdk/sdk-runtime-boundary";
+import {
+	deriveClaudeUsage,
+	deriveCodexUsage,
+	mapClineUsage,
+	readAgentUsage,
+} from "../../../src/terminal/agent-usage-reader";
 
-const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "claude-usage-transcript.jsonl");
+const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
+const codexFixturePath = join(fixtureDir, "codex-usage-rollout.jsonl");
 
 /** Parse a JSONL blob the same way the reader does, so tests feed it real records. */
 function parseJsonl(raw: string): Record<string, unknown>[] {
@@ -20,6 +28,10 @@ function parseJsonl(raw: string): Record<string, unknown>[] {
 
 async function loadFixtureRecords(): Promise<Record<string, unknown>[]> {
 	return parseJsonl(await readFile(fixturePath, "utf8"));
+}
+
+async function loadCodexFixtureRecords(): Promise<Record<string, unknown>[]> {
+	return parseJsonl(await readFile(codexFixturePath, "utf8"));
 }
 
 describe("deriveClaudeUsage", () => {
@@ -103,6 +115,78 @@ describe("deriveClaudeUsage", () => {
 	});
 });
 
+describe("deriveCodexUsage", () => {
+	// Codex's `payload.info.total_token_usage` is CUMULATIVE for the whole
+	// session, so the LAST token_count record is the running total. These are the
+	// exact numbers of the final real record captured in the fixture.
+	const LAST_TOTAL = { input_tokens: 14540591, cached_input_tokens: 13658624, output_tokens: 37096 };
+
+	it("takes the last cumulative token_count total rather than summing records", async () => {
+		const usage = deriveCodexUsage(await loadCodexFixtureRecords());
+
+		// The fixture carries three increasing cumulative records; summing them
+		// would multiply-count. Only the final total survives.
+		expect(usage).toEqual({
+			inputTokens: LAST_TOTAL.input_tokens - LAST_TOTAL.cached_input_tokens,
+			outputTokens: LAST_TOTAL.output_tokens,
+			cacheReadTokens: LAST_TOTAL.cached_input_tokens,
+			cacheCreationTokens: 0,
+			costUsd: null,
+		});
+	});
+
+	it("excludes cached tokens from the input count, since Codex folds them into input_tokens", async () => {
+		const usage = deriveCodexUsage(await loadCodexFixtureRecords());
+
+		// Codex reports input_tokens INCLUSIVE of cache reads (unlike Claude); the
+		// uncached prompt is the difference.
+		expect(usage?.inputTokens).toBe(881967);
+		expect(usage?.cacheReadTokens).toBe(LAST_TOTAL.cached_input_tokens);
+	});
+
+	it("counts reasoning tokens as output and reports no separately-billed cache writes", async () => {
+		const usage = deriveCodexUsage(await loadCodexFixtureRecords());
+
+		// output_tokens (37096) already includes reasoning_output_tokens (7890) —
+		// we do not add it again. OpenAI-style caching bills no cache-write.
+		expect(usage?.outputTokens).toBe(LAST_TOTAL.output_tokens);
+		expect(usage?.cacheCreationTokens).toBe(0);
+	});
+
+	it("returns null for a rollout that predates token_count reporting", () => {
+		const preTokenCount = [
+			{ type: "session_meta", payload: { session_id: "old" } },
+			{ type: "event_msg", payload: { type: "task_started" } },
+		];
+
+		expect(deriveCodexUsage(preTokenCount)).toBeNull();
+		expect(deriveCodexUsage([])).toBeNull();
+	});
+});
+
+describe("mapClineUsage", () => {
+	// Cline reports usage through its SDK, not a transcript. The normalized shape
+	// is a straight pass-through of `SessionAccumulatedUsage` — the only renames
+	// are cacheWriteTokens → cacheCreationTokens and totalCost → costUsd.
+	it("passes SDK usage through, renaming cache-write and carrying Cline's own cost", () => {
+		const sdkUsage: ClineSdkAccumulatedUsage = {
+			inputTokens: 1200,
+			outputTokens: 340,
+			cacheReadTokens: 5000,
+			cacheWriteTokens: 800,
+			totalCost: 0.0123,
+		};
+
+		expect(mapClineUsage(sdkUsage)).toEqual({
+			inputTokens: 1200,
+			outputTokens: 340,
+			cacheReadTokens: 5000,
+			cacheCreationTokens: 800,
+			costUsd: 0.0123,
+		});
+	});
+});
+
 describe("readAgentUsage — claude", () => {
 	let homePath = "";
 
@@ -151,8 +235,79 @@ describe("readAgentUsage — claude", () => {
 		expect(result).toEqual({ present: true, usage: null });
 	});
 
-	it("returns absent for a non-Claude agent (other agents land in a later card)", async () => {
-		const result = await readAgentUsage({ agentId: "codex", sessionId: "whatever", homePath });
+	it("returns absent for an agent with no known transcript layout", async () => {
+		const result = await readAgentUsage({ agentId: "unknown-agent", sessionId: "whatever", homePath });
+
+		expect(result).toEqual({ present: false, usage: null });
+	});
+});
+
+describe("readAgentUsage — codex", () => {
+	let homePath = "";
+
+	beforeEach(async () => {
+		homePath = await mkdtemp(join(tmpdir(), "usage-reader-codex-"));
+	});
+
+	afterEach(async () => {
+		await rm(homePath, { recursive: true, force: true });
+	});
+
+	async function writeRollout(sessionId: string, records: unknown[]): Promise<void> {
+		// Mirror the codex layout the locator scans: a date-partitioned tree of
+		// `rollout-<timestamp>-<sessionId>.jsonl` files.
+		const absolutePath = join(
+			homePath,
+			".codex",
+			"sessions",
+			"2026",
+			"07",
+			"10",
+			`rollout-2026-07-10T11-09-06-${sessionId}.jsonl`,
+		);
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+	}
+
+	it("locates the rollout and returns the last cumulative total", async () => {
+		const sessionId = "019f4b49-a9e3-74b3-8beb-75b8dec8a874";
+		await writeRollout(sessionId, await loadCodexFixtureRecords());
+
+		const result = await readAgentUsage({ agentId: "codex", sessionId, homePath });
+
+		expect(result.present).toBe(true);
+		expect(result.usage).toEqual({
+			inputTokens: 881967,
+			outputTokens: 37096,
+			cacheReadTokens: 13658624,
+			cacheCreationTokens: 0,
+			costUsd: null,
+		});
+	});
+
+	it("reports present with null usage for a rollout that predates token_count", async () => {
+		const sessionId = "codex-pre-token-count";
+		await writeRollout(sessionId, [{ type: "event_msg", payload: { type: "task_started" } }]);
+
+		const result = await readAgentUsage({ agentId: "codex", sessionId, homePath });
+
+		expect(result).toEqual({ present: true, usage: null });
+	});
+
+	it("reports absent with null usage when the rollout is gone", async () => {
+		const result = await readAgentUsage({ agentId: "codex", sessionId: "missing", homePath });
+
+		expect(result).toEqual({ present: false, usage: null });
+	});
+});
+
+describe("readAgentUsage — cline", () => {
+	// Cline usage is SDK-reported, not transcript-derived, and the derive-on-read
+	// endpoint holds no live ClineCore handle to call getAccumulatedUsage — so the
+	// reader returns absent until that handle is reachable (mapClineUsage is the
+	// ready mapping). This pins the documented deferral.
+	it("returns absent because no live SDK handle is reachable on the read path", async () => {
+		const result = await readAgentUsage({ agentId: "cline", sessionId: "any", homePath: tmpdir() });
 
 		expect(result).toEqual({ present: false, usage: null });
 	});
