@@ -250,6 +250,16 @@ metadata live together and updates are one obvious edit.
 
 ## 8. UI placement
 
+> **Revised 2026-07-11 — headline is real work, not the 4-lane grand total.** The chip headline
+> now shows `realWorkTokenCount = inputTokens + outputTokens` (new conversational work), **not** the
+> `input + output + cacheRead + cacheCreation` sum this section originally specified. On a real long
+> Claude session the cache-read lane (context re-read every turn, billed at 0.1×) dominates the raw
+> total by ~100× — a measured transcript had 84.0M cache-read + 3.2M cache-write against just 74K
+> input + 608K output, i.e. an 87.9M grand total vs 682K of actual work — so summing all four lanes
+> overstated a card's weight ~130×. The grand total moves to the chip **tooltip** (`… · 87.9M total ·
+> $X.XX est.`) so the headline↔total gap stays self-explaining vs ccusage-style tools that show the
+> sum. Cost is unchanged: it still prices each lane separately (cache-read at 0.1×) per §7.
+
 On `web-ui/src/components/board-card.tsx`, beside the existing agent/model chip. Commit `9680766`
 built `taskAgentSettingsLabel` by joining `[agentOverrideLabel, modelOverrideLabel, agentModelLabel]`
 with `·`. The usage chip is a **separate, adjacent element** (not another join segment) so it can carry

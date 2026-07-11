@@ -29,7 +29,7 @@ import type { RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
-import { formatCostUsd, formatTokenCount, totalTokenCount } from "@/utils/format-token-count";
+import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
 import {
@@ -507,25 +507,32 @@ export function BoardCard({
 		return parts.length > 0 ? parts.join(" · ") : null;
 	}, [agentOverrideLabel, modelOverrideLabel, agentModelLabel]);
 	// Cumulative token usage, derived on read from the agent's own transcript.
-	// A fresh card (unknown or all-zero usage) shows nothing so the board stays
-	// clean; the chip only appears once there is a real total to report. When the
-	// agent's model is priced, an estimated cost is appended (`· $X.XX`); an
-	// unpriced model shows tokens alone rather than a wrong dollar figure.
+	// The headline counts only real conversational work (input + output); cache
+	// lanes are excluded because re-read context dominates the raw total ~100×
+	// and would make a card read far heavier than it is (see realWorkTokenCount).
+	// A fresh card (unknown, or no work and no cost) shows nothing so the board
+	// stays clean; the chip only appears once there is real work or a cost to
+	// report. When the agent's model is priced, an estimated cost is appended
+	// (`· $X.XX`); an unpriced model shows tokens alone rather than a wrong dollar
+	// figure. The tooltip carries the full per-lane breakdown and the grand total
+	// so the headline↔total gap is self-explaining vs ccusage-style tools.
 	const tokenUsageChip = useMemo(() => {
 		if (!tokenUsage) {
 			return null;
 		}
-		const total = totalTokenCount(tokenUsage);
-		if (total <= 0) {
+		const realWork = realWorkTokenCount(tokenUsage);
+		const hasCost = tokenUsage.costUsd != null && tokenUsage.costUsd > 0;
+		if (realWork <= 0 && !hasCost) {
 			return null;
 		}
 		const costLabel = tokenUsage.costUsd != null ? ` · ${formatCostUsd(tokenUsage.costUsd)}` : "";
 		return {
-			label: `${formatTokenCount(total)}${costLabel}`,
+			label: `${formatTokenCount(realWork)}${costLabel}`,
 			title:
 				`${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out · ` +
 				`${tokenUsage.cacheReadTokens.toLocaleString()} cache read · ` +
-				`${tokenUsage.cacheCreationTokens.toLocaleString()} cache write` +
+				`${tokenUsage.cacheCreationTokens.toLocaleString()} cache write · ` +
+				`${totalTokenCount(tokenUsage).toLocaleString()} total` +
 				(tokenUsage.costUsd != null ? ` · ${formatCostUsd(tokenUsage.costUsd)} est.` : ""),
 		};
 	}, [tokenUsage]);

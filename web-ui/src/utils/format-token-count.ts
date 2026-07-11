@@ -5,6 +5,24 @@ export function totalTokenCount(usage: RuntimeTaskTokenUsage): number {
 	return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
 }
 
+/**
+ * The distinct conversational work a card's agent has done — `inputTokens +
+ * outputTokens`, deliberately excluding BOTH cache lanes.
+ *
+ * This is the headline number for the board chip, not {@link totalTokenCount}.
+ * In a long Claude session cache-read tokens are the same context re-read on
+ * every turn (billed at only 0.1× base input), so they dominate the raw total
+ * by ~100× — a real transcript showed 84.0M cache-read + 3.2M cache-write next
+ * to just 74K input + 608K output, i.e. an 87.9M grand total against 682K of
+ * actual work. Summing all four lanes makes a card's "weight" read ~130× too
+ * heavy, so the headline counts only new, non-cached work. The full grand total
+ * still lives in the chip tooltip, and cost is priced per-lane separately (a
+ * cache-read at 0.1×) — neither is affected by this.
+ */
+export function realWorkTokenCount(usage: RuntimeTaskTokenUsage): number {
+	return usage.inputTokens + usage.outputTokens;
+}
+
 function formatCompact(value: number, suffix: string): string {
 	const rounded = Math.round(value * 10) / 10;
 	// Show one decimal, but drop it when the value lands on a whole number

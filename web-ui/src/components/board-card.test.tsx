@@ -925,6 +925,107 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("tok");
 	});
 
+	it("headlines the real conversational work, not the cache-read-inflated total", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-4-8" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 74_000,
+						outputTokens: 608_000,
+						cacheReadTokens: 84_000_000,
+						cacheCreationTokens: 3_200_000,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		// input+output = 682K of real work; the 88M raw total (dominated by
+		// re-read cache) must not become the headline.
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("682K tok"),
+		);
+		expect(usageChip?.textContent).toBe("682K tok");
+		expect(container.textContent).not.toContain("87.9M tok");
+	});
+
+	it("exposes the grand token total in the chip tooltip so the headline gap is self-explaining", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-4-8" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 74_000,
+						outputTokens: 608_000,
+						cacheReadTokens: 84_000_000,
+						cacheCreationTokens: 3_200_000,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("682K tok"),
+		);
+		const tooltip = usageChip?.getAttribute("title") ?? "";
+		expect(tooltip).toContain(`${(74_000).toLocaleString()} in`);
+		expect(tooltip).toContain(`${(608_000).toLocaleString()} out`);
+		expect(tooltip).toContain(`${(84_000_000).toLocaleString()} cache read`);
+		expect(tooltip).toContain(`${(3_200_000).toLocaleString()} cache write`);
+		expect(tooltip).toContain(`${(87_882_000).toLocaleString()} total`);
+	});
+
+	it("appends the cost estimate to a cache-heavy card's real-work headline", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-4-8" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 74_000,
+						outputTokens: 608_000,
+						cacheReadTokens: 84_000_000,
+						cacheCreationTokens: 3_200_000,
+						costUsd: 77.2,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find((element) =>
+			element.textContent?.includes("682K tok"),
+		);
+		expect(usageChip?.textContent).toBe("682K tok · $77.20");
+	});
+
+	it("renders no chip for a card with only cached context and no real work or cost", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 0,
+						outputTokens: 0,
+						cacheReadTokens: 5_000_000,
+						cacheCreationTokens: 120_000,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		expect(container.textContent).not.toContain("tok");
+	});
+
 	it("shows normal agent messages without the agent prefix", async () => {
 		await act(async () => {
 			root.render(

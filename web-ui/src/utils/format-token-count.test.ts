@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeTaskTokenUsage } from "@/runtime/types";
-import { formatCostUsd, formatTokenCount, totalTokenCount } from "@/utils/format-token-count";
+import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 
 describe("formatTokenCount", () => {
 	it("humanizes millions with one decimal", () => {
@@ -55,5 +55,33 @@ describe("totalTokenCount", () => {
 		};
 
 		expect(totalTokenCount(usage)).toBe(334);
+	});
+});
+
+describe("realWorkTokenCount", () => {
+	it("counts only the conversational work, excluding both cache lanes", () => {
+		const usage: RuntimeTaskTokenUsage = {
+			inputTokens: 74_000,
+			outputTokens: 608_000,
+			cacheReadTokens: 84_000_000,
+			cacheCreationTokens: 3_200_000,
+			costUsd: null,
+		};
+
+		// cache-read re-reads dominate the raw total (~88M) but are not new work;
+		// the headline reflects the 682K of distinct input+output instead.
+		expect(realWorkTokenCount(usage)).toBe(682_000);
+	});
+
+	it("is zero when a card has only cached context and no input or output", () => {
+		const usage: RuntimeTaskTokenUsage = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 5_000_000,
+			cacheCreationTokens: 120_000,
+			costUsd: null,
+		};
+
+		expect(realWorkTokenCount(usage)).toBe(0);
 	});
 });
