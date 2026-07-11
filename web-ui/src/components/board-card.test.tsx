@@ -318,7 +318,7 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("cc618");
 	});
 
-	it("shows the per-card agent model override", async () => {
+	it("shows the per-card agent model override as a friendly name", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -329,15 +329,50 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("claude-haiku-4-5");
+		expect(container.textContent).toContain("Claude Code");
+		expect(container.textContent).toContain("Haiku 4.5");
+		expect(container.textContent).not.toContain("claude-haiku-4-5");
 	});
 
-	it("does not show an agent model chip when no override is set", async () => {
+	it("shows the raw model id when a card's agentModel override is unknown to the display-name table", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "codex", agentModel: "gpt-5.1-codex-mini" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("gpt-5.1-codex-mini");
+	});
+
+	it("shows the agent with a muted default model label when no override is set", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="backlog" />);
+		});
+
+		expect(container.textContent).toContain("Claude Code");
+		expect(container.textContent).toContain("default");
+		expect(container.textContent).not.toContain("claude-haiku-4-5");
+	});
+
+	it("falls back to the workspace default agent when a card never set one", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" defaultAgentId="codex" />);
+		});
+
+		expect(container.textContent).toContain("OpenAI Codex");
+	});
+
+	it("shows nothing agent-related for a card with neither its own agent nor a known workspace default", async () => {
 		await act(async () => {
 			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
 		});
 
 		expect(container.textContent).not.toContain("claude-haiku-4-5");
+		expect(container.textContent).not.toContain("default");
 	});
 
 	it("shows formatted agent override details with model name and reasoning effort", async () => {
@@ -817,8 +852,8 @@ describe("BoardCard", () => {
 		expect(usageChip).toBeDefined();
 		// The chip shares the model chip's row (adjacent), but is a separate
 		// element carrying its own muted styling — the model label is NOT inside it.
-		expect(usageChip?.parentElement?.textContent).toContain("claude-haiku-4-5");
-		expect(usageChip?.textContent).not.toContain("claude-haiku-4-5");
+		expect(usageChip?.parentElement?.textContent).toContain("Haiku 4.5");
+		expect(usageChip?.textContent).not.toContain("Haiku 4.5");
 	});
 
 	it("appends an estimated cost to the token chip when cost is known", async () => {

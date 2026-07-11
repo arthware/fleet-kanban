@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
@@ -61,6 +61,22 @@ const DESCRIPTION_EXPAND_LABEL = "See more";
 const DESCRIPTION_COLLAPSE_LABEL = "Less";
 const DESCRIPTION_COLLAPSE_SUFFIX = `… ${DESCRIPTION_EXPAND_LABEL}`;
 const DESCRIPTION_EXPANDED_SUFFIX = `… ${DESCRIPTION_COLLAPSE_LABEL}`;
+
+// Short display names for the handful of Claude model ids a card's agentModel
+// override can carry. An id absent here (another provider's, or a future
+// Claude model) falls back to the raw id rather than hiding it.
+const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+	"claude-opus-4-8": "Opus 4.8",
+	"claude-sonnet-5": "Sonnet 5",
+	"claude-haiku-4-5": "Haiku 4.5",
+};
+
+function resolveAgentModelDisplayName(agentId: RuntimeAgentId | null, modelId: string): string {
+	if (agentId === "cline") {
+		return resolveClineModelDisplayName(modelId);
+	}
+	return KNOWN_MODEL_DISPLAY_NAMES[modelId] ?? modelId;
+}
 
 function reconstructTaskWorktreeDisplayPath(
 	taskId: string,
@@ -262,6 +278,7 @@ export function BoardCard({
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId = null,
+	defaultAgentId = null,
 }: {
 	card: BoardCardModel;
 	index: number;
@@ -288,6 +305,7 @@ export function BoardCard({
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
+	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -467,9 +485,13 @@ export function BoardCard({
 			: sessionSummary?.agentSessionLifecycle === "resumable"
 				? "Resume"
 				: "Restore";
-	const agentOverrideLabel = useMemo(
-		() => (card.agentId ? (getRuntimeAgentCatalogEntry(card.agentId)?.label ?? card.agentId) : null),
-		[card.agentId],
+	// The agent always renders, even for a card that never set an override —
+	// falling back to the workspace's default agent so operators can see what a
+	// card actually runs on, not just what it explicitly overrode.
+	const effectiveAgentId = card.agentId ?? defaultAgentId ?? null;
+	const agentLabel = useMemo(
+		() => (effectiveAgentId ? (getRuntimeAgentCatalogEntry(effectiveAgentId)?.label ?? effectiveAgentId) : null),
+		[effectiveAgentId],
 	);
 	const modelOverrideLabel = useMemo(() => {
 		if (card.clineSettings === undefined) {
@@ -499,13 +521,29 @@ export function BoardCard({
 			showReasoningEffort: Boolean(inheritedReasoningEffort),
 		});
 	}, [card.clineSettings, defaultClineModelId]);
-	const agentModelLabel = card.agentModel || null;
-	const taskAgentSettingsLabel = useMemo(() => {
-		const parts = [agentOverrideLabel, modelOverrideLabel, agentModelLabel].filter((value): value is string =>
-			Boolean(value),
-		);
-		return parts.length > 0 ? parts.join(" · ") : null;
-	}, [agentOverrideLabel, modelOverrideLabel, agentModelLabel]);
+	// Model source priority: the Cline picker's own structured override (already
+	// resolved above) wins when present; otherwise the card's plain agentModel
+	// override; otherwise a muted "default" once the agent itself is known — a
+	// card that has never set anything model-specific still tells you it's
+	// running the workspace default rather than showing nothing.
+	const resolvedModelLabel = useMemo(() => {
+		if (modelOverrideLabel) {
+			return { text: modelOverrideLabel, isDefault: false };
+		}
+		if (card.agentModel) {
+			return { text: resolveAgentModelDisplayName(effectiveAgentId, card.agentModel), isDefault: false };
+		}
+		if (effectiveAgentId) {
+			return { text: "default", isDefault: true };
+		}
+		return null;
+	}, [modelOverrideLabel, card.agentModel, effectiveAgentId]);
+	const taskAgentSettings = useMemo(() => {
+		if (!agentLabel && !resolvedModelLabel) {
+			return null;
+		}
+		return { agentLabel, modelLabel: resolvedModelLabel };
+	}, [agentLabel, resolvedModelLabel]);
 	// Cumulative token usage, derived on read from the agent's own transcript.
 	// The headline counts only real conversational work (input + output); cache
 	// lanes are excluded because re-read context dominates the raw total ~100×
@@ -804,9 +842,9 @@ export function BoardCard({
 									</p>
 								</div>
 							) : null}
-							{taskAgentSettingsLabel || tokenUsageChip ? (
+							{taskAgentSettings || tokenUsageChip ? (
 								<div className="mt-1 flex min-w-0 items-center gap-1.5">
-									{taskAgentSettingsLabel ? (
+									{taskAgentSettings ? (
 										<span
 											className={cn(
 												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
@@ -816,7 +854,17 @@ export function BoardCard({
 											)}
 										>
 											<Bot size={12} className="shrink-0" />
-											<span className="truncate">{taskAgentSettingsLabel}</span>
+											<span className="truncate">
+												{taskAgentSettings.agentLabel}
+												{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
+												{taskAgentSettings.modelLabel ? (
+													<span
+														className={cn(taskAgentSettings.modelLabel.isDefault && "text-text-tertiary")}
+													>
+														{taskAgentSettings.modelLabel.text}
+													</span>
+												) : null}
+											</span>
 										</span>
 									) : null}
 									{tokenUsageChip ? (
