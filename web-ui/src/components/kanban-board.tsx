@@ -15,7 +15,7 @@ import { BoardColumn } from "@/components/board-column";
 import { DependencyOverlay } from "@/components/dependencies/dependency-overlay";
 import { useDependencyLinking } from "@/components/dependencies/use-dependency-linking";
 import type { TaskTokenUsageById } from "@/hooks/use-task-token-usage";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { canCreateTaskDependency } from "@/state/board-state";
 import { findCardColumnId, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard, BoardColumnId, BoardData, BoardDependency } from "@/types";
@@ -57,6 +57,7 @@ export function KanbanBoard({
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId,
+	defaultAgentId,
 }: {
 	data: BoardData;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
@@ -86,6 +87,7 @@ export function KanbanBoard({
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
+	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const dragOccurredRef = useRef(false);
 	const boardRef = useRef<HTMLElement>(null);
@@ -418,6 +420,7 @@ export function KanbanBoard({
 						workspacePath={workspacePath}
 						taskWorktreesRoot={taskWorktreesRoot}
 						defaultClineModelId={defaultClineModelId}
+						defaultAgentId={defaultAgentId}
 						onCardClick={(card) => {
 							if (!dragOccurredRef.current) {
 								onCardSelect(card.id);
