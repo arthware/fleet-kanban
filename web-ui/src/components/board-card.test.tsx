@@ -772,6 +772,86 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("Thinking...");
 	});
 
+	it("shows a humanized token-usage chip when a card has usage", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-4-8" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 1_100_000,
+						outputTokens: 100_000,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("1.2M tok");
+	});
+
+	it("renders the token-usage chip next to the agent model label", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-haiku-4-5" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 2_345,
+						outputTokens: 0,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		const usageChip = Array.from(container.querySelectorAll("span")).find(
+			(element) => element.textContent?.trim() === "2.3K tok",
+		);
+		expect(usageChip).toBeDefined();
+		// The chip shares the model chip's row (adjacent), but is a separate
+		// element carrying its own muted styling — the model label is NOT inside it.
+		expect(usageChip?.parentElement?.textContent).toContain("claude-haiku-4-5");
+		expect(usageChip?.textContent).not.toContain("claude-haiku-4-5");
+	});
+
+	it("does not render a token-usage chip when usage is absent", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="in_progress" tokenUsage={null} />,
+			);
+		});
+
+		expect(container.textContent).not.toContain("tok");
+	});
+
+	it("does not render a token-usage chip for an all-zero total", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude" })}
+					index={0}
+					columnId="in_progress"
+					tokenUsage={{
+						inputTokens: 0,
+						outputTokens: 0,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		expect(container.textContent).not.toContain("tok");
+	});
+
 	it("shows normal agent messages without the agent prefix", async () => {
 		await act(async () => {
 			root.render(

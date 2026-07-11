@@ -53,6 +53,7 @@ import { useTaskBranchOptions } from "@/hooks/use-task-branch-options";
 import { useTaskEditor } from "@/hooks/use-task-editor";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useTaskStartActions } from "@/hooks/use-task-start-actions";
+import { useTaskTokenUsage } from "@/hooks/use-task-token-usage";
 import { useTerminalPanels } from "@/hooks/use-terminal-panels";
 import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { LayoutCustomizationsProvider } from "@/resize/layout-customizations";
@@ -231,6 +232,25 @@ export default function App(): ReactElement {
 	} = useTaskSessions({
 		currentProjectId,
 		setSessions,
+	});
+
+	// Only cards with a captured agent session can have derivable usage; a fresh
+	// backlog card contributes nothing. Sorted so the batch key is stable.
+	const tokenUsageTaskIds = useMemo(
+		() =>
+			Object.keys(sessions)
+				.filter((taskId) => Boolean(sessions[taskId]?.agentSessionId))
+				.sort(),
+		[sessions],
+	);
+	const hasActiveTokenUsageSession = useMemo(
+		() => tokenUsageTaskIds.some((taskId) => sessions[taskId]?.state === "running"),
+		[sessions, tokenUsageTaskIds],
+	);
+	const tokenUsageById = useTaskTokenUsage({
+		currentProjectId,
+		taskIds: tokenUsageTaskIds,
+		isPolling: hasActiveTokenUsageSession,
 	});
 
 	const {
@@ -981,6 +1001,7 @@ export default function App(): ReactElement {
 											<KanbanBoard
 												data={board}
 												taskSessions={sessions}
+												tokenUsageById={tokenUsageById}
 												workspacePath={workspacePath}
 												taskWorktreesRoot={taskWorktreesRoot}
 												onCardSelect={handleCardSelect}
