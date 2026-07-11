@@ -1144,6 +1144,39 @@ export const runtimeTaskTranscriptResponseSchema = z.object({
 });
 export type RuntimeTaskTranscriptResponse = z.infer<typeof runtimeTaskTranscriptResponseSchema>;
 
+/**
+ * One normalized token-usage total per card, derived on read from the agent's
+ * own transcript (never separately tracked). Field names/meanings deliberately
+ * match Cline's `SessionAccumulatedUsage` (the SDK source of truth) so the Cline
+ * path can pass through — `cacheCreationTokens` is Cline's `cacheWriteTokens`
+ * renamed (prompt-cache writes; from Claude's `cache_creation_input_tokens`).
+ * `costUsd` is `null` until a model price table lands (a later card); the four
+ * token fields are counted independently and never subtracted from one another.
+ */
+export const runtimeTaskTokenUsageSchema = z.object({
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	cacheReadTokens: z.number(),
+	cacheCreationTokens: z.number(),
+	costUsd: z.number().nullable(),
+});
+export type RuntimeTaskTokenUsage = z.infer<typeof runtimeTaskTokenUsageSchema>;
+
+export const runtimeTaskTokenUsageRequestSchema = z.object({
+	taskIds: z.array(z.string()),
+});
+export type RuntimeTaskTokenUsageRequest = z.infer<typeof runtimeTaskTokenUsageRequestSchema>;
+
+export const runtimeTaskTokenUsageResponseSchema = z.object({
+	ok: z.boolean(),
+	// One entry per requested task id: the normalized usage, or `null` when the
+	// card has no resolvable session (or no usage on disk yet). Keyed by task id
+	// so a single round-trip covers every currently-rendered card.
+	usage: z.record(z.string(), runtimeTaskTokenUsageSchema.nullable()),
+	error: z.string().optional(),
+});
+export type RuntimeTaskTokenUsageResponse = z.infer<typeof runtimeTaskTokenUsageResponseSchema>;
+
 export const runtimeTaskChatSendRequestSchema = z.object({
 	taskId: z.string(),
 	text: z.string(),
