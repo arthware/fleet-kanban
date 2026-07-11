@@ -746,6 +746,36 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain(preview);
 	});
 
+	it("hides the worktree path from active card review status while keeping branch and change summary", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "task/card-pr-url-helper",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 4,
+			additions: 12,
+			deletions: 3,
+		};
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="in_progress"
+					sessionSummary={createSummary("awaiting_review")}
+				/>,
+			);
+		});
+
+		expect(container.textContent).not.toContain("/tmp/fleet-kanban-worktrees/task-1");
+		expect(container.textContent).toContain("task/card-pr-url-helper");
+		expect(container.textContent).toContain("4 files");
+		expect(container.textContent).toContain("+12");
+		expect(container.textContent).toContain("-3");
+	});
+
 	it("shows the latest assistant preview on active task cards", async () => {
 		await act(async () => {
 			root.render(
