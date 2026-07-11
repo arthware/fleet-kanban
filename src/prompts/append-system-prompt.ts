@@ -233,10 +233,10 @@ Notes:
 
 ## task done
 
-Purpose: move a task or an entire column to \`done\`, stop active sessions if needed, clean up task worktrees, and auto-start any linked backlog tasks that become ready. \`task trash\` is also accepted as an alias.
+Purpose: complete a task or an entire column by moving it to \`done\`, stop active sessions if needed, keep task worktrees, and auto-start any linked backlog tasks that become ready.
 
 Command:
-\`${kanbanCommand} task done (--task-id <task_id> | --column backlog|in_progress|review|done) [--project-path <path>]\`
+\`${kanbanCommand} task done (--task-id <task_id> | --column backlog|in_progress|review|done|trash) [--project-path <path>]\`
 
 Parameters:
 - \`--task-id <task_id>\` optional single-task target.
@@ -247,12 +247,28 @@ Notes:
 - Provide exactly one of \`--task-id\` or \`--column\`.
 - \`task done --column done\` is a no-op for tasks already in done.
 
+## task trash
+
+Purpose: archive a task or an entire column by moving it to \`trash\`, stop active sessions if needed, and clean up task worktrees. This does not auto-start linked backlog tasks.
+
+Command:
+\`${kanbanCommand} task trash (--task-id <task_id> | --column backlog|in_progress|review|done|trash) [--project-path <path>]\`
+
+Parameters:
+- \`--task-id <task_id>\` optional single-task target.
+- \`--column <value>\` optional bulk target. Allowed values: \`backlog\`, \`in_progress\`, \`review\`, \`done\`, \`trash\`.
+- \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
+
+Notes:
+- Provide exactly one of \`--task-id\` or \`--column\`.
+- \`task trash --column trash\` is a no-op for tasks already in trash.
+
 ## task delete
 
 Purpose: permanently delete a task or every task in a column, removing cards, dependency links, and task worktrees.
 
 Command:
-\`${kanbanCommand} task delete (--task-id <task_id> | --column backlog|in_progress|review|done) [--project-path <path>]\`
+\`${kanbanCommand} task delete (--task-id <task_id> | --column backlog|in_progress|review|done|trash) [--project-path <path>]\`
 
 Parameters:
 - \`--task-id <task_id>\` optional single-task target.
@@ -261,7 +277,7 @@ Parameters:
 
 Notes:
 - Provide exactly one of \`--task-id\` or \`--column\`.
-- \`task delete --column done\` is the way to clear the done column.
+- \`task delete --column done\` permanently removes completed task records.
 
 ## task link
 

@@ -4,6 +4,7 @@ import type { RuntimeBoardData } from "../../src/core/api-contract";
 import {
 	addTaskDependency,
 	addTaskToColumn,
+	completeTaskAndGetReadyLinkedTaskIds,
 	deleteTasksFromBoard,
 	moveTaskToColumn,
 	trashTaskAndGetReadyLinkedTaskIds,
@@ -16,11 +17,106 @@ function createBoard(): RuntimeBoardData {
 			{ id: "backlog", title: "Backlog", cards: [] },
 			{ id: "in_progress", title: "In Progress", cards: [] },
 			{ id: "review", title: "Review", cards: [] },
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies: [],
 	};
 }
+
+describe("done/trash lifecycle mutations", () => {
+	it("moves a review task to done and returns ready linked backlog task ids", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.added).toBe(true);
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb", 123);
+
+		expect(completed.moved).toBe(true);
+		expect(completed.readyTaskIds).toEqual(["aaaaa"]);
+		expect(completed.board.columns.find((column) => column.id === "done")?.cards.map((card) => card.id)).toEqual([
+			"bbbbb",
+		]);
+		expect(completed.board.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+	});
+
+	it("moves a review task to trash without returning ready linked backlog task ids", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.added).toBe(true);
+
+		const trashed = trashTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb", 123);
+
+		expect(trashed.moved).toBe(true);
+		expect(trashed.readyTaskIds).toEqual([]);
+		expect(trashed.board.columns.find((column) => column.id === "trash")?.cards.map((card) => card.id)).toEqual([
+			"bbbbb",
+		]);
+	});
+
+	it("rejects creating a new dependency to a done task", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createDone = addTaskToColumn(
+			createBacklog.board,
+			"done",
+			{ prompt: "Finished task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+
+		const linked = addTaskDependency(createDone.board, "aaaaa", "bbbbb");
+
+		expect(linked.added).toBe(false);
+		expect(linked.reason).toBe("terminal_task");
+	});
+
+	it("prunes dependencies when a linked task moves to done", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.board.dependencies).toHaveLength(1);
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb");
+
+		expect(completed.board.dependencies).toEqual([]);
+	});
+});
 
 describe("deleteTasksFromBoard", () => {
 	it("removes a trashed task and any dependencies that reference it", () => {

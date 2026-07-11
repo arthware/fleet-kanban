@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-
+import { ensureTaskWorktreeIfDoesntExist } from "../../src/workspace/task-worktree";
 import { createGitTestEnv } from "../utilities/git-env";
 import {
 	getAvailablePort,
@@ -50,6 +50,27 @@ function commitAll(cwd: string, message: string): string {
 	runGit(cwd, ["add", "."]);
 	runGit(cwd, ["commit", "-qm", message]);
 	return runGit(cwd, ["rev-parse", "HEAD"]);
+}
+
+async function withHomeEnv<T>(homeDir: string, run: () => Promise<T>): Promise<T> {
+	const previousHome = process.env.HOME;
+	const previousUserProfile = process.env.USERPROFILE;
+	process.env.HOME = homeDir;
+	process.env.USERPROFILE = homeDir;
+	try {
+		return await run();
+	} finally {
+		if (previousHome === undefined) {
+			delete process.env.HOME;
+		} else {
+			process.env.HOME = previousHome;
+		}
+		if (previousUserProfile === undefined) {
+			delete process.env.USERPROFILE;
+		} else {
+			process.env.USERPROFILE = previousUserProfile;
+		}
+	}
 }
 
 function installBrowserOpenStub(binDir: string, logPath: string): void {
@@ -292,7 +313,7 @@ describe("source task commands", () => {
 		}
 	});
 
-	it("supports done and trash aliases when moving and deleting tasks", { timeout: 60_000 }, async () => {
+	it("keeps done, trash, and delete as separate task lifecycles", { timeout: 60_000 }, async () => {
 		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-done-delete-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-done-delete-");
 
@@ -357,17 +378,43 @@ describe("source task commands", () => {
 				}
 				expect(taskIds).toHaveLength(3);
 
-				const movedByDoneAlias = await runCliCommandAndCollectOutput({
+				const doneWorktreePath = await withHomeEnv(homeDir, async () => {
+					const ensured = await ensureTaskWorktreeIfDoesntExist({
+						cwd: projectPath,
+						taskId: taskIds[0] ?? "",
+						baseRef: "main",
+					});
+					if (!ensured.ok) {
+						throw new Error(ensured.error ?? "Could not ensure done task worktree.");
+					}
+					return ensured.path;
+				});
+				const trashWorktreePath = await withHomeEnv(homeDir, async () => {
+					const ensured = await ensureTaskWorktreeIfDoesntExist({
+						cwd: projectPath,
+						taskId: taskIds[1] ?? "",
+						baseRef: "main",
+					});
+					if (!ensured.ok) {
+						throw new Error(ensured.error ?? "Could not ensure trash task worktree.");
+					}
+					return ensured.path;
+				});
+				expect(existsSync(doneWorktreePath)).toBe(true);
+				expect(existsSync(trashWorktreePath)).toBe(true);
+
+				const movedToDone = await runCliCommandAndCollectOutput({
 					args: ["task", "done", "--task-id", taskIds[0] ?? "", "--project-path", projectPath],
 					cwd: projectPath,
 					env,
 				});
 				expect(
-					movedByDoneAlias.didExit,
-					`task done did not exit in time.\nstdout:\n${movedByDoneAlias.stdout}\nstderr:\n${movedByDoneAlias.stderr}`,
+					movedToDone.didExit,
+					`task done did not exit in time.\nstdout:\n${movedToDone.stdout}\nstderr:\n${movedToDone.stderr}`,
 				).toBe(true);
-				expect(movedByDoneAlias.exitCode).toBe(0);
-				expect(movedByDoneAlias.stdout).toContain('"ok": true');
+				expect(movedToDone.exitCode).toBe(0);
+				expect(movedToDone.stdout).toContain('"ok": true');
+				expect(existsSync(doneWorktreePath)).toBe(true);
 
 				const movedByTrashCommand = await runCliCommandAndCollectOutput({
 					args: ["task", "trash", "--column", "backlog", "--project-path", projectPath],
@@ -382,6 +429,7 @@ describe("source task commands", () => {
 				expect(movedByTrashCommand.stdout).toContain('"ok": true');
 				expect(movedByTrashCommand.stdout).toContain('"column": "backlog"');
 				expect(movedByTrashCommand.stdout).toContain('"count": 2');
+				expect(existsSync(trashWorktreePath)).toBe(false);
 
 				const listedDoneBeforeDelete = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "done", "--project-path", projectPath],
@@ -393,7 +441,7 @@ describe("source task commands", () => {
 					`task list --column done did not exit in time.\nstdout:\n${listedDoneBeforeDelete.stdout}\nstderr:\n${listedDoneBeforeDelete.stderr}`,
 				).toBe(true);
 				expect(listedDoneBeforeDelete.exitCode).toBe(0);
-				expect(listedDoneBeforeDelete.stdout).toContain('"count": 3');
+				expect(listedDoneBeforeDelete.stdout).toContain('"count": 1');
 
 				const listedTrashBeforeDelete = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "trash", "--project-path", projectPath],
@@ -405,7 +453,7 @@ describe("source task commands", () => {
 					`task list --column trash did not exit in time.\nstdout:\n${listedTrashBeforeDelete.stdout}\nstderr:\n${listedTrashBeforeDelete.stderr}`,
 				).toBe(true);
 				expect(listedTrashBeforeDelete.exitCode).toBe(0);
-				expect(listedTrashBeforeDelete.stdout).toContain('"count": 3');
+				expect(listedTrashBeforeDelete.stdout).toContain('"count": 2');
 
 				const deletedDone = await runCliCommandAndCollectOutput({
 					args: ["task", "delete", "--column", "done", "--project-path", projectPath],
@@ -418,8 +466,9 @@ describe("source task commands", () => {
 				).toBe(true);
 				expect(deletedDone.exitCode).toBe(0);
 				expect(deletedDone.stdout).toContain('"ok": true');
-				expect(deletedDone.stdout).toContain('"column": "trash"');
-				expect(deletedDone.stdout).toContain('"count": 3');
+				expect(deletedDone.stdout).toContain('"column": "done"');
+				expect(deletedDone.stdout).toContain('"count": 1');
+				expect(existsSync(doneWorktreePath)).toBe(false);
 
 				const listedTrash = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "trash", "--project-path", projectPath],
@@ -431,7 +480,7 @@ describe("source task commands", () => {
 					`task list --column trash did not exit in time.\nstdout:\n${listedTrash.stdout}\nstderr:\n${listedTrash.stderr}`,
 				).toBe(true);
 				expect(listedTrash.exitCode).toBe(0);
-				expect(listedTrash.stdout).toContain('"count": 0');
+				expect(listedTrash.stdout).toContain('"count": 2');
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);

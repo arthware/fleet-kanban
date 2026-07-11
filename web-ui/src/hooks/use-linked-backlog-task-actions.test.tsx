@@ -42,7 +42,8 @@ function createBoard(dependencies: BoardDependency[] = []): BoardData {
 				title: "Review",
 				cards: [createTask("task-2", "Review task", 2)],
 			},
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies,
 	};
@@ -85,7 +86,7 @@ function HookHarness({
 	kickoffTaskInProgress?: (
 		task: BoardCard,
 		taskId: string,
-		fromColumnId: "backlog" | "in_progress" | "review" | "trash",
+		fromColumnId: "backlog" | "in_progress" | "review" | "done" | "trash",
 		options?: { optimisticMove?: boolean },
 	) => Promise<boolean>;
 	startBacklogTaskWithAnimation?: (task: BoardCard) => Promise<boolean>;
