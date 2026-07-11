@@ -7,6 +7,10 @@ export interface RuntimeAgentCatalogEntry {
 	baseArgs: string[];
 	autonomousArgs: string[];
 	installUrl: string;
+	// Whether this agent's CLI takes a native --model flag, so a per-card
+	// agentModel override (task.agentModel) can be applied. See
+	// terminal/agent-session-adapters.ts's applyAgentModel.
+	supportsAgentModelOverride?: boolean;
 }
 
 export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
@@ -17,6 +21,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		baseArgs: [],
 		autonomousArgs: ["--permission-mode", "auto"],
 		installUrl: "https://docs.anthropic.com/en/docs/claude-code/quickstart",
+		supportsAgentModelOverride: true,
 	},
 	{
 		id: "codex",
@@ -25,6 +30,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		baseArgs: [],
 		autonomousArgs: ["--dangerously-bypass-approvals-and-sandbox"],
 		installUrl: "https://github.com/openai/codex",
+		supportsAgentModelOverride: true,
 	},
 	{
 		id: "cline",

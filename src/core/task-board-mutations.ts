@@ -33,6 +33,7 @@ export interface RuntimeUpdateTaskInput {
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId | null;
+	agentModel?: string | null;
 	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
 }
@@ -626,6 +627,7 @@ export function updateTask(
 				autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
+				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,
 				clineSettings:
 					input.clineSettings === undefined
 						? cloneTaskClineSettings(card.clineSettings)

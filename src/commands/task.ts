@@ -353,6 +353,7 @@ function formatTaskRecord(
 		autoReviewEnabled: task.autoReviewEnabled === true,
 		autoReviewMode: task.autoReviewMode ?? "commit",
 		...(task.agentId ? { agentId: task.agentId } : {}),
+		...(task.agentModel ? { agentModel: task.agentModel } : {}),
 		...formatTaskClineSettings(task.clineSettings),
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
@@ -546,6 +547,7 @@ async function updateTaskCommand(input: {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId | null;
+	agentModel?: string | null;
 	clineProviderId?: string | null;
 	clineModelId?: string | null;
 	clineReasoningEffort?: ParsedTaskClineReasoningEffort;
@@ -558,6 +560,7 @@ async function updateTaskCommand(input: {
 		input.autoReviewEnabled === undefined &&
 		input.autoReviewMode === undefined &&
 		input.agentId === undefined &&
+		input.agentModel === undefined &&
 		input.clineProviderId === undefined &&
 		input.clineModelId === undefined &&
 		input.clineReasoningEffort === undefined
@@ -573,6 +576,15 @@ async function updateTaskCommand(input: {
 		if (!taskRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 		}
+		// baseRef/agentModel drive worktree creation and the CLI agent's launch
+		// args, both fixed once a task leaves backlog — changing them afterward
+		// wouldn't take effect and would be misleading, so reject rather than
+		// silently ignore.
+		if ((input.baseRef !== undefined || input.agentModel !== undefined) && taskRecord.columnId !== "backlog") {
+			throw new Error(
+				`Task "${input.taskId}" is in "${taskRecord.columnId}" — base-ref and agent-model can only be changed while a task is in backlog.`,
+			);
+		}
 		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
 			providerId: input.clineProviderId,
 			modelId: input.clineModelId,
@@ -587,6 +599,7 @@ async function updateTaskCommand(input: {
 			autoReviewEnabled: input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
 			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
 			agentId: input.agentId,
+			agentModel: input.agentModel,
 			clineSettings: nextTaskClineSettings,
 		});
 		if (!updatedTask.updated || !updatedTask.task) {
@@ -1297,6 +1310,10 @@ export function registerTaskCommand(program: Command): void {
 			'Agent override: cline | claude | codex | droid | gemini | opencode. Use "default" to clear.',
 		)
 		.option(
+			"--agent-model <id>",
+			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',
+		)
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" to clear.',
 		)
@@ -1316,6 +1333,7 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewEnabled?: unknown;
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
+				agentModel?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1333,6 +1351,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
+							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							clineProviderId: parseOptionalStringOrDefault(options.clineProvider),
 							clineModelId: parseOptionalStringOrDefault(options.clineModel),
 							clineReasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),

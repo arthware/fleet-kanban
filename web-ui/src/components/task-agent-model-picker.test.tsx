@@ -18,6 +18,12 @@ vi.mock("@runtime-agent-catalog", () => ({
 		{ id: "cline", label: "Cline", binary: "cline" },
 		{ id: "claude", label: "Claude Code", binary: "claude" },
 	]),
+	getRuntimeAgentCatalogEntry: vi.fn((agentId: string) => {
+		if (agentId === "claude" || agentId === "codex") {
+			return { id: agentId, label: "Claude Code", binary: agentId, supportsAgentModelOverride: true };
+		}
+		return { id: agentId, label: "Cline", binary: agentId };
+	}),
 }));
 
 vi.mock("@/runtime/runtime-config-query", () => ({
@@ -394,6 +400,8 @@ describe("TaskAgentModelPicker – auto-reset invalid model selection", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={createTaskClineSettings({
 						providerId: "groq",
 						modelId: "claude-opus-4-20250514",
@@ -432,6 +440,8 @@ describe("TaskAgentModelPicker – auto-reset invalid model selection", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={createTaskClineSettings({
 						providerId: "groq",
 						modelId: "llama-3.3-70b-versatile",
@@ -462,6 +472,8 @@ describe("TaskAgentModelPicker – auto-reset invalid model selection", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={createTaskClineSettings({
 						providerId: "groq",
 						modelId: "claude-opus-4-20250514",
@@ -493,6 +505,8 @@ describe("TaskAgentModelPicker – auto-reset invalid model selection", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={createTaskClineSettings({
 						providerId: "groq",
 						modelId: "mixtral-8x7b-32768",
@@ -523,6 +537,8 @@ describe("TaskAgentModelPicker – inherited default reasoning effort", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={undefined}
 					onClineSettingsChange={() => {}}
 					agentOptions={[{ value: "", label: "Cline" }]}
@@ -573,6 +589,8 @@ describe("TaskAgentModelPicker – inherited default reasoning effort", () => {
 					<TaskAgentModelPicker
 						agentId={"cline" as RuntimeAgentId}
 						onAgentIdChange={() => {}}
+						agentModel={undefined}
+						onAgentModelChange={() => {}}
 						clineSettings={undefined}
 						onClineSettingsChange={() => {}}
 						agentOptions={[{ value: "", label: "Cline" }]}
@@ -620,6 +638,8 @@ describe("TaskAgentModelPicker – inherited default reasoning effort", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={undefined}
 					onClineSettingsChange={onClineSettingsChange}
 					agentOptions={[{ value: "", label: "Cline" }]}
@@ -678,6 +698,8 @@ describe("TaskAgentModelPicker – inherited default reasoning effort", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={undefined}
 					onClineSettingsChange={onClineSettingsChange}
 					agentOptions={[{ value: "", label: "Cline" }]}
@@ -727,6 +749,8 @@ describe("TaskAgentModelPicker – inherited default reasoning effort", () => {
 				<TaskAgentModelPicker
 					agentId={"cline" as RuntimeAgentId}
 					onAgentIdChange={() => {}}
+					agentModel={undefined}
+					onAgentModelChange={() => {}}
 					clineSettings={createTaskClineSettings({
 						modelId: "openai/gpt-5.3-codex",
 					})}
