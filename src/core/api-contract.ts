@@ -74,11 +74,8 @@ export type RuntimeSlashCommandsResponse = z.infer<typeof runtimeSlashCommandsRe
 export const runtimeAgentIdSchema = z.enum(["claude", "codex", "gemini", "opencode", "droid", "kiro", "cline"]);
 export type RuntimeAgentId = z.infer<typeof runtimeAgentIdSchema>;
 
-const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "trash"]);
-export const runtimeBoardColumnIdSchema = z.preprocess(
-	(val) => (val === "done" ? "trash" : val),
-	runtimeBoardColumnIdEnum,
-);
+const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "done", "trash"]);
+export const runtimeBoardColumnIdSchema = runtimeBoardColumnIdEnum;
 export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdEnum>;
 
 const runtimeTaskAutoReviewModeEnum = z.enum(["commit", "pr"]);
@@ -202,10 +199,25 @@ export const runtimeBoardDependencySchema = z.object({
 });
 export type RuntimeBoardDependency = z.infer<typeof runtimeBoardDependencySchema>;
 
-export const runtimeBoardDataSchema = z.object({
-	columns: z.array(runtimeBoardColumnSchema),
-	dependencies: z.array(runtimeBoardDependencySchema).default([]),
-});
+export const runtimeBoardDataSchema = z
+	.object({
+		columns: z.array(runtimeBoardColumnSchema),
+		dependencies: z.array(runtimeBoardDependencySchema).default([]),
+	})
+	.transform((board) => {
+		const hasDoneColumn = board.columns.some((column) => column.id === "done");
+		const hasTrashColumn = board.columns.some((column) => column.id === "trash");
+		if (hasDoneColumn || !hasTrashColumn) {
+			return board;
+		}
+		return {
+			...board,
+			columns: [
+				...board.columns.map((column) => (column.id === "trash" ? { ...column, id: "done" as const } : column)),
+				{ id: "trash" as const, title: "Trash", cards: [] },
+			],
+		};
+	});
 export type RuntimeBoardData = z.infer<typeof runtimeBoardDataSchema>;
 
 export const runtimeGitRepositoryInfoSchema = z.object({
@@ -361,6 +373,7 @@ export const runtimeProjectTaskCountsSchema = z.object({
 	backlog: z.number(),
 	in_progress: z.number(),
 	review: z.number(),
+	done: z.number(),
 	trash: z.number(),
 });
 export type RuntimeProjectTaskCounts = z.infer<typeof runtimeProjectTaskCountsSchema>;

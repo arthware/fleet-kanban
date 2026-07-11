@@ -85,7 +85,7 @@ export interface RuntimeUpdateTaskResult {
 export interface RuntimeAddTaskDependencyResult {
 	board: RuntimeBoardData;
 	added: boolean;
-	reason?: "missing_task" | "same_task" | "duplicate" | "trash_task" | "non_backlog";
+	reason?: "missing_task" | "same_task" | "duplicate" | "terminal_task" | "trash_task" | "non_backlog";
 	dependency?: RuntimeBoardDependency;
 }
 
@@ -189,8 +189,13 @@ function resolveDependencyEndpoints(
 	if (!firstColumnId || !secondColumnId) {
 		return { reason: "missing_task" };
 	}
-	if (firstColumnId === "trash" || secondColumnId === "trash") {
-		return { reason: "trash_task" };
+	if (
+		firstColumnId === "done" ||
+		firstColumnId === "trash" ||
+		secondColumnId === "done" ||
+		secondColumnId === "trash"
+	) {
+		return { reason: "terminal_task" };
 	}
 	const firstIsBacklog = firstColumnId === "backlog";
 	const secondIsBacklog = secondColumnId === "backlog";
@@ -208,7 +213,7 @@ function resolveDependencyEndpoints(
 		: { backlogTaskId: secondTaskId, linkedTaskId: firstTaskId };
 }
 
-function getLinkedBacklogTaskIdsReadyAfterTaskTrashed(
+function getLinkedBacklogTaskIdsReadyAfterTaskCompleted(
 	board: RuntimeBoardData,
 	taskId: string,
 	fromColumnId: RuntimeBoardColumnId | null,
@@ -414,8 +419,26 @@ export function removeTaskDependency(board: RuntimeBoardData, dependencyId: stri
 	};
 }
 
+export function getReadyLinkedTaskIdsForCompletedTask(board: RuntimeBoardData, taskId: string): string[] {
+	return getLinkedBacklogTaskIdsReadyAfterTaskCompleted(board, taskId, getTaskColumnId(board, taskId));
+}
+
 export function getReadyLinkedTaskIdsForTaskInTrash(board: RuntimeBoardData, taskId: string): string[] {
-	return getLinkedBacklogTaskIdsReadyAfterTaskTrashed(board, taskId, getTaskColumnId(board, taskId));
+	return getReadyLinkedTaskIdsForCompletedTask(board, taskId);
+}
+
+export function completeTaskAndGetReadyLinkedTaskIds(
+	board: RuntimeBoardData,
+	taskId: string,
+	now: number = Date.now(),
+): RuntimeTrashTaskResult {
+	const fromColumnId = getTaskColumnId(board, taskId);
+	const readyTaskIds = getLinkedBacklogTaskIdsReadyAfterTaskCompleted(board, taskId, fromColumnId);
+	const movedToDone = moveTaskToColumn(board, taskId, "done", now);
+	return {
+		...movedToDone,
+		readyTaskIds: movedToDone.moved ? readyTaskIds : [],
+	};
 }
 
 export function trashTaskAndGetReadyLinkedTaskIds(
@@ -423,12 +446,10 @@ export function trashTaskAndGetReadyLinkedTaskIds(
 	taskId: string,
 	now: number = Date.now(),
 ): RuntimeTrashTaskResult {
-	const fromColumnId = getTaskColumnId(board, taskId);
-	const readyTaskIds = getLinkedBacklogTaskIdsReadyAfterTaskTrashed(board, taskId, fromColumnId);
 	const movedToTrash = moveTaskToColumn(board, taskId, "trash", now);
 	return {
 		...movedToTrash,
-		readyTaskIds: movedToTrash.moved ? readyTaskIds : [],
+		readyTaskIds: [],
 	};
 }
 
@@ -549,7 +570,9 @@ export function moveTaskToColumn(
 		updatedAt: now,
 	};
 	const targetCards =
-		targetColumnId === "trash" ? [movedTask, ...targetColumn.cards] : [...targetColumn.cards, movedTask];
+		targetColumnId === "done" || targetColumnId === "trash"
+			? [movedTask, ...targetColumn.cards]
+			: [...targetColumn.cards, movedTask];
 
 	const columns = board.columns.map((column, index) => {
 		if (index === found.columnIndex) {

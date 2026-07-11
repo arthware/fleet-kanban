@@ -38,7 +38,8 @@ function createBoard(title: string): RuntimeBoardData {
 			},
 			{ id: "in_progress", title: "In Progress", cards: [] },
 			{ id: "review", title: "Review", cards: [] },
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies: [],
 	};
@@ -97,6 +98,29 @@ function initGitRepository(path: string): void {
 }
 
 describe.sequential("workspace-state integration", () => {
+	it("creates a new board with done before trash", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-default-board-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-a");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const state = await loadWorkspaceState(workspacePath);
+
+				expect(state.board.columns.map((column) => column.id)).toEqual([
+					"backlog",
+					"in_progress",
+					"review",
+					"done",
+					"trash",
+				]);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
 	it("persists revision numbers and rejects stale writes", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-");

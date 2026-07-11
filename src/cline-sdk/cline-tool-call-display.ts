@@ -146,7 +146,7 @@ const KANBAN_SUBCOMMAND_LABELS: Record<string, string> = {
 	create: "Creating task",
 	link: "Linking tasks",
 	unlink: "Unlinking tasks",
-	trash: "Moving task to done",
+	trash: "Moving task to trash",
 	done: "Moving task to done",
 	delete: "Deleting task",
 	start: "Starting task",
