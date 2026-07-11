@@ -525,6 +525,7 @@ export function useBoardInteractions({
 
 	useReviewAutoActions({
 		board,
+		sessionsByTaskId: sessions,
 		taskGitActionLoadingByTaskId,
 		runAutoReviewGitAction,
 		requestMoveTaskToTrash: requestMoveTaskToTrashWithAnimation,
