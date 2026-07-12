@@ -306,6 +306,39 @@ describe("CardDetailView", () => {
 		});
 	});
 
+	it("shows the PR badge in the detail header when the selected card stores a PR", async () => {
+		const selection = createSelection();
+		selection.card.prUrl = "https://github.com/cline/kanban/pull/42";
+		selection.card.prState = "merged";
+		selection.card.prNumber = 42;
+
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={selection}
+					currentProjectId="workspace-1"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		const link = container.querySelector<HTMLAnchorElement>('a[href="https://github.com/cline/kanban/pull/42"]');
+		expect(link).not.toBeNull();
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+		expect(link?.textContent).toContain("PR #42");
+		expect(link?.querySelector("svg.lucide-git-merge")).toBeInstanceOf(SVGSVGElement);
+	});
+
 	it("collapses the expanded diff on Escape without closing the detail view", async () => {
 		await act(async () => {
 			root.render(
