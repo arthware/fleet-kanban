@@ -4,6 +4,7 @@ export interface RuntimeAgentCatalogEntry {
 	id: RuntimeAgentId;
 	label: string;
 	binary: string;
+	binaryAliases?: string[];
 	baseArgs: string[];
 	autonomousArgs: string[];
 	installUrl: string;
@@ -31,6 +32,15 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		autonomousArgs: ["--dangerously-bypass-approvals-and-sandbox"],
 		installUrl: "https://github.com/openai/codex",
 		supportsAgentModelOverride: true,
+	},
+	{
+		id: "cursor",
+		label: "Cursor Agent",
+		binary: "cursor-agent",
+		binaryAliases: ["agent"],
+		baseArgs: [],
+		autonomousArgs: ["--force"],
+		installUrl: "https://cursor.com/docs/cli/overview",
 	},
 	{
 		id: "cline",
@@ -80,6 +90,7 @@ export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = [
 	"cline",
 	"claude",
 	"codex",
+	"cursor",
 	"droid",
 	"kiro",
 	// "opencode",
@@ -98,4 +109,12 @@ export function getRuntimeLaunchSupportedAgentCatalog(): RuntimeAgentCatalogEntr
 
 export function getRuntimeAgentCatalogEntry(agentId: RuntimeAgentId): RuntimeAgentCatalogEntry | null {
 	return RUNTIME_AGENT_CATALOG.find((entry) => entry.id === agentId) ?? null;
+}
+
+export function getRuntimeAgentBinaryCandidates(agentId: RuntimeAgentId): string[] {
+	const entry = getRuntimeAgentCatalogEntry(agentId);
+	if (!entry) {
+		return [agentId];
+	}
+	return [entry.binary, ...(entry.binaryAliases ?? [])];
 }

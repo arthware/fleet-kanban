@@ -159,6 +159,65 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(getCodexConfigOverrideValues(launch.args, "check_for_update_on_startup")).toEqual(["false"]);
 	});
 
+	it("given a Cursor home sidebar session, when it launches with a prompt, then the sidebar guidance is sent with the prompt", async () => {
+		// given
+		setupTempHome();
+		setKanbanProcessContext();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "__home_agent__:workspace-1:cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Create a task for the failing login test",
+		});
+
+		// then
+		const initialPrompt = launch.args.at(-1) ?? "";
+		expect(initialPrompt).toContain("Kanban sidebar agent");
+		expect(initialPrompt).toContain("Current home agent: `cursor`");
+		expect(initialPrompt).toContain("cursor-agent mcp login linear");
+		expect(initialPrompt).toContain("# User Request");
+		expect(initialPrompt).toContain("Create a task for the failing login test");
+	});
+
+	it("given cursor-agent is installed, when a card selects Cursor and starts, then cursor-agent launches with prompt hooks and autonomous args", async () => {
+		// given
+		const cwd = setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd,
+			prompt: "Implement Cursor launch support",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-cursor");
+		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
+		expect(launch.args).toContain("--force");
+		expect(launch.args.at(-1)).toBe("Implement Cursor launch support");
+
+		const hooksPath = join(cwd, ".cursor", "hooks.json");
+		const config = JSON.parse(readFileSync(hooksPath, "utf8")) as {
+			version?: number;
+			hooks?: Record<string, Array<{ command?: string }>>;
+		};
+		expect(config.version).toBe(1);
+		expect(config.hooks?.beforeSubmitPrompt?.[0]?.command).toContain("to_in_progress");
+		expect(config.hooks?.beforeShellExecution?.[0]?.command).toContain("to_in_progress");
+		expect(config.hooks?.afterFileEdit?.[0]?.command).toContain("activity");
+		expect(config.hooks?.stop?.[0]?.command).toContain("to_review");
+		expect(config.hooks?.stop?.[0]?.command).toContain("Waiting for review");
+	});
+
 	it("disables Codex startup update checks for Kanban-launched sessions", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -594,6 +653,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 		});
 		expect(kiroLaunch.args).toContain("--resume");
 
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+		expect(cursorLaunch.args).toContain("--continue");
+
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline",
 			agentId: "cline",
@@ -686,6 +756,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(kiroLaunch.args).toContain("--trust-all-tools");
+
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor-auto",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(cursorLaunch.args).toContain("--force");
 
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline-auto",
@@ -939,6 +1020,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(kiroLaunch.args).toContain("--trust-all-tools");
+
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor-no-auto",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: ["--force"],
+			autonomousModeEnabled: false,
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(cursorLaunch.args).toContain("--force");
 	});
 });
 
