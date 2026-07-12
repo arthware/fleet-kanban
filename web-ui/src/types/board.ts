@@ -1,6 +1,7 @@
 import type {
 	RuntimeAgentId,
 	RuntimeBoardColumnId,
+	RuntimeBoardTransition,
 	RuntimeCardPrState,
 	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
@@ -9,6 +10,7 @@ import type {
 } from "@/runtime/types";
 
 export type BoardColumnId = RuntimeBoardColumnId;
+export type BoardTransition = RuntimeBoardTransition;
 export type CardPrState = RuntimeCardPrState;
 export type ExternalIssue = RuntimeExternalIssue;
 
@@ -61,6 +63,7 @@ export interface BoardCard {
 	prState?: CardPrState;
 	prNumber?: number;
 	externalIssue?: ExternalIssue;
+	transitions?: BoardTransition[];
 }
 
 export interface BoardColumn {
