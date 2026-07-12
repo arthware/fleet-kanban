@@ -452,3 +452,83 @@ describe("per-task agent/model/provider overrides", () => {
 		});
 	});
 });
+
+describe("external issue metadata", () => {
+	const externalIssue = {
+		provider: "github" as const,
+		key: "owner/repo#42",
+		url: "https://github.com/owner/repo/issues/42",
+		raw: "owner/repo#42",
+	};
+
+	it("persists externalIssue on the card when creating a task", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Issue-backed task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		expect(created.task.externalIssue).toEqual(externalIssue);
+	});
+
+	it("updates externalIssue from undefined to a value", () => {
+		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			externalIssue,
+		});
+
+		expect(updated.updated).toBe(true);
+		expect(updated.task?.externalIssue).toEqual(externalIssue);
+	});
+
+	it("preserves externalIssue when update input omits it", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Updated prompt",
+			baseRef: "main",
+		});
+
+		expect(updated.task?.externalIssue).toEqual(externalIssue);
+	});
+
+	it("clears externalIssue when update input provides null", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			externalIssue: null,
+		});
+
+		expect(updated.task?.externalIssue).toBeUndefined();
+	});
+
+	it("preserves externalIssue across move operations", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Movable task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "review");
+
+		expect(moved.moved).toBe(true);
+		expect(moved.task?.externalIssue).toEqual(externalIssue);
+	});
+});

@@ -7,10 +7,12 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardDependency,
 	RuntimeClineReasoningEffort,
+	RuntimeExternalIssue,
 	RuntimeTaskClineSettings,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import { runtimeAgentIdSchema, runtimeClineReasoningEffortSchema } from "../core/api-contract";
+import { parseExternalIssueRef } from "../core/external-issue";
 import { buildKanbanRuntimeUrl, getKanbanRuntimeOrigin, getRuntimeFetch } from "../core/runtime-endpoint";
 import {
 	addTaskDependency,
@@ -27,6 +29,7 @@ import {
 import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
+import { resolveRepoNameWithOwner } from "../workspace/repo-name";
 import { renderTranscriptTailLines, selectTranscriptTail } from "./task-transcript-tail";
 
 const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "done", "trash"] as const;
@@ -146,6 +149,38 @@ function formatTaskClineSettings(settings?: RuntimeTaskClineSettings): JsonRecor
 	return {
 		clineSettings: cloneTaskClineSettings(settings) ?? {},
 	};
+}
+
+export async function resolveExternalIssueForTaskCommand(input: {
+	ref: string;
+	cwd: string;
+	env?: NodeJS.ProcessEnv;
+}): Promise<RuntimeExternalIssue> {
+	const parsed = parseExternalIssueRef(input.ref);
+	if (!parsed) {
+		throw new Error(
+			`Invalid external issue reference "${input.ref}". Expected a Linear issue (ENG-123 or Linear URL) or GitHub issue (#123, owner/repo#123, or issue URL).`,
+		);
+	}
+	if (parsed.url) {
+		return parsed;
+	}
+	if (parsed.provider === "linear") {
+		const workspaceSlug = input.env?.KANBAN_LINEAR_WORKSPACE?.trim();
+		return {
+			...parsed,
+			...(workspaceSlug ? { url: `https://linear.app/${workspaceSlug}/issue/${parsed.key}` } : {}),
+		};
+	}
+	if (parsed.provider === "github" && parsed.key.startsWith("#")) {
+		const issueNumber = parsed.key.slice(1);
+		const nameWithOwner = await resolveRepoNameWithOwner(input.cwd);
+		return {
+			...parsed,
+			...(nameWithOwner ? { url: `https://github.com/${nameWithOwner}/issues/${issueNumber}` } : {}),
+		};
+	}
+	return parsed;
 }
 
 function buildTaskClineSettingsForCreate(input: {
@@ -352,6 +387,7 @@ function formatTaskRecord(
 		autoReviewMode: task.autoReviewMode ?? "commit",
 		...(task.agentId ? { agentId: task.agentId } : {}),
 		...(task.agentModel ? { agentModel: task.agentModel } : {}),
+		...(task.externalIssue ? { externalIssue: task.externalIssue } : {}),
 		...formatTaskClineSettings(task.clineSettings),
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
@@ -483,9 +519,18 @@ async function createTask(input: {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	externalIssueRef?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const externalIssue =
+		input.externalIssueRef !== undefined
+			? await resolveExternalIssueForTaskCommand({
+					ref: input.externalIssueRef,
+					cwd: workspaceRepoPath,
+					env: process.env,
+				})
+			: undefined;
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const created = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (state) => {
@@ -504,6 +549,7 @@ async function createTask(input: {
 				autoReviewMode: input.autoReviewMode,
 				agentId: input.agentId,
 				agentModel: input.agentModel,
+				externalIssue,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
 			},
@@ -529,6 +575,7 @@ async function createTask(input: {
 			autoReviewMode: created.autoReviewMode ?? "commit",
 			...(created.agentId ? { agentId: created.agentId } : {}),
 			...(created.agentModel ? { agentModel: created.agentModel } : {}),
+			...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
 			...formatTaskClineSettings(created.clineSettings),
 		},
 	};
@@ -546,6 +593,7 @@ async function updateTaskCommand(input: {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
+	externalIssueRef?: string | null;
 	clineProviderId?: string | null;
 	clineModelId?: string | null;
 	clineReasoningEffort?: ParsedTaskClineReasoningEffort;
@@ -559,6 +607,7 @@ async function updateTaskCommand(input: {
 		input.autoReviewMode === undefined &&
 		input.agentId === undefined &&
 		input.agentModel === undefined &&
+		input.externalIssueRef === undefined &&
 		input.clineProviderId === undefined &&
 		input.clineModelId === undefined &&
 		input.clineReasoningEffort === undefined
@@ -567,6 +616,16 @@ async function updateTaskCommand(input: {
 	}
 
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const externalIssue =
+		input.externalIssueRef === undefined
+			? undefined
+			: input.externalIssueRef === null
+				? null
+				: await resolveExternalIssueForTaskCommand({
+						ref: input.externalIssueRef,
+						cwd: workspaceRepoPath,
+						env: process.env,
+					});
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const updated = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
@@ -598,6 +657,7 @@ async function updateTaskCommand(input: {
 			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
 			agentId: input.agentId,
 			agentModel: input.agentModel,
+			externalIssue,
 			clineSettings: nextTaskClineSettings,
 		});
 		if (!updatedTask.updated || !updatedTask.task) {
@@ -1414,6 +1474,11 @@ export function registerTaskCommand(program: Command): void {
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
 		.option(
+			"--external-issue <ref>",
+			"External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.",
+		)
+		.option("--issue <ref>", "Alias for --external-issue.")
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" for workspace default.',
 		)
@@ -1436,6 +1501,8 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				externalIssue?: string;
+				issue?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1453,6 +1520,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId) ?? undefined,
 							agentModel: parseOptionalStringOrDefault(options.agentModel) ?? undefined,
+							externalIssueRef: options.externalIssue ?? options.issue,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
 								modelId: parseOptionalStringOrDefault(options.clineModel) ?? undefined,
@@ -1483,6 +1551,11 @@ export function registerTaskCommand(program: Command): void {
 			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',
 		)
 		.option(
+			"--external-issue <ref>",
+			'External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Use "default" to clear. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.',
+		)
+		.option("--issue <ref>", "Alias for --external-issue.")
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" to clear.',
 		)
@@ -1503,6 +1576,8 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				externalIssue?: string;
+				issue?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1521,6 +1596,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
+							externalIssueRef: parseOptionalStringOrDefault(options.externalIssue ?? options.issue),
 							clineProviderId: parseOptionalStringOrDefault(options.clineProvider),
 							clineModelId: parseOptionalStringOrDefault(options.clineModel),
 							clineReasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),

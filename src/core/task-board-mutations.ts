@@ -5,6 +5,7 @@ import type {
 	RuntimeBoardData,
 	RuntimeBoardDependency,
 	RuntimeCardPrState,
+	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
@@ -22,6 +23,7 @@ export interface RuntimeCreateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	externalIssue?: RuntimeExternalIssue;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -35,6 +37,7 @@ export interface RuntimeUpdateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
+	externalIssue?: RuntimeExternalIssue | null;
 	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
 }
@@ -61,6 +64,24 @@ function cloneTaskClineSettings(settings?: RuntimeTaskClineSettings | null): Run
 		...(providerId ? { providerId } : {}),
 		...(modelId ? { modelId } : {}),
 		...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
+	};
+}
+
+function cloneExternalIssue(issue?: RuntimeExternalIssue | null): RuntimeExternalIssue | undefined {
+	if (issue === undefined || issue === null) {
+		return undefined;
+	}
+	const key = issue.key.trim();
+	const raw = issue.raw.trim();
+	const url = issue.url?.trim();
+	if (!key || !raw) {
+		return undefined;
+	}
+	return {
+		provider: issue.provider,
+		key,
+		...(url ? { url } : {}),
+		raw,
 	};
 }
 
@@ -307,6 +328,7 @@ export function addTaskToColumn(
 	if (explicitTaskId && existingIds.has(explicitTaskId)) {
 		throw new Error(`Task "${explicitTaskId}" already exists.`);
 	}
+	const externalIssue = cloneExternalIssue(input.externalIssue);
 	const task: RuntimeBoardCard = {
 		id: explicitTaskId || createUniqueTaskId(existingIds, randomUuid),
 		title: resolveTaskTitle(input.title, prompt),
@@ -317,6 +339,7 @@ export function addTaskToColumn(
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
 		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
+		...(externalIssue ? { externalIssue } : {}),
 		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,
 		createdAt: now,
@@ -652,6 +675,12 @@ export function updateTask(
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
 				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,
+				externalIssue:
+					input.externalIssue === undefined
+						? cloneExternalIssue(card.externalIssue)
+						: input.externalIssue === null
+							? undefined
+							: cloneExternalIssue(input.externalIssue),
 				clineSettings:
 					input.clineSettings === undefined
 						? cloneTaskClineSettings(card.clineSettings)
