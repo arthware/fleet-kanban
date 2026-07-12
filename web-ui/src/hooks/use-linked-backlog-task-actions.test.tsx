@@ -189,7 +189,7 @@ describe("useLinkedBacklogTaskActions", () => {
 		});
 	});
 
-	it("tracks how many linked tasks were auto-started when a parent task is trashed", async () => {
+	it("does not auto-start linked tasks when a parent task is trashed", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 		const kickoffTaskInProgress = vi.fn(async () => true);
 		const boardFactory = () =>
@@ -223,11 +223,11 @@ describe("useLinkedBacklogTaskActions", () => {
 			await initialSnapshot.confirmMoveTaskToTrash(reviewTask, initialSnapshot.board);
 		});
 
-		expect(kickoffTaskInProgress).toHaveBeenCalledTimes(2);
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(2);
+		expect(kickoffTaskInProgress).not.toHaveBeenCalled();
+		expect(trackTasksAutoStartedFromDependencyMock).not.toHaveBeenCalled();
 	});
 
-	it("uses animated backlog starts for dependency-unblocked tasks when available", async () => {
+	it("does not use animated backlog starts for dependency-unblocked tasks when trashing", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 		const kickoffTaskInProgress = vi.fn(async () => true);
 		const startBacklogTaskWithAnimation = vi.fn(async (task: BoardCard) => task.id === "task-1");
@@ -265,12 +265,10 @@ describe("useLinkedBacklogTaskActions", () => {
 			await initialSnapshot.confirmMoveTaskToTrash(reviewTask, initialSnapshot.board);
 		});
 
-		expect(startBacklogTaskWithAnimation).toHaveBeenCalledTimes(2);
-		expect(startBacklogTaskWithAnimation.mock.calls[0]?.[0]).toMatchObject({ id: "task-1" });
-		expect(startBacklogTaskWithAnimation.mock.calls[1]?.[0]).toMatchObject({ id: "task-3" });
-		expect(waitForBacklogStartAnimationAvailability).toHaveBeenCalledTimes(1);
+		expect(startBacklogTaskWithAnimation).not.toHaveBeenCalled();
+		expect(waitForBacklogStartAnimationAvailability).not.toHaveBeenCalled();
 		expect(kickoffTaskInProgress).not.toHaveBeenCalled();
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(1);
+		expect(trackTasksAutoStartedFromDependencyMock).not.toHaveBeenCalled();
 	});
 
 	it("stops the main task session and its detail terminal shell when a task is trashed", async () => {
@@ -339,7 +337,7 @@ describe("useLinkedBacklogTaskActions", () => {
 		expect(cleanupTaskWorkspace).toHaveBeenCalledWith("task-2");
 	});
 
-	it("can queue the next dependency-unblocked animation before the previous start resolves", async () => {
+	it("does not queue dependency-unblocked animations when trashing", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 		const firstKickoff = createDeferred<boolean>();
 		const secondKickoff = createDeferred<boolean>();
@@ -387,16 +385,14 @@ describe("useLinkedBacklogTaskActions", () => {
 			await Promise.resolve();
 		});
 
-		expect(startBacklogTaskWithAnimation).toHaveBeenCalledTimes(1);
-		expect(startBacklogTaskWithAnimation.mock.calls[0]?.[0]).toMatchObject({ id: "task-1" });
+		expect(startBacklogTaskWithAnimation).not.toHaveBeenCalled();
 
 		await act(async () => {
 			waitForSecondAnimation.resolve();
 			await Promise.resolve();
 		});
 
-		expect(startBacklogTaskWithAnimation).toHaveBeenCalledTimes(2);
-		expect(startBacklogTaskWithAnimation.mock.calls[1]?.[0]).toMatchObject({ id: "task-3" });
+		expect(startBacklogTaskWithAnimation).not.toHaveBeenCalled();
 
 		await act(async () => {
 			firstKickoff.resolve(true);
@@ -404,6 +400,6 @@ describe("useLinkedBacklogTaskActions", () => {
 			await movePromise;
 		});
 
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(2);
+		expect(trackTasksAutoStartedFromDependencyMock).not.toHaveBeenCalled();
 	});
 });

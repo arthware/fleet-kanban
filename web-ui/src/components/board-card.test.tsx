@@ -238,7 +238,7 @@ describe("BoardCard", () => {
 			element.textContent?.includes("Ship the feature"),
 		);
 		expect(title?.className).not.toContain("line-through");
-		expect(container.querySelector('button[aria-label*="task from done"]')).toBeNull();
+		expect(container.querySelector('button[aria-label*="task from archive"]')).toBeNull();
 		expect(container.textContent).not.toContain("Restore");
 		expect(container.textContent).not.toContain("Start fresh");
 
@@ -321,7 +321,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		const resumeButton = container.querySelector('button[aria-label="Resume task from done"]');
+		const resumeButton = container.querySelector('button[aria-label="Resume task from archive"]');
 		expect(resumeButton).toBeInstanceOf(HTMLButtonElement);
 		expect(resumeButton?.textContent?.trim()).toBe("Resume");
 	});
@@ -343,7 +343,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		const startFreshButton = container.querySelector('button[aria-label="Start fresh task from done"]');
+		const startFreshButton = container.querySelector('button[aria-label="Start fresh task from archive"]');
 		expect(startFreshButton).toBeInstanceOf(HTMLButtonElement);
 		expect(startFreshButton?.textContent?.trim()).toBe("Start fresh");
 	});

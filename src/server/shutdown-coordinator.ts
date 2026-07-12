@@ -157,7 +157,16 @@ function collectShutdownInterruptedTaskIds(
 }
 
 function collectWorkColumnTaskIds(workspaceState: RuntimeWorkspaceStateResponse): string[] {
-	return Array.from(collectProjectWorktreeTaskIdsForRemoval(workspaceState.board));
+	const taskIds: string[] = [];
+	for (const column of workspaceState.board.columns) {
+		if (column.id !== "in_progress" && column.id !== "review") {
+			continue;
+		}
+		for (const card of column.cards) {
+			taskIds.push(card.id);
+		}
+	}
+	return taskIds;
 }
 
 export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDependencies): Promise<void> {

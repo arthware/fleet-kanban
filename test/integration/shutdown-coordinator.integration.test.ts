@@ -57,7 +57,7 @@ function createCard(taskId: string) {
 	};
 }
 
-function createBoard(taskIds: { inProgress?: string[]; review?: string[] }): RuntimeBoardData {
+function createBoard(taskIds: { inProgress?: string[]; review?: string[]; done?: string[] }): RuntimeBoardData {
 	return {
 		columns: [
 			{ id: "backlog", title: "Backlog", cards: [] },
@@ -71,7 +71,12 @@ function createBoard(taskIds: { inProgress?: string[]; review?: string[] }): Run
 				title: "Review",
 				cards: (taskIds.review ?? []).map((taskId) => createCard(taskId)),
 			},
-			{ id: "trash", title: "Done", cards: [] },
+			{
+				id: "done",
+				title: "Done",
+				cards: (taskIds.done ?? []).map((taskId) => createCard(taskId)),
+			},
+			{ id: "trash", title: "Archived", cards: [] },
 		],
 		dependencies: [],
 	};
@@ -180,6 +185,89 @@ describe.sequential("shutdown coordinator integration", () => {
 				);
 				expect(indexedAfter.sessions["indexed-awaiting-review"]?.state).toBe("interrupted");
 				expect(indexedAfter.sessions["indexed-missing-session"]).toBeUndefined();
+			} finally {
+				cleanup();
+			}
+		});
+	}, 30_000);
+
+	it("leaves done cards in done on shutdown", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-shutdown-done-");
+			try {
+				const projectPath = join(sandboxRoot, "done-project");
+				mkdirSync(projectPath, { recursive: true });
+				initGitRepository(projectPath);
+
+				const initial = await loadWorkspaceState(projectPath);
+				await saveWorkspaceState(projectPath, {
+					board: createBoard({
+						done: ["done-task"],
+					}),
+					sessions: {
+						"done-task": createSession("done-task", "idle"),
+					},
+					expectedRevision: initial.revision,
+				});
+
+				await shutdownRuntimeServer({
+					workspaceRegistry: {
+						listManagedWorkspaces: () => [],
+					},
+					warn: () => {},
+					closeRuntimeServer: async () => {},
+				});
+
+				const after = await loadWorkspaceState(projectPath);
+				const doneCards = after.board.columns.find((column) => column.id === "done")?.cards ?? [];
+				const trashCards = after.board.columns.find((column) => column.id === "trash")?.cards ?? [];
+				expect(doneCards.map((card) => card.id)).toEqual(["done-task"]);
+				expect(trashCards.map((card) => card.id)).toEqual([]);
+				expect(after.sessions["done-task"]?.state).toBe("idle");
+			} finally {
+				cleanup();
+			}
+		});
+	}, 30_000);
+
+	it("honors skipSessionCleanup by closing without mutating workspace state", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-shutdown-skip-");
+			try {
+				const projectPath = join(sandboxRoot, "skip-project");
+				mkdirSync(projectPath, { recursive: true });
+				initGitRepository(projectPath);
+
+				const initial = await loadWorkspaceState(projectPath);
+				await saveWorkspaceState(projectPath, {
+					board: createBoard({
+						review: ["review-task"],
+					}),
+					sessions: {
+						"review-task": createSession("review-task", "awaiting_review"),
+					},
+					expectedRevision: initial.revision,
+				});
+
+				let didCloseRuntimeServer = false;
+				await shutdownRuntimeServer({
+					workspaceRegistry: {
+						listManagedWorkspaces: () => [],
+					},
+					warn: () => {},
+					closeRuntimeServer: async () => {
+						didCloseRuntimeServer = true;
+					},
+					skipSessionCleanup: true,
+				});
+
+				expect(didCloseRuntimeServer).toBe(true);
+				const after = await loadWorkspaceState(projectPath);
+				expect(after.board.columns.find((column) => column.id === "review")?.cards.map((card) => card.id)).toEqual([
+					"review-task",
+				]);
+				expect(after.board.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+				expect(after.sessions["review-task"]?.state).toBe("awaiting_review");
 			} finally {
 				cleanup();
 			}

@@ -8,12 +8,14 @@ import {
 	type SensorAPI,
 	type SnapDragActions,
 } from "@hello-pangea/dnd";
+import { Archive, ChevronDown, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BoardColumn } from "@/components/board-column";
 import { DependencyOverlay } from "@/components/dependencies/dependency-overlay";
 import { useDependencyLinking } from "@/components/dependencies/use-dependency-linking";
+import { Button } from "@/components/ui/button";
 import type { TaskTokenUsageById } from "@/hooks/use-task-token-usage";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { canCreateTaskDependency } from "@/state/board-state";
@@ -45,6 +47,7 @@ export function KanbanBoard({
 	onOpenPrTask,
 	onCancelAutomaticTaskAction,
 	onMoveToTrashTask,
+	onMoveDoneTaskToTrash,
 	onRestoreFromTrashTask,
 	commitTaskLoadingById,
 	openPrTaskLoadingById,
@@ -75,6 +78,7 @@ export function KanbanBoard({
 	onOpenPrTask?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
+	onMoveDoneTaskToTrash?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
 	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
@@ -95,6 +99,7 @@ export function KanbanBoard({
 	const latestDataRef = useRef<BoardData>(data);
 	const programmaticCardMoveInFlightRef = useRef<ProgrammaticCardMoveInFlight | null>(null);
 	const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
+	const [isArchivedOpen, setIsArchivedOpen] = useState(false);
 
 	const [activeDragSourceColumnId, setActiveDragSourceColumnId] = useState<BoardColumnId | null>(null);
 	const [programmaticCardMoveInFlight, setProgrammaticCardMoveInFlight] =
@@ -377,6 +382,9 @@ export function KanbanBoard({
 	const visibleColumns = BOARD_COLUMN_ORDER.map((columnId) =>
 		data.columns.find((column) => column.id === columnId),
 	).filter((column): column is BoardData["columns"][number] => column !== undefined);
+	const trashColumn = data.columns.find((column) => column.id === "trash") ?? null;
+	const renderedColumns = isArchivedOpen && trashColumn ? [...visibleColumns, trashColumn] : visibleColumns;
+	const archivedTaskCount = trashColumn?.cards.length ?? 0;
 
 	return (
 		<DragDropContext
@@ -390,7 +398,7 @@ export function KanbanBoard({
 				className="kb-board kb-dependency-surface"
 				data-programmatic-card-move={programmaticCardMoveInFlight ? "true" : undefined}
 			>
-				{visibleColumns.map((column) => (
+				{renderedColumns.map((column) => (
 					<BoardColumn
 						key={column.id}
 						column={column}
@@ -407,11 +415,19 @@ export function KanbanBoard({
 						onCommitTask={column.id === "review" ? onCommitTask : undefined}
 						onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
 						onCancelAutomaticTaskAction={onCancelAutomaticTaskAction}
-						onMoveToTrashTask={column.id === "review" ? onMoveToTrashTask : undefined}
+						onMoveToTrashTask={
+							column.id === "review"
+								? onMoveToTrashTask
+								: column.id === "done"
+									? onMoveDoneTaskToTrash
+									: undefined
+						}
 						onRestoreFromTrashTask={column.id === "trash" ? onRestoreFromTrashTask : undefined}
 						commitTaskLoadingById={column.id === "review" ? commitTaskLoadingById : undefined}
 						openPrTaskLoadingById={column.id === "review" ? openPrTaskLoadingById : undefined}
-						moveToTrashLoadingById={column.id === "review" ? moveToTrashLoadingById : undefined}
+						moveToTrashLoadingById={
+							column.id === "review" || column.id === "done" ? moveToTrashLoadingById : undefined
+						}
 						activeDragTaskId={activeDragTaskId}
 						activeDragSourceColumnId={activeDragSourceColumnId}
 						programmaticCardMoveInFlight={programmaticCardMoveInFlight}
@@ -431,6 +447,21 @@ export function KanbanBoard({
 						}}
 					/>
 				))}
+				<div className="flex min-w-[156px] flex-none flex-col">
+					<Button
+						icon={isArchivedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+						variant="ghost"
+						size="sm"
+						aria-expanded={isArchivedOpen}
+						aria-controls={trashColumn ? "kb-archived-column" : undefined}
+						onClick={() => setIsArchivedOpen((current) => !current)}
+					>
+						<span className="inline-flex items-center gap-1.5">
+							<Archive size={14} />
+							<span>Archived ({archivedTaskCount})</span>
+						</span>
+					</Button>
+				</div>
 				<DependencyOverlay
 					containerRef={boardRef}
 					dependencies={dependencies}
