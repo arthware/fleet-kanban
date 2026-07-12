@@ -158,8 +158,8 @@ async function startBoardTask(input: {
 	return start.payload;
 }
 
-describe.sequential("stub agent board orchestration", () => {
-	it("runs a zero-token deterministic card lifecycle and auto-starts a linked backlog card", async () => {
+describe.sequential("GIVEN an isolated board seeded with a pet repo and a test-only stub agent", () => {
+	it("WHEN a stub-agent card completes and its prerequisite is marked done THEN the board records review, done, and linked-card auto-start state", async () => {
 		const fixture = createPetRepoFixtureCopy();
 		const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
 		expect(existsSync(stubAgentPath)).toBe(true);

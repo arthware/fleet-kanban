@@ -18,8 +18,8 @@ function runGit(cwd: string, args: string[]): string {
 	return result.stdout.trim();
 }
 
-describe("pet repo fixture", () => {
-	it("copies the template into a committed main-branch git repository", () => {
+describe("GIVEN the pet repo fixture helper", () => {
+	it("WHEN it creates a fixture copy THEN the result is a clean committed main-branch repository with the design doc present", () => {
 		const fixture = createPetRepoFixtureCopy();
 		try {
 			expect(runGit(fixture.path, ["branch", "--show-current"])).toBe("main");
