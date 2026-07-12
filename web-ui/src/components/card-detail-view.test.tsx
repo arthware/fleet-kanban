@@ -552,6 +552,52 @@ describe("CardDetailView", () => {
 		);
 	});
 
+	it("uses card-scoped empty-state copy for all changes", async () => {
+		mockUseRuntimeWorkspaceChanges.mockReturnValue({
+			changes: {
+				files: [],
+			},
+			isRuntimeAvailable: true,
+		});
+
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={createSelection()}
+					currentProjectId="workspace-1"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("No changes for this card");
+		expect(container.textContent).not.toContain("No working changes");
+
+		const lastTurnButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "Last Turn",
+		);
+		expect(lastTurnButton).toBeInstanceOf(HTMLButtonElement);
+		if (!(lastTurnButton instanceof HTMLButtonElement)) {
+			throw new Error("Expected a Last Turn button.");
+		}
+
+		await act(async () => {
+			lastTurnButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			lastTurnButton.click();
+		});
+
+		expect(container.textContent).toContain("No changes since last turn");
+	});
+
 	it("closes git history before handling other Escape behavior", async () => {
 		const onCloseGitHistory = vi.fn();
 

@@ -363,6 +363,15 @@ export async function createEmptyWorkspaceChangesResponse(cwd: string): Promise<
 	};
 }
 
+export async function resolveTaskForkPoint(cwd: string, baseRef: string): Promise<string | null> {
+	try {
+		const forkPoint = (await getGitStdout(["merge-base", baseRef, "HEAD"], cwd)).trim();
+		return forkPoint || null;
+	} catch {
+		return null;
+	}
+}
+
 export async function getWorkspaceChanges(cwd: string): Promise<RuntimeWorkspaceChangesResponse> {
 	const repoRoot = (await getGitStdout(["rev-parse", "--show-toplevel"], cwd)).trim();
 	if (!repoRoot) {
