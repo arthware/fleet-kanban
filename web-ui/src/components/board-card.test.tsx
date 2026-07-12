@@ -122,6 +122,13 @@ function findSpanByExactText(container: HTMLElement, text: string): HTMLSpanElem
 	);
 }
 
+function findPrBadge(
+	container: HTMLElement,
+	href = "https://github.com/cline/kanban/pull/42",
+): HTMLAnchorElement | null {
+	return container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -924,17 +931,142 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("-3");
 	});
 
-	it("links to the stored PR on a review card, opening it in a new tab", async () => {
-		mockWorkspaceSnapshot = {
-			taskId: "task-1",
-			path: "/tmp/fleet-kanban-worktrees/task-1",
-			branch: "feature/pr-link",
-			isDetached: false,
-			headCommit: "abc123",
-			changedFiles: 2,
-			additions: 5,
-			deletions: 1,
-		};
+	it("renders the stored PR as a badge with new-tab link attributes", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const link = findPrBadge(container);
+		expect(link).not.toBeNull();
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+		expect(link?.textContent).toContain("PR #42");
+		expect(link?.className).toContain("inline-flex");
+		expect(link?.className).toContain("border-status-green/30");
+	});
+
+	it("renders the PR badge in the top meta row above the title, not the lower chip row", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						startInPlanMode: true,
+						agentId: "claude",
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const metaRow = container.querySelector<HTMLElement>('[data-testid="board-card-meta-row"]');
+		const chipRow = container.querySelector<HTMLElement>('[data-testid="board-card-chip-row"]');
+		const title = Array.from(container.querySelectorAll("p")).find(
+			(element) => element.textContent?.trim() === "Review API changes",
+		);
+		const prBadge = findPrBadge(container);
+
+		expect(metaRow).toBeInstanceOf(HTMLElement);
+		expect(chipRow).toBeInstanceOf(HTMLElement);
+		expect(prBadge).not.toBeNull();
+		expect(metaRow?.contains(prBadge)).toBe(true);
+		expect(chipRow?.contains(prBadge)).toBe(false);
+		expect(title).toBeInstanceOf(HTMLElement);
+		if (!(metaRow instanceof HTMLElement) || !(title instanceof HTMLElement)) {
+			throw new Error("Expected meta row and title to render.");
+		}
+		expect(metaRow.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("does not render an empty top meta row when the card has no cross-reference chips", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
+		});
+
+		expect(container.querySelector('[data-testid="board-card-meta-row"]')).toBeNull();
+	});
+
+	it("renders the stored PR badge in every board column", async () => {
+		for (const columnId of ["backlog", "in_progress", "review", "done", "trash"] as const) {
+			await act(async () => {
+				root.render(
+					<TooltipProvider>
+						<BoardCard
+							card={createCard({
+								prUrl: "https://github.com/cline/kanban/pull/42",
+								prState: "open",
+								prNumber: 42,
+							})}
+							index={0}
+							columnId={columnId}
+						/>
+					</TooltipProvider>,
+				);
+			});
+
+			expect(findPrBadge(container)).not.toBeNull();
+		}
+	});
+
+	it.each([
+		["open", "PR #42", "lucide-git-pull-request-arrow", "border-status-green/30"],
+		["merged", "PR #42", "lucide-git-merge", "border-status-purple/30"],
+		["closed", "PR #42", "lucide-git-pull-request-closed", "border-status-red/30"],
+		[undefined, "PR #42", "lucide-git-pull-request", "border-border"],
+	] as const)("uses the %s PR badge icon, label, and tint", async (prState, label, iconClass, tintClass) => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState,
+						prNumber: 42,
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const link = findPrBadge(container);
+		expect(link?.textContent).toContain(label);
+		expect(link?.className).toContain(tintClass);
+		expect(link?.querySelector(`svg.${iconClass}`)).toBeInstanceOf(SVGSVGElement);
+	});
+
+	it("renders a plain PR label when the stored PR has no number", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(findPrBadge(container)?.textContent?.trim()).toBe("PR");
+		expect(container.textContent).not.toContain("View PR");
+	});
+
+	it("does not select the card on PR badge mousedown or click", async () => {
+		const onClick = vi.fn();
 
 		await act(async () => {
 			root.render(
@@ -945,76 +1077,27 @@ describe("BoardCard", () => {
 						prNumber: 42,
 					})}
 					index={0}
-					columnId="review"
-					sessionSummary={createSummary("awaiting_review")}
+					columnId="backlog"
+					onClick={onClick}
 				/>,
 			);
 		});
 
-		const link = container.querySelector<HTMLAnchorElement>('a[href="https://github.com/cline/kanban/pull/42"]');
-		expect(link).not.toBeNull();
-		expect(link?.getAttribute("target")).toBe("_blank");
-		expect(link?.getAttribute("rel")).toContain("noopener");
-		expect(link?.textContent).toContain("PR #42");
-	});
-
-	it("renders no PR link on a review card without a stored PR", async () => {
-		mockWorkspaceSnapshot = {
-			taskId: "task-1",
-			path: "/tmp/fleet-kanban-worktrees/task-1",
-			branch: "feature/pr-link",
-			isDetached: false,
-			headCommit: "abc123",
-			changedFiles: 2,
-			additions: 5,
-			deletions: 1,
-		};
-
+		const link = findPrBadge(container);
 		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard()}
-					index={0}
-					columnId="review"
-					sessionSummary={createSummary("awaiting_review")}
-				/>,
-			);
+			link?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+			link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 		});
 
-		expect(container.querySelector("a")).toBeNull();
+		expect(onClick).not.toHaveBeenCalled();
 	});
 
-	it("keeps the PR link on a done card so it survives past review", async () => {
-		mockWorkspaceSnapshot = {
-			taskId: "task-1",
-			path: "/tmp/fleet-kanban-worktrees/task-1",
-			branch: "feature/pr-link",
-			isDetached: false,
-			headCommit: "abc123",
-			changedFiles: 2,
-			additions: 5,
-			deletions: 1,
-		};
-
+	it("renders no PR badge without a stored PR URL", async () => {
 		await act(async () => {
-			root.render(
-				<TooltipProvider>
-					<BoardCard
-						card={createCard({
-							prUrl: "https://github.com/cline/kanban/pull/42",
-							prState: "merged",
-							prNumber: 42,
-						})}
-						index={0}
-						columnId="done"
-					/>
-				</TooltipProvider>,
-			);
+			root.render(<BoardCard card={createCard({ prState: "open", prNumber: 42 })} index={0} columnId="review" />);
 		});
 
-		const link = container.querySelector<HTMLAnchorElement>('a[href="https://github.com/cline/kanban/pull/42"]');
-		expect(link).not.toBeNull();
-		expect(link?.textContent).toContain("PR #42");
+		expect(container.querySelector('a[href*="/pull/"]')).toBeNull();
 	});
 
 	it("shows the latest assistant preview on active task cards", async () => {

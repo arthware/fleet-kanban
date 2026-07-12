@@ -22,6 +22,7 @@ import {
 	formatClineSelectedModelButtonText,
 	resolveClineModelDisplayName,
 } from "@/components/detail-panels/cline-model-picker-options";
+import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
@@ -478,22 +479,6 @@ export function BoardCard({
 					deletions: reviewWorkspaceSnapshot.deletions ?? 0,
 				}
 		: null;
-	// The PR a review/done card's branch led to, captured once server-side. Shown
-	// where the worktree path used to sit in the review-status row.
-	const prLinkLabel = card.prUrl ? (card.prNumber != null ? `PR #${card.prNumber}` : "View PR") : null;
-	const prLink = card.prUrl ? (
-		<a
-			href={card.prUrl}
-			target="_blank"
-			rel="noopener noreferrer"
-			className="font-mono text-text-tertiary hover:text-text-secondary"
-			style={{ marginLeft: 6, textDecoration: "none" }}
-			onMouseDown={(event) => event.stopPropagation()}
-			onClick={(event) => event.stopPropagation()}
-		>
-			{prLinkLabel}
-		</a>
-	) : null;
 	const showReviewGitActions = columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0;
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
 	const cancelAutomaticActionLabel =
@@ -681,6 +666,11 @@ export function BoardCard({
 								isDependencyTarget && "kb-board-card-dependency-target",
 							)}
 						>
+							{card.prUrl ? (
+								<div className="mb-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-meta-row">
+									<PrBadge card={card} />
+								</div>
+							) : null}
 							<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
 								{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
 								<div className="flex-1 min-w-0">
@@ -880,7 +870,7 @@ export function BoardCard({
 								</div>
 							) : null}
 							{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
-								<div className="mt-1 flex min-w-0 items-center gap-1.5">
+								<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
 									{isPlanCard ? (
 										<span
 											className={cn(
@@ -954,7 +944,7 @@ export function BoardCard({
 									</div>
 								</div>
 							) : null}
-							{showWorkspaceStatus && (reviewWorkspacePath || prLink) ? (
+							{showWorkspaceStatus && reviewWorkspacePath ? (
 								<p
 									className="font-mono"
 									style={{
@@ -978,7 +968,6 @@ export function BoardCard({
 													{reviewWorkspacePath}
 												</span>
 											) : null}
-											{prLink}
 										</>
 									) : reviewWorkspaceSnapshot ? (
 										<>
@@ -1003,11 +992,8 @@ export function BoardCard({
 													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
 												</>
 											) : null}
-											{prLink}
 										</>
-									) : (
-										prLink
-									)}
+									) : null}
 								</p>
 							) : null}
 							{showReviewGitActions ? (
