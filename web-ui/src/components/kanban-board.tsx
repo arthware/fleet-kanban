@@ -57,6 +57,7 @@ export function KanbanBoard({
 	onDeleteDependency,
 	onDragEnd,
 	onRequestProgrammaticCardMoveReady,
+	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId,
@@ -88,6 +89,7 @@ export function KanbanBoard({
 	onDeleteDependency?: (dependencyId: string) => void;
 	onDragEnd: (result: DropResult) => void;
 	onRequestProgrammaticCardMoveReady?: (requestMove: RequestProgrammaticCardMove | null) => void;
+	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
@@ -436,6 +438,7 @@ export function KanbanBoard({
 						dependencySourceTaskId={dependencyLinking.draft?.sourceTaskId ?? null}
 						dependencyTargetTaskId={dependencyLinking.draft?.targetTaskId ?? null}
 						isDependencyLinking={dependencyLinking.draft !== null}
+						workspaceId={workspaceId}
 						workspacePath={workspacePath}
 						taskWorktreesRoot={taskWorktreesRoot}
 						defaultClineModelId={defaultClineModelId}

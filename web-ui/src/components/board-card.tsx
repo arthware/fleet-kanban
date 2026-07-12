@@ -17,6 +17,7 @@ import {
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DesignDocBadge } from "@/components/design-doc-badge";
 import {
 	formatClineReasoningEffortLabel,
 	formatClineSelectedModelButtonText,
@@ -279,6 +280,7 @@ export function BoardCard({
 	isDependencySource = false,
 	isDependencyTarget = false,
 	isDependencyLinking = false,
+	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId = null,
@@ -306,6 +308,7 @@ export function BoardCard({
 	isDependencySource?: boolean;
 	isDependencyTarget?: boolean;
 	isDependencyLinking?: boolean;
+	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
@@ -667,10 +670,18 @@ export function BoardCard({
 								isDependencyTarget && "kb-board-card-dependency-target",
 							)}
 						>
-							{card.externalIssue || card.prUrl ? (
-								<div className="mb-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-meta-row">
+							{card.externalIssue || card.prUrl || (workspaceId && workspacePath) ? (
+								<div
+									className="mb-1 flex min-w-0 items-center gap-1.5 empty:hidden"
+									data-testid="board-card-meta-row"
+								>
 									<ExternalIssueBadge issue={card.externalIssue} />
 									<PrBadge card={card} />
+									<DesignDocBadge
+										card={card}
+										workspaceId={workspaceId ?? null}
+										workspacePath={workspacePath}
+									/>
 								</div>
 							) : null}
 							<div className="flex items-center gap-2" style={{ minHeight: 24 }}>

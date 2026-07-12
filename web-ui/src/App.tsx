@@ -1004,6 +1004,7 @@ export default function App(): ReactElement {
 												taskSessions={sessions}
 												tokenUsageById={tokenUsageById}
 												workspacePath={workspacePath}
+												workspaceId={currentProjectId}
 												taskWorktreesRoot={taskWorktreesRoot}
 												onCardSelect={handleCardSelect}
 												onCreateTask={handleOpenCreateTask}
