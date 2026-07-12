@@ -30,6 +30,7 @@ import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage }
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
+import { cardKind, getTaskCompletionPolicyBadgeLabel } from "@/utils/card-completion-policy";
 import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
@@ -562,6 +563,8 @@ export function BoardCard({
 		}
 		return { agentLabel, modelLabel: resolvedModelLabel };
 	}, [agentLabel, resolvedModelLabel]);
+	const isPlanCard = cardKind(card) === "plan";
+	const completionPolicyBadgeLabel = getTaskCompletionPolicyBadgeLabel(card);
 	// Cumulative token usage, derived on read from the agent's own transcript.
 	// The headline counts only real conversational work (input + output); cache
 	// lanes are excluded because re-read context dominates the raw total ~100×
@@ -876,8 +879,20 @@ export function BoardCard({
 									</p>
 								</div>
 							) : null}
-							{taskAgentSettings || tokenUsageChip ? (
+							{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
 								<div className="mt-1 flex min-w-0 items-center gap-1.5">
+									{isPlanCard ? (
+										<span
+											className={cn(
+												"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+												isTrashCard
+													? "border-border text-text-tertiary bg-surface-1"
+													: "border-status-purple/30 bg-status-purple/10 text-status-purple",
+											)}
+										>
+											Plan
+										</span>
+									) : null}
 									{taskAgentSettings ? (
 										<span
 											className={cn(
@@ -907,6 +922,11 @@ export function BoardCard({
 											title={tokenUsageChip.title}
 										>
 											{tokenUsageChip.label}
+										</span>
+									) : null}
+									{completionPolicyBadgeLabel ? (
+										<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+											{completionPolicyBadgeLabel}
 										</span>
 									) : null}
 								</div>
