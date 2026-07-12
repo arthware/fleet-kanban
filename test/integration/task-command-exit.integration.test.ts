@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import type { RuntimeBoardCard, RuntimeBoardData } from "../../src/core/api-contract";
+import { loadWorkspaceState, saveWorkspaceState } from "../../src/state/workspace-state";
 import { ensureTaskWorktreeIfDoesntExist } from "../../src/workspace/task-worktree";
 import { createGitTestEnv } from "../utilities/git-env";
 import {
@@ -50,6 +52,42 @@ function commitAll(cwd: string, message: string): string {
 	runGit(cwd, ["add", "."]);
 	runGit(cwd, ["commit", "-qm", message]);
 	return runGit(cwd, ["rev-parse", "HEAD"]);
+}
+
+function createLargeTaskCard(index: number): RuntimeBoardCard {
+	const paddedPrompt = [
+		`Large stdout regression task ${index}`,
+		"This prompt is intentionally padded so task list emits more than the OS pipe buffer.",
+		`tail-marker-${index}`,
+		"x".repeat(4_000),
+	].join("\n");
+	const timestamp = Date.now() + index;
+	return {
+		id: `large-stdout-task-${index}`,
+		title: `Large stdout regression task ${index}`,
+		prompt: paddedPrompt,
+		startInPlanMode: false,
+		baseRef: "main",
+		createdAt: timestamp,
+		updatedAt: timestamp,
+	};
+}
+
+function createLargeTaskBoard(taskCount: number): RuntimeBoardData {
+	return {
+		columns: [
+			{
+				id: "backlog",
+				title: "Backlog",
+				cards: Array.from({ length: taskCount }, (_, index) => createLargeTaskCard(index)),
+			},
+			{ id: "in_progress", title: "In Progress", cards: [] },
+			{ id: "review", title: "Review", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
+		],
+		dependencies: [],
+	};
 }
 
 async function withHomeEnv<T>(homeDir: string, run: () => Promise<T>): Promise<T> {
@@ -167,7 +205,145 @@ async function runCliCommandAndCollectOutput(options: {
 	};
 }
 
+async function runCliCommandWithInitiallyBackpressuredStdout(options: {
+	args: string[];
+	cwd: string;
+	env: NodeJS.ProcessEnv;
+	resumeStdoutAfterMs: number;
+	timeoutMs?: number;
+}): Promise<{ stdout: string; stderr: string; exitCode: number | null; didExit: boolean }> {
+	const process = spawnSourceCli(options.args, {
+		cwd: options.cwd,
+		env: options.env,
+	});
+
+	let stdout = "";
+	let stderr = "";
+	process.stdout?.pause();
+	process.stderr?.on("data", (chunk: Buffer) => {
+		stderr += chunk.toString();
+	});
+
+	let isCollectingStdout = false;
+	const collectStdout = () => {
+		if (isCollectingStdout) {
+			return;
+		}
+		isCollectingStdout = true;
+		process.stdout?.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString();
+		});
+		process.stdout?.resume();
+	};
+
+	const resumeStdout = setTimeout(collectStdout, options.resumeStdoutAfterMs);
+
+	const didExit = await waitForExit(process, options.timeoutMs ?? 8_000);
+	clearTimeout(resumeStdout);
+	collectStdout();
+	if (!didExit) {
+		process.kill("SIGKILL");
+		process.stdout?.resume();
+	}
+
+	await new Promise<void>((resolve) => {
+		if (!process.stdout || process.stdout.readableEnded) {
+			resolve();
+			return;
+		}
+		process.stdout.once("end", resolve);
+		process.stdout.resume();
+	});
+
+	return {
+		stdout,
+		stderr,
+		exitCode: process.exitCode,
+		didExit,
+	};
+}
+
 describe("source task commands", () => {
+	it("flushes large task list stdout before exiting", { timeout: 60_000 }, async () => {
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-large-stdout-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-large-stdout-");
+
+		try {
+			initGitRepository(projectPath);
+			writeFileSync(join(projectPath, "README.md"), "# Large Stdout Test\n", "utf8");
+			commitAll(projectPath, "init");
+
+			const port = String(await getAvailablePort());
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+			});
+
+			await withHomeEnv(homeDir, async () => {
+				const initialState = await loadWorkspaceState(projectPath);
+				await saveWorkspaceState(projectPath, {
+					board: createLargeTaskBoard(48),
+					sessions: {},
+					expectedRevision: initialState.revision,
+				});
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			try {
+				await waitForServerStart(serverProcess);
+
+				const result = await runCliCommandWithInitiallyBackpressuredStdout({
+					args: ["task", "list", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+					resumeStdoutAfterMs: 2_000,
+				});
+
+				expect(result.didExit, `task list did not exit in time.\nstderr:\n${result.stderr}`).toBe(true);
+				expect(result.exitCode).toBe(0);
+				expect(result.stdout.length).toBeGreaterThan(128 * 1024);
+
+				const payload = JSON.parse(result.stdout) as {
+					ok?: boolean;
+					count?: number;
+					tasks?: Array<{ id?: string; prompt?: string }>;
+				};
+				expect(payload.ok).toBe(true);
+				expect(payload.count).toBe(48);
+				expect(payload.tasks).toHaveLength(48);
+				expect(payload.tasks?.at(-1)?.id).toBe("large-stdout-task-47");
+				expect(payload.tasks?.at(-1)?.prompt).toContain("tail-marker-47");
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("exits after creating a task when the runtime server is already running", { timeout: 60_000 }, async () => {
 		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-exit-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-exit-");
