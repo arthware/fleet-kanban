@@ -650,7 +650,6 @@ const claudeAdapter: AgentSessionAdapter = {
 		}
 		if (
 			input.autonomousModeEnabled &&
-			!input.startInPlanMode &&
 			!hasCliOption(args, "--permission-mode") &&
 			!hasCliOption(args, "--dangerously-skip-permissions")
 		) {
@@ -684,23 +683,14 @@ const claudeAdapter: AgentSessionAdapter = {
 		} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
 			args.push("--continue");
 		}
-		if (input.startInPlanMode) {
-			const withoutImmediateBypass = args.filter((arg) => arg !== "--dangerously-skip-permissions");
-			args.length = 0;
-			args.push(...withoutImmediateBypass);
-			args.push("--permission-mode", "plan");
-		}
-
 		applyAgentModel(args, input.agentModel);
 
 		// The Bash-guard runs whenever this launch bypasses native permission checks
 		// (skip-permissions). It's a PreToolUse hook because hooks still run — and can
 		// still block — under `--dangerously-skip-permissions`, unlike settings.json
-		// permissions.deny prompts. Plan mode strips the bypass above, so it's off there.
+		// permissions.deny prompts.
 		const bashGuardEnabled =
-			input.autonomousModeEnabled === true &&
-			!input.startInPlanMode &&
-			hasCliOption(args, "--dangerously-skip-permissions");
+			input.autonomousModeEnabled === true && hasCliOption(args, "--dangerously-skip-permissions");
 
 		const hooks = resolveHookContext(input);
 		if (hooks) {
@@ -796,13 +786,18 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--append-system-prompt", appendedSystemPrompt);
 		}
 
-		const withPromptLaunch = withPrompt(args, input.prompt, "append");
+		const trimmed = input.prompt.trim();
+		const deferredStartupInput = input.startInPlanMode
+			? toBracketedPasteSubmission(trimmed ? `/plan ${trimmed}` : "/plan")
+			: undefined;
+		const withPromptLaunch = withPrompt(args, input.startInPlanMode ? "" : input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
 				...withPromptLaunch.env,
 				...env,
 			},
+			deferredStartupInput,
 		};
 	},
 };
