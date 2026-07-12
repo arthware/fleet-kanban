@@ -86,6 +86,17 @@ printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
 	}
 }
 
+function installFakeClaudeStub(binDir: string): void {
+	mkdirSync(binDir, { recursive: true });
+	const scriptPath = join(binDir, "claude");
+	const script = `#!/usr/bin/env sh
+printf 'fake claude started\\n'
+sleep 30
+`;
+	writeFileSync(scriptPath, script, "utf8");
+	chmodSync(scriptPath, 0o755);
+}
+
 function readBrowserOpenLog(logPath: string): string[] {
 	if (!existsSync(logPath)) {
 		return [];
@@ -867,6 +878,200 @@ describe("source task commands", () => {
 				expect(cleared.exitCode).toBe(0);
 				const clearedPayload = JSON.parse(cleared.stdout) as { task?: { externalIssue?: unknown } };
 				expect(clearedPayload.task?.externalIssue).toBeUndefined();
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("accepts external issue keys anywhere a single task id is accepted", { timeout: 90_000 }, async () => {
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-issue-ref-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-issue-ref-");
+
+		try {
+			initGitRepository(projectPath);
+			writeFileSync(join(projectPath, "README.md"), "# Task Issue Ref Test\n", "utf8");
+			commitAll(projectPath, "init");
+			runGit(projectPath, ["remote", "add", "origin", "https://github.com/owner/repo.git"]);
+
+			const port = String(await getAvailablePort());
+			const fakeAgentBinDir = join(homeDir, "agent-bin");
+			installFakeClaudeStub(fakeAgentBinDir);
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+				PATH: `${fakeAgentBinDir}:${process.env.PATH ?? ""}`,
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			try {
+				await waitForServerStart(serverProcess);
+
+				const createIssueTask = async (prompt: string, issue: string): Promise<string> => {
+					const created = await runCliCommandAndCollectOutput({
+						args: ["task", "create", "--prompt", prompt, "--issue", issue, "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(
+						created.exitCode,
+						`task create failed.\nstdout:\n${created.stdout}\nstderr:\n${created.stderr}`,
+					).toBe(0);
+					const payload = JSON.parse(created.stdout) as { task?: { id?: string } };
+					expect(payload.task?.id).toEqual(expect.any(String));
+					return payload.task?.id ?? "";
+				};
+
+				const startTaskId = await createIssueTask("Task addressed by Linear start key", "ENG-101");
+				const updateTaskId = await createIssueTask("Task addressed by Linear update key", "ENG-102");
+				await createIssueTask("Task addressed by owner repo done key", "owner/repo#103");
+				await createIssueTask("Task addressed by short GitHub trash key", "#104");
+				await createIssueTask("Task addressed by Linear delete key", "ENG-105");
+				const linkTaskId = await createIssueTask("Task addressed by Linear link key", "ENG-106");
+				const linkedTaskId = await createIssueTask("Task addressed by short GitHub linked key", "#107");
+				await createIssueTask("First ambiguous task", "ENG-108");
+				await createIssueTask("Second ambiguous task", "ENG-108");
+
+				const startByIssue = await runCliCommandAndCollectOutput({
+					args: ["task", "start", "--task-id", "ENG-101", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(
+					startByIssue.exitCode,
+					`task start by issue failed.\nstdout:\n${startByIssue.stdout}\nstderr:\n${startByIssue.stderr}`,
+				).toBe(0);
+				expect(startByIssue.stdout).toContain(`"id": "${startTaskId}"`);
+				expect(startByIssue.stdout).toContain('"column": "in_progress"');
+
+				const updateByIssue = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						"ENG-102",
+						"--prompt",
+						"Updated through issue key",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(updateByIssue.exitCode).toBe(0);
+				expect(updateByIssue.stdout).toContain(`"id": "${updateTaskId}"`);
+				expect(updateByIssue.stdout).toContain('"prompt": "Updated through issue key"');
+
+				const updateByRealId = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						updateTaskId,
+						"--prompt",
+						"Updated through real id",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(updateByRealId.exitCode).toBe(0);
+				expect(updateByRealId.stdout).toContain(`"id": "${updateTaskId}"`);
+				expect(updateByRealId.stdout).toContain('"prompt": "Updated through real id"');
+
+				const doneByIssue = await runCliCommandAndCollectOutput({
+					args: ["task", "done", "--task-id", "owner/repo#103", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(doneByIssue.exitCode).toBe(0);
+				expect(doneByIssue.stdout).toContain('"column": "done"');
+
+				const trashByIssue = await runCliCommandAndCollectOutput({
+					args: ["task", "trash", "--task-id", "#104", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(trashByIssue.exitCode).toBe(0);
+				expect(trashByIssue.stdout).toContain('"column": "trash"');
+
+				const deleteByIssue = await runCliCommandAndCollectOutput({
+					args: ["task", "delete", "--task-id", "ENG-105", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(deleteByIssue.exitCode).toBe(0);
+				expect(deleteByIssue.stdout).toContain('"count": 1');
+
+				const linkByIssues = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"link",
+						"--task-id",
+						"ENG-106",
+						"--linked-task-id",
+						"#107",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(linkByIssues.exitCode).toBe(0);
+				expect(linkByIssues.stdout).toContain(`"backlogTaskId": "${linkTaskId}"`);
+				expect(linkByIssues.stdout).toContain(`"linkedTaskId": "${linkedTaskId}"`);
+
+				const ambiguousUpdate = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						"ENG-108",
+						"--prompt",
+						"Should not be applied",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(ambiguousUpdate.exitCode).not.toBe(0);
+				const ambiguousPayload = JSON.parse(ambiguousUpdate.stdout) as { error?: string };
+				expect(ambiguousPayload.error).toContain('Multiple cards reference issue "ENG-108":');
+
+				const listed = await runCliCommandAndCollectOutput({
+					args: ["task", "list", "--column", "backlog", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(listed.exitCode).toBe(0);
+				expect(listed.stdout).not.toContain("Should not be applied");
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);
