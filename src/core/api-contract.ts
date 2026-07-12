@@ -60,6 +60,19 @@ export const runtimeWorkspaceFileSearchResponseSchema = z.object({
 });
 export type RuntimeWorkspaceFileSearchResponse = z.infer<typeof runtimeWorkspaceFileSearchResponseSchema>;
 
+export const runtimeDesignDocRequestSchema = z.object({
+	taskId: z.string(),
+	externalIssueKey: z.string().optional(),
+});
+export type RuntimeDesignDocRequest = z.infer<typeof runtimeDesignDocRequestSchema>;
+
+export const runtimeDesignDocResponseSchema = z.object({
+	exists: z.boolean(),
+	path: z.string().optional(),
+	content: z.string().optional(),
+});
+export type RuntimeDesignDocResponse = z.infer<typeof runtimeDesignDocResponseSchema>;
+
 export const runtimeSlashCommandSchema = z.object({
 	name: z.string(),
 	instructions: z.string(),

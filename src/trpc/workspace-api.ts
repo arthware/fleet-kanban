@@ -15,6 +15,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import {
+	parseDesignDocRequest,
 	parseGitCheckoutRequest,
 	parseTaskDurabilityRequest,
 	parseWorktreeDeleteRequest,
@@ -22,6 +23,7 @@ import {
 } from "../core/api-validation";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
+import { readTaskDesignDoc } from "../workspace/design-doc";
 import {
 	createEmptyWorkspaceChangesResponse,
 	getWorkspaceChanges,
@@ -406,6 +408,14 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 				query,
 				files,
 			} satisfies RuntimeWorkspaceFileSearchResponse;
+		},
+		loadDesignDoc: async (workspaceScope, input) => {
+			const body = parseDesignDocRequest(input);
+			return await readTaskDesignDoc({
+				projectRoot: workspaceScope.workspacePath,
+				taskId: body.taskId,
+				externalIssueKey: body.externalIssueKey,
+			});
 		},
 		loadState: async (workspaceScope) => {
 			return await deps.buildWorkspaceStateSnapshot(workspaceScope.workspaceId, workspaceScope.workspacePath);

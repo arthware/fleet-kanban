@@ -11,6 +11,9 @@ import type { ReviewTaskWorkspaceSnapshot } from "@/types";
 let mockWorkspaceSnapshot: ReviewTaskWorkspaceSnapshot | undefined;
 let mockMeasureWidths = [240, 240, 240];
 let mockMeasureCallCount = 0;
+const trpcMocks = vi.hoisted(() => ({
+	getDesignDoc: vi.fn(),
+}));
 
 vi.mock("@hello-pangea/dnd", () => ({
 	Draggable: ({
@@ -31,6 +34,16 @@ vi.mock("@hello-pangea/dnd", () => ({
 
 vi.mock("@/stores/workspace-metadata-store", () => ({
 	useTaskWorkspaceSnapshotValue: () => mockWorkspaceSnapshot,
+}));
+
+vi.mock("@/runtime/trpc-client", () => ({
+	getRuntimeTrpcClient: () => ({
+		workspace: {
+			getDesignDoc: {
+				query: trpcMocks.getDesignDoc,
+			},
+		},
+	}),
 }));
 
 vi.mock("@/utils/react-use", () => ({
@@ -168,6 +181,8 @@ describe("BoardCard", () => {
 		mockWorkspaceSnapshot = undefined;
 		mockMeasureWidths = [240, 240, 240];
 		mockMeasureCallCount = 0;
+		trpcMocks.getDesignDoc.mockReset();
+		trpcMocks.getDesignDoc.mockResolvedValue({ exists: false });
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1253,6 +1268,71 @@ describe("BoardCard", () => {
 		});
 
 		expect(container.querySelector('a[href*="/pull/"]')).toBeNull();
+	});
+
+	it("does not show a design badge when no matching design doc exists", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="backlog"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+				/>,
+			);
+		});
+
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		expect(trpcMocks.getDesignDoc).toHaveBeenCalledWith({ taskId: "task-1" });
+		expect(container.textContent).not.toContain("Design");
+	});
+
+	it("shows a design badge and opens the rendered markdown doc when a matching design doc exists", async () => {
+		trpcMocks.getDesignDoc.mockResolvedValue({
+			exists: true,
+			path: "/tmp/repo/docs/design/ENG-123-api-review.md",
+			content: "# API Review\n\nDesign details are ready.",
+		});
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "linear",
+							key: "ENG-123",
+							raw: "ENG-123",
+						},
+					})}
+					index={0}
+					columnId="backlog"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+				/>,
+			);
+		});
+
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const button = Array.from(container.querySelectorAll("button")).find(
+			(candidate) => candidate.textContent?.trim() === "Design",
+		);
+		expect(button).toBeInstanceOf(HTMLButtonElement);
+		expect(trpcMocks.getDesignDoc).toHaveBeenCalledWith({ taskId: "task-1", externalIssueKey: "ENG-123" });
+
+		await act(async () => {
+			button?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+			button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		});
+
+		expect(document.body.textContent).toContain("API Review");
+		expect(document.body.textContent).toContain("Design details are ready.");
 	});
 
 	it("shows the latest assistant preview on active task cards", async () => {

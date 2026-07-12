@@ -37,6 +37,8 @@ import type {
 	RuntimeConfigResponse,
 	RuntimeConfigSaveRequest,
 	RuntimeDebugResetAllStateResponse,
+	RuntimeDesignDocRequest,
+	RuntimeDesignDocResponse,
 	RuntimeDirectoryListRequest,
 	RuntimeDirectoryListResponse,
 	RuntimeFeaturebaseTokenResponse,
@@ -134,6 +136,8 @@ import {
 	runtimeConfigResponseSchema,
 	runtimeConfigSaveRequestSchema,
 	runtimeDebugResetAllStateResponseSchema,
+	runtimeDesignDocRequestSchema,
+	runtimeDesignDocResponseSchema,
 	runtimeDirectoryListRequestSchema,
 	runtimeDirectoryListResponseSchema,
 	runtimeFeaturebaseTokenResponseSchema,
@@ -358,6 +362,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorkspaceFileSearchRequest,
 		) => Promise<RuntimeWorkspaceFileSearchResponse>;
+		loadDesignDoc: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeDesignDocRequest,
+		) => Promise<RuntimeDesignDocResponse>;
 		loadState: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceStateResponse>;
 		notifyStateUpdated: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceStateNotifyResponse>;
 		saveState: (
@@ -695,6 +703,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeWorkspaceFileSearchResponseSchema)
 			.query(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.searchFiles(ctx.workspaceScope, input);
+			}),
+		getDesignDoc: workspaceProcedure
+			.input(runtimeDesignDocRequestSchema)
+			.output(runtimeDesignDocResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.loadDesignDoc(ctx.workspaceScope, input);
 			}),
 		getState: workspaceProcedure.output(runtimeWorkspaceStateResponseSchema).query(async ({ ctx }) => {
 			return await ctx.workspaceApi.loadState(ctx.workspaceScope);

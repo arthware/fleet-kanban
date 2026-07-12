@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary, RuntimeWorkspaceChangesResponse } from "../../../src/core/api-contract";
 
@@ -31,6 +34,24 @@ vi.mock("../../../src/workspace/get-workspace-changes.js", () => ({
 
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 
+let tempDirs: string[] = [];
+
+async function createTempProjectRoot(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "fleet-kanban-workspace-api-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
+function createWorkspaceApiForTests(): ReturnType<typeof createWorkspaceApi> {
+	return createWorkspaceApi({
+		ensureTerminalManagerForWorkspace: vi.fn(),
+		getScopedClineTaskSessionService: vi.fn(),
+		broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+		broadcastRuntimeProjectsUpdated: vi.fn(),
+		buildWorkspaceStateSnapshot: vi.fn(),
+	});
+}
+
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
 		taskId: "task-1",
@@ -59,6 +80,11 @@ function createChangesResponse(): RuntimeWorkspaceChangesResponse {
 		files: [],
 	};
 }
+
+afterEach(async () => {
+	await Promise.all(tempDirs.map(async (dir) => await rm(dir, { recursive: true, force: true })));
+	tempDirs = [];
+});
 
 describe("createWorkspaceApi loadChanges", () => {
 	beforeEach(() => {
@@ -384,5 +410,64 @@ describe("createWorkspaceApi loadChanges", () => {
 		expect(response).toBe(emptyResponse);
 		expect(workspaceChangesMocks.createEmptyWorkspaceChangesResponse).toHaveBeenCalledWith("/tmp/repo");
 		expect(workspaceChangesMocks.getWorkspaceChanges).not.toHaveBeenCalled();
+	});
+});
+
+describe("createWorkspaceApi loadDesignDoc", () => {
+	it("returns exists false when the design directory is missing or no file matches", async () => {
+		const projectRoot = await createTempProjectRoot();
+		const api = createWorkspaceApiForTests();
+
+		await expect(
+			api.loadDesignDoc(
+				{
+					workspaceId: "workspace-1",
+					workspacePath: projectRoot,
+				},
+				{
+					taskId: "05506",
+				},
+			),
+		).resolves.toEqual({ exists: false });
+
+		await mkdir(join(projectRoot, "docs", "design"), { recursive: true });
+
+		await expect(
+			api.loadDesignDoc(
+				{
+					workspaceId: "workspace-1",
+					workspacePath: projectRoot,
+				},
+				{
+					taskId: "05506",
+				},
+			),
+		).resolves.toEqual({ exists: false });
+	});
+
+	it("returns the first sorted matching markdown file content", async () => {
+		const projectRoot = await createTempProjectRoot();
+		const designDir = join(projectRoot, "docs", "design");
+		await mkdir(designDir, { recursive: true });
+		await writeFile(join(designDir, "ENG-123-z-later.md"), "later");
+		await writeFile(join(designDir, "ENG-123-a-first.md"), "# First");
+		const api = createWorkspaceApiForTests();
+
+		const result = await api.loadDesignDoc(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: projectRoot,
+			},
+			{
+				taskId: "05506",
+				externalIssueKey: "ENG-123",
+			},
+		);
+
+		expect(result).toEqual({
+			exists: true,
+			path: join(designDir, "ENG-123-a-first.md"),
+			content: "# First",
+		});
 	});
 });
