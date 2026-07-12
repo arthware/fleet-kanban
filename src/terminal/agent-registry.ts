@@ -8,6 +8,9 @@ import type {
 } from "../core/api-contract";
 import { isBinaryAvailableOnPath } from "./command-discovery";
 
+const TEST_AGENT_BINARY_ENV = "KANBAN_TEST_AGENT_BINARY";
+const TEST_AGENT_ARGS_ENV = "KANBAN_TEST_AGENT_ARGS_JSON";
+
 export interface ResolvedAgentCommand {
 	agentId: RuntimeAgentId;
 	label: string;
@@ -36,6 +39,18 @@ function joinCommand(binary: string, args: string[]): string {
 		return binary;
 	}
 	return [binary, ...args.map(quoteForDisplay)].join(" ");
+}
+
+function parseTestAgentArgs(value: string | undefined): string[] {
+	if (!value) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed.filter((arg): arg is string => typeof arg === "string") : [];
+	} catch {
+		return [];
+	}
 }
 
 function parseBooleanEnvValue(value: string | undefined): boolean {
@@ -83,6 +98,17 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 	const selected = getRuntimeLaunchSupportedAgentCatalog().find((entry) => entry.id === runtimeConfig.selectedAgentId);
 	if (!selected) {
 		return null;
+	}
+	const testAgentBinary = process.env[TEST_AGENT_BINARY_ENV]?.trim();
+	if (testAgentBinary && selected.id !== "cline") {
+		const args = parseTestAgentArgs(process.env[TEST_AGENT_ARGS_ENV]);
+		return {
+			agentId: selected.id,
+			label: selected.label,
+			command: joinCommand(testAgentBinary, args),
+			binary: testAgentBinary,
+			args,
+		};
 	}
 	const defaultArgs = getDefaultArgs(selected.id);
 	const command = joinCommand(selected.binary, defaultArgs);
