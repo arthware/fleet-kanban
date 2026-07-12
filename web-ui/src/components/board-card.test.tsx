@@ -116,6 +116,12 @@ function createSummary(
 	};
 }
 
+function findSpanByExactText(container: HTMLElement, text: string): HTMLSpanElement | undefined {
+	return Array.from(container.querySelectorAll("span")).find(
+		(element): element is HTMLSpanElement => element.textContent?.trim() === text,
+	);
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -411,6 +417,75 @@ describe("BoardCard", () => {
 
 		expect(container.textContent).not.toContain("claude-haiku-4-5");
 		expect(container.textContent).not.toContain("default");
+	});
+
+	it("shows a purple Plan badge for start-in-plan-mode cards", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ startInPlanMode: true })} index={0} columnId="backlog" />);
+		});
+
+		const planBadge = findSpanByExactText(container, "Plan");
+		expect(planBadge).toBeDefined();
+		expect(planBadge?.className).toContain("border-status-purple/30");
+		expect(planBadge?.className).toContain("text-status-purple");
+	});
+
+	it("does not show a kind badge for build cards", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ startInPlanMode: false })} index={0} columnId="backlog" />);
+		});
+
+		expect(findSpanByExactText(container, "Plan")).toBeUndefined();
+	});
+
+	it("shows an Auto-PR completion-policy badge for build cards configured to self-open a PR", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ autoReviewEnabled: true, autoReviewMode: "pr" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(findSpanByExactText(container, "Auto-PR")).toBeDefined();
+	});
+
+	it("shows an Auto-commit completion-policy badge for build cards configured to self-commit", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ autoReviewEnabled: true, autoReviewMode: "commit" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(findSpanByExactText(container, "Auto-commit")).toBeDefined();
+	});
+
+	it("does not show a completion-policy badge for manual build cards", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ autoReviewEnabled: false })} index={0} columnId="backlog" />);
+		});
+
+		expect(container.textContent).not.toContain("Auto-");
+	});
+
+	it("does not show a completion-policy badge when auto-review data is absent", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ autoReviewEnabled: undefined, autoReviewMode: undefined })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		expect(container.textContent).not.toContain("Auto-");
 	});
 
 	it("shows formatted agent override details with model name and reasoning effort", async () => {
