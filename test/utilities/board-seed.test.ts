@@ -12,8 +12,8 @@ import {
 } from "./board-seed";
 import { createTempDir } from "./temp-dir";
 
-describe("board seed helper", () => {
-	it("creates a schema-valid board with a stub card and linked backlog cards", () => {
+describe("GIVEN the stub lifecycle board seed helper", () => {
+	it("WHEN it creates a board THEN the board is schema-valid and contains the stub card plus linked backlog cards", () => {
 		const board = createStubLifecycleBoard();
 		expect(runtimeBoardDataSchema.parse(board)).toEqual(board);
 		expect(board.columns.find((column) => column.id === "backlog")?.cards.map((card) => card.id)).toEqual([
@@ -29,7 +29,7 @@ describe("board seed helper", () => {
 		]);
 	});
 
-	it("writes board.json, sessions.json, and meta.json under the isolated CLINE_HOME layout", () => {
+	it("WHEN it seeds an isolated home THEN board, session, and meta state are written under the runtime workspace layout", () => {
 		const temp = createTempDir("kanban-board-seed-");
 		try {
 			seedIsolatedBoardState({ homeDir: temp.path, workspaceId: "pet-repo" });
