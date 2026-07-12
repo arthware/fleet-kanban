@@ -223,7 +223,8 @@ describe("native-agent helpers", () => {
 		).toBe(true);
 	});
 
-	it("ignores non-launch agents when checking native CLI availability", () => {
+	it("given Gemini is launch-supported and installed, when checking native CLI availability, then task agent setup is satisfied", () => {
+		// given
 		const config = createRuntimeConfigResponse("claude");
 		config.agents = [
 			{
@@ -236,7 +237,12 @@ describe("native-agent helpers", () => {
 				configured: false,
 			},
 		];
-		expect(isTaskAgentSetupSatisfied(config)).toBe(false);
+
+		// when
+		const setupSatisfied = isTaskAgentSetupSatisfied(config);
+
+		// then
+		expect(setupSatisfied).toBe(true);
 	});
 
 	it("selects the latest incoming chat message only for the matching task", () => {

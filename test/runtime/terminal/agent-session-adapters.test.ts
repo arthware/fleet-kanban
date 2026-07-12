@@ -268,17 +268,28 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(settings.hooks?.PostToolUseFailure).toBeDefined();
 	});
 
-	it("writes Gemini settings with AfterTool mapped to to_in_progress", async () => {
+	it("given a card selects Gemini CLI, when preparing launch with a prompt and hooks, then Gemini runs non-interactively with hook state forwarding", async () => {
+		// given
 		setupTempHome();
-		await prepareAgentLaunch({
+		const prompt = "Implement the billing export";
+
+		// when
+		const launch = await prepareAgentLaunch({
 			taskId: "task-1",
 			agentId: "gemini",
 			binary: "gemini",
 			args: [],
 			cwd: "/tmp",
-			prompt: "",
+			prompt,
 			workspaceId: "workspace-1",
 		});
+
+		// then
+		expect(launch.args).toEqual(["-i", prompt]);
+		expect(launch.deferredStartupInput).toBeUndefined();
+		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-1");
+		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
+		expect(launch.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toContain("settings.json");
 
 		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "gemini", "settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
@@ -584,6 +595,25 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(postToolUseScript).toContain("plan_mode_respond");
 	});
 
+	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
+		// given
+		setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+
+		// then
+		expect(launch.args).toEqual(expect.arrayContaining(["--resume", "latest"]));
+	});
+
 	it("adds resume flags for each agent", async () => {
 		setupTempHome();
 
@@ -608,17 +638,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(claudeLaunch.args).toContain("--continue");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(geminiLaunch.args).toEqual(expect.arrayContaining(["--resume", "latest"]));
 
 		const opencodeLaunch = await prepareAgentLaunch({
 			taskId: "task-opencode",
@@ -706,6 +725,25 @@ describe("prepareAgentLaunch hook strategies", () => {
 		}
 	});
 
+	it("given Gemini autonomous mode is enabled, when preparing launch, then Gemini receives the yolo flag", async () => {
+		// given
+		setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini-auto",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+		});
+
+		// then
+		expect(launch.args).toContain("--yolo");
+	});
+
 	it("applies autonomous mode flags in adapters for non-droid CLIs", async () => {
 		setupTempHome();
 
@@ -734,17 +772,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini-auto",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(geminiLaunch.args).toContain("--yolo");
 
 		const kiroLaunch = await prepareAgentLaunch({
 			taskId: "task-kiro-auto",

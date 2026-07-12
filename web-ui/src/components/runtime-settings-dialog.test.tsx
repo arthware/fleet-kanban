@@ -89,6 +89,7 @@ vi.mock("@runtime-agent-catalog", () => ({
 		{ id: "cline", label: "Cline", binary: "cline" },
 		{ id: "claude", label: "Claude Code", binary: "claude" },
 		{ id: "cursor", label: "Cursor Agent", binary: "cursor-agent" },
+		{ id: "gemini", label: "Gemini CLI", binary: "gemini" },
 	]),
 }));
 
@@ -194,6 +195,13 @@ const savedClineOauthConfig = {
 			label: "Claude Code",
 			binary: "claude",
 			command: "claude",
+			installed: true,
+		},
+		{
+			id: "gemini",
+			label: "Gemini CLI",
+			binary: "gemini",
+			command: "gemini",
 			installed: true,
 		},
 	],
@@ -309,6 +317,28 @@ describe("RuntimeSettingsDialog", () => {
 		// then
 		expect(document.body.textContent).toContain("Cursor Agent");
 		expect(document.body.textContent).toContain("cursor-agent");
+	});
+
+	it("given Gemini is launch-supported, when settings render the agent list, then Gemini appears as a selectable agent", async () => {
+		// given
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		// when
+		const geminiAgentRow = Array.from(document.body.querySelectorAll("label, div, span")).find((element) =>
+			element.textContent?.includes("Gemini CLI"),
+		);
+
+		// then
+		expect(geminiAgentRow).toBeTruthy();
 	});
 
 	it("calls the layout reset callback when reset layout is clicked", async () => {
