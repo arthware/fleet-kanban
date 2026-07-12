@@ -74,11 +74,8 @@ export type RuntimeSlashCommandsResponse = z.infer<typeof runtimeSlashCommandsRe
 export const runtimeAgentIdSchema = z.enum(["claude", "codex", "gemini", "opencode", "droid", "kiro", "cline"]);
 export type RuntimeAgentId = z.infer<typeof runtimeAgentIdSchema>;
 
-const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "trash"]);
-export const runtimeBoardColumnIdSchema = z.preprocess(
-	(val) => (val === "done" ? "trash" : val),
-	runtimeBoardColumnIdEnum,
-);
+const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "done", "trash"]);
+export const runtimeBoardColumnIdSchema = runtimeBoardColumnIdEnum;
 export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdEnum>;
 
 const runtimeTaskAutoReviewModeEnum = z.enum(["commit", "pr"]);
@@ -129,6 +126,24 @@ function normalizeRuntimeTaskClineSettings(input: {
 	};
 }
 
+// The lifecycle state of the GitHub PR a card's branch led to. Mirrors the
+// CardPrState union produced by `resolveCardPrUrl` (src/workspace/card-pr-url).
+export const runtimeCardPrStateSchema = z.enum(["open", "merged", "closed"]);
+export type RuntimeCardPrState = z.infer<typeof runtimeCardPrStateSchema>;
+
+// A single external issue this card corresponds to (Linear or GitHub), for
+// cross-linking the board to the source of record. Optional and informational.
+export const runtimeExternalIssueProviderSchema = z.enum(["linear", "github"]);
+export type RuntimeExternalIssueProvider = z.infer<typeof runtimeExternalIssueProviderSchema>;
+
+export const runtimeExternalIssueSchema = z.object({
+	provider: runtimeExternalIssueProviderSchema,
+	key: z.string(),
+	url: z.string().optional(),
+	raw: z.string(),
+});
+export type RuntimeExternalIssue = z.infer<typeof runtimeExternalIssueSchema>;
+
 export const runtimeBoardCardSchema = z
 	.object({
 		id: z.string(),
@@ -144,6 +159,15 @@ export const runtimeBoardCardSchema = z
 		// native --model flag so mechanical cards can run a cheaper model. Optional
 		// so a board.json written before this field existed still parses.
 		agentModel: z.string().optional(),
+		// The GitHub PR a review/done card's branch led to. Captured once when the
+		// PR is first detected (see workspace-metadata-monitor) and persisted onto
+		// the card so the board can link to it without querying `gh` at render time
+		// or on every poll. Optional so a board.json written before these fields
+		// existed still parses.
+		prUrl: z.string().optional(),
+		prState: runtimeCardPrStateSchema.optional(),
+		prNumber: z.number().int().optional(),
+		externalIssue: runtimeExternalIssueSchema.optional(),
 		clineSettings: runtimeTaskClineSettingsSchema.optional(),
 		clineProviderId: z.string().optional(),
 		clineModelId: z.string().optional(),
@@ -189,10 +213,25 @@ export const runtimeBoardDependencySchema = z.object({
 });
 export type RuntimeBoardDependency = z.infer<typeof runtimeBoardDependencySchema>;
 
-export const runtimeBoardDataSchema = z.object({
-	columns: z.array(runtimeBoardColumnSchema),
-	dependencies: z.array(runtimeBoardDependencySchema).default([]),
-});
+export const runtimeBoardDataSchema = z
+	.object({
+		columns: z.array(runtimeBoardColumnSchema),
+		dependencies: z.array(runtimeBoardDependencySchema).default([]),
+	})
+	.transform((board) => {
+		const hasDoneColumn = board.columns.some((column) => column.id === "done");
+		const hasTrashColumn = board.columns.some((column) => column.id === "trash");
+		if (hasDoneColumn || !hasTrashColumn) {
+			return board;
+		}
+		return {
+			...board,
+			columns: [
+				...board.columns.map((column) => (column.id === "trash" ? { ...column, id: "done" as const } : column)),
+				{ id: "trash" as const, title: "Trash", cards: [] },
+			],
+		};
+	});
 export type RuntimeBoardData = z.infer<typeof runtimeBoardDataSchema>;
 
 export const runtimeGitRepositoryInfoSchema = z.object({
@@ -348,6 +387,7 @@ export const runtimeProjectTaskCountsSchema = z.object({
 	backlog: z.number(),
 	in_progress: z.number(),
 	review: z.number(),
+	done: z.number(),
 	trash: z.number(),
 });
 export type RuntimeProjectTaskCounts = z.infer<typeof runtimeProjectTaskCountsSchema>;
@@ -585,17 +625,57 @@ export const runtimeWorktreeEnsureResponseSchema = z.union([
 ]);
 export type RuntimeWorktreeEnsureResponse = z.infer<typeof runtimeWorktreeEnsureResponseSchema>;
 
+// "Is this card's work durably saved?" — the assessment that gates a card
+// becoming Done and its worktree being removed. Mirrors the TaskWorkDurability*
+// types in src/workspace/durable-save.ts, which owns the classification logic.
+export const runtimeTaskWorkDurabilityStatusSchema = z.enum([
+	"no_worktree",
+	"clean_and_landed",
+	"merged",
+	"uncommitted_changes",
+	"unlanded_commits",
+	"awaiting_merge",
+	"indeterminate",
+]);
+export type RuntimeTaskWorkDurabilityStatus = z.infer<typeof runtimeTaskWorkDurabilityStatusSchema>;
+
+export const runtimeTaskWorkDurabilityAssessmentSchema = z.object({
+	durable: z.boolean(),
+	status: runtimeTaskWorkDurabilityStatusSchema,
+	detail: z.string(),
+});
+export type RuntimeTaskWorkDurabilityAssessment = z.infer<typeof runtimeTaskWorkDurabilityAssessmentSchema>;
+
 export const runtimeWorktreeDeleteRequestSchema = z.object({
 	taskId: z.string(),
+	// Explicit Discard: remove the worktree even when its work is not durably
+	// saved. Absent/false means the durability gate is enforced.
+	discard: z.boolean().optional(),
 });
 export type RuntimeWorktreeDeleteRequest = z.infer<typeof runtimeWorktreeDeleteRequestSchema>;
 
 export const runtimeWorktreeDeleteResponseSchema = z.object({
 	ok: z.boolean(),
 	removed: z.boolean(),
+	// True when the delete was refused because the work is not durably saved and
+	// the caller did not explicitly Discard. The worktree is retained.
+	blocked: z.boolean().optional(),
+	durability: runtimeTaskWorkDurabilityAssessmentSchema.optional(),
 	error: z.string().optional(),
 });
 export type RuntimeWorktreeDeleteResponse = z.infer<typeof runtimeWorktreeDeleteResponseSchema>;
+
+export const runtimeTaskDurabilityRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeTaskDurabilityRequest = z.infer<typeof runtimeTaskDurabilityRequestSchema>;
+
+export const runtimeTaskDurabilityResponseSchema = z.object({
+	ok: z.literal(true),
+	taskId: z.string(),
+	durability: runtimeTaskWorkDurabilityAssessmentSchema,
+});
+export type RuntimeTaskDurabilityResponse = z.infer<typeof runtimeTaskDurabilityResponseSchema>;
 
 export const runtimeTaskWorkspaceInfoRequestSchema = z.object({
 	taskId: z.string(),
@@ -1103,6 +1183,39 @@ export const runtimeTaskTranscriptResponseSchema = z.object({
 	error: z.string().optional(),
 });
 export type RuntimeTaskTranscriptResponse = z.infer<typeof runtimeTaskTranscriptResponseSchema>;
+
+/**
+ * One normalized token-usage total per card, derived on read from the agent's
+ * own transcript (never separately tracked). Field names/meanings deliberately
+ * match Cline's `SessionAccumulatedUsage` (the SDK source of truth) so the Cline
+ * path can pass through — `cacheCreationTokens` is Cline's `cacheWriteTokens`
+ * renamed (prompt-cache writes; from Claude's `cache_creation_input_tokens`).
+ * `costUsd` is `null` until a model price table lands (a later card); the four
+ * token fields are counted independently and never subtracted from one another.
+ */
+export const runtimeTaskTokenUsageSchema = z.object({
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	cacheReadTokens: z.number(),
+	cacheCreationTokens: z.number(),
+	costUsd: z.number().nullable(),
+});
+export type RuntimeTaskTokenUsage = z.infer<typeof runtimeTaskTokenUsageSchema>;
+
+export const runtimeTaskTokenUsageRequestSchema = z.object({
+	taskIds: z.array(z.string()),
+});
+export type RuntimeTaskTokenUsageRequest = z.infer<typeof runtimeTaskTokenUsageRequestSchema>;
+
+export const runtimeTaskTokenUsageResponseSchema = z.object({
+	ok: z.boolean(),
+	// One entry per requested task id: the normalized usage, or `null` when the
+	// card has no resolvable session (or no usage on disk yet). Keyed by task id
+	// so a single round-trip covers every currently-rendered card.
+	usage: z.record(z.string(), runtimeTaskTokenUsageSchema.nullable()),
+	error: z.string().optional(),
+});
+export type RuntimeTaskTokenUsageResponse = z.infer<typeof runtimeTaskTokenUsageResponseSchema>;
 
 export const runtimeTaskChatSendRequestSchema = z.object({
 	taskId: z.string(),

@@ -53,7 +53,8 @@ function createBoard(): BoardData {
 			},
 			{ id: "in_progress", title: "In Progress", cards: [] },
 			{ id: "review", title: "Review", cards: [] },
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies: [],
 	};
@@ -69,6 +70,9 @@ interface HookSnapshot {
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleStartTask: (taskId: string) => void;
 	handleCardSelect: (taskId: string) => void;
+	handleDragEnd: ReturnType<typeof useBoardInteractions>["handleDragEnd"];
+	handleMoveDoneCardToTrash: (taskId: string) => void;
+	handleMoveReviewCardToTrash: (taskId: string) => void;
 }
 
 function createRect(width: number, height: number): DOMRect {
@@ -98,7 +102,7 @@ function HookHarness({
 	setBoard: Dispatch<SetStateAction<BoardData>>;
 	ensureTaskWorkspace: UseTaskSessionsResult["ensureTaskWorkspace"];
 	startTaskSession: UseTaskSessionsResult["startTaskSession"];
-	selectedCard?: { card: BoardCard; column: { id: "backlog" | "in_progress" | "review" | "trash" } } | null;
+	selectedCard?: { card: BoardCard; column: { id: "backlog" | "in_progress" | "review" | "done" | "trash" } } | null;
 	setSelectedTaskIdOverride?: Dispatch<SetStateAction<string | null>>;
 	onSnapshot?: (snapshot: HookSnapshot) => void;
 }): null {
@@ -134,8 +138,19 @@ function HookHarness({
 			handleRestoreTaskFromTrash: actions.handleRestoreTaskFromTrash,
 			handleStartTask: actions.handleStartTask,
 			handleCardSelect: actions.handleCardSelect,
+			handleDragEnd: actions.handleDragEnd,
+			handleMoveDoneCardToTrash: actions.handleMoveDoneCardToTrash,
+			handleMoveReviewCardToTrash: actions.handleMoveReviewCardToTrash,
 		});
-	}, [actions.handleCardSelect, actions.handleRestoreTaskFromTrash, actions.handleStartTask, onSnapshot]);
+	}, [
+		actions.handleCardSelect,
+		actions.handleDragEnd,
+		actions.handleMoveDoneCardToTrash,
+		actions.handleMoveReviewCardToTrash,
+		actions.handleRestoreTaskFromTrash,
+		actions.handleStartTask,
+		onSnapshot,
+	]);
 
 	return null;
 }
@@ -453,7 +468,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -507,7 +523,10 @@ describe("useBoardInteractions", () => {
 			createdAt: trashTask.createdAt,
 		});
 		expect(ensureTaskWorkspace).toHaveBeenCalledWith(expectedTask);
-		expect(startTaskSession).toHaveBeenCalledWith(expectedTask, { resumeFromTrash: true });
+		expect(startTaskSession).toHaveBeenCalledWith(expectedTask, {
+			resumeFromTrash: true,
+			resumeMode: "fresh",
+		});
 		expect(showAppToastMock).toHaveBeenCalledWith({
 			intent: "warning",
 			icon: "warning-sign",
@@ -559,7 +578,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -646,7 +666,8 @@ describe("useBoardInteractions", () => {
 				{ id: "backlog", title: "Backlog", cards: [] },
 				{ id: "in_progress", title: "In Progress", cards: [] },
 				{ id: "review", title: "Review", cards: [] },
-				{ id: "trash", title: "Done", cards: [trashTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [trashTask] },
 			],
 			dependencies: [],
 		};
@@ -676,5 +697,221 @@ describe("useBoardInteractions", () => {
 		});
 
 		expect(setSelectedTaskId).not.toHaveBeenCalled();
+	});
+
+	it("moves a review card to done without invoking the trash cleanup workflow", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		useProgrammaticCardMovesMock.mockReturnValue({
+			handleProgrammaticCardMoveReady: () => {},
+			setRequestMoveTaskToTrashHandler: () => {},
+			tryProgrammaticCardMove: () => "unavailable",
+			consumeProgrammaticCardMove: () => ({}),
+			resolvePendingProgrammaticTrashMove: () => {},
+			waitForProgrammaticCardMoveAvailability: async () => {},
+			resetProgrammaticCardMoves: () => {},
+			requestMoveTaskToTrashWithAnimation: async () => {},
+			programmaticCardMoveCycle: 0,
+		});
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		useLinkedBacklogTaskActionsMock.mockReturnValue({
+			handleCreateDependency: () => {},
+			handleDeleteDependency: () => {},
+			confirmMoveTaskToTrash: async () => {},
+			requestMoveTaskToTrash,
+		});
+
+		const reviewTask = createTask("task-review", "Review task", 2);
+		let currentBoard: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [reviewTask] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		};
+		const setBoard = vi.fn<Dispatch<SetStateAction<BoardData>>>((nextBoard) => {
+			if (typeof nextBoard === "function") {
+				currentBoard = nextBoard(currentBoard);
+				return;
+			}
+			currentBoard = nextBoard;
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={currentBoard}
+					setBoard={setBoard}
+					ensureTaskWorkspace={async () => ({ ok: true as const })}
+					startTaskSession={async () => ({ ok: true as const })}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (!latestSnapshot) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			latestSnapshot!.handleMoveReviewCardToTrash("task-review");
+			await Promise.resolve();
+		});
+
+		expect(currentBoard.columns.find((column) => column.id === "review")?.cards).toEqual([]);
+		expect(currentBoard.columns.find((column) => column.id === "done")?.cards.map((card) => card.id)).toEqual([
+			"task-review",
+		]);
+		expect(currentBoard.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("archives a done card through the trash cleanup workflow", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+		const requestMoveTaskToTrashWithAnimation = vi.fn(async () => {});
+
+		useProgrammaticCardMovesMock.mockReturnValue({
+			handleProgrammaticCardMoveReady: () => {},
+			setRequestMoveTaskToTrashHandler: () => {},
+			tryProgrammaticCardMove: () => "unavailable",
+			consumeProgrammaticCardMove: () => ({}),
+			resolvePendingProgrammaticTrashMove: () => {},
+			waitForProgrammaticCardMoveAvailability: async () => {},
+			resetProgrammaticCardMoves: () => {},
+			requestMoveTaskToTrashWithAnimation,
+			programmaticCardMoveCycle: 0,
+		});
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		useLinkedBacklogTaskActionsMock.mockReturnValue({
+			handleCreateDependency: () => {},
+			handleDeleteDependency: () => {},
+			confirmMoveTaskToTrash: async () => {},
+			requestMoveTaskToTrash,
+		});
+
+		const doneTask = createTask("task-done", "Done task", 2);
+		const board: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "done", title: "Done", cards: [doneTask] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={board}
+					setBoard={() => board}
+					ensureTaskWorkspace={async () => ({ ok: true as const })}
+					startTaskSession={async () => ({ ok: true as const })}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (!latestSnapshot) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			latestSnapshot!.handleMoveDoneCardToTrash("task-done");
+			await Promise.resolve();
+		});
+
+		expect(requestMoveTaskToTrashWithAnimation).toHaveBeenCalledWith("task-done", "done");
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("runs the trash cleanup handler when a done card is dropped into trash", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		useProgrammaticCardMovesMock.mockReturnValue({
+			handleProgrammaticCardMoveReady: () => {},
+			setRequestMoveTaskToTrashHandler: () => {},
+			tryProgrammaticCardMove: () => "unavailable",
+			consumeProgrammaticCardMove: () => ({}),
+			resolvePendingProgrammaticTrashMove: () => {},
+			waitForProgrammaticCardMoveAvailability: async () => {},
+			resetProgrammaticCardMoves: () => {},
+			requestMoveTaskToTrashWithAnimation: async () => {},
+			programmaticCardMoveCycle: 0,
+		});
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		useLinkedBacklogTaskActionsMock.mockReturnValue({
+			handleCreateDependency: () => {},
+			handleDeleteDependency: () => {},
+			confirmMoveTaskToTrash: async () => {},
+			requestMoveTaskToTrash,
+		});
+
+		const doneTask = createTask("task-done-drop", "Done task drop", 2);
+		let currentBoard: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "done", title: "Done", cards: [doneTask] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		};
+		const setBoard = vi.fn<Dispatch<SetStateAction<BoardData>>>((nextBoard) => {
+			if (typeof nextBoard === "function") {
+				currentBoard = nextBoard(currentBoard);
+				return;
+			}
+			currentBoard = nextBoard;
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={currentBoard}
+					setBoard={setBoard}
+					ensureTaskWorkspace={async () => ({ ok: true as const })}
+					startTaskSession={async () => ({ ok: true as const })}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (!latestSnapshot) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			latestSnapshot!.handleDragEnd({
+				draggableId: "task-done-drop",
+				type: "CARD",
+				source: { droppableId: "done", index: 0 },
+				destination: { droppableId: "trash", index: 0 },
+				reason: "DROP",
+				mode: "FLUID",
+				combine: null,
+			});
+			await Promise.resolve();
+		});
+
+		expect(currentBoard.columns.find((column) => column.id === "done")?.cards).toEqual([]);
+		expect(currentBoard.columns.find((column) => column.id === "trash")?.cards.map((card) => card.id)).toEqual([
+			"task-done-drop",
+		]);
+		expect(requestMoveTaskToTrash).toHaveBeenCalledWith("task-done-drop", "done", {
+			optimisticMoveApplied: true,
+			skipWorkingChangeWarning: undefined,
+		});
 	});
 });

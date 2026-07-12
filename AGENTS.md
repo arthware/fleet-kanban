@@ -11,6 +11,22 @@ exploration when that primed context genuinely doesn't cover what you need, and 
 (what was missing) so the next card's prompt can be primed better. Broad Opus-driven sweeps on every
 card are the cost spiral we're closing, not the default.
 
+**Prior-art commits — cite them, then read them first.** A card may carry an optional, well-known
+`## Prior art` section that names the commit(s) of similar past work. It is the manual, per-card
+precursor to the automated change-index (see `docs/design/architect-console.md` §6) — until that
+ledger exists, the operator hand-cites the SHAs. The shape is exactly:
+
+```
+## Prior art (read with `git show <sha>` before starting)
+- <sha> — <one line: what it did / why it's similar>
+```
+
+It is **optional** — most cards won't have it, and you never add it to fill space. But **when a card
+does list Prior art, treat it as a required first step: before writing any code, run `git show <sha>`
+(and `git log -p -1 <sha>` for the fuller diff) on each cited commit and match the pattern it
+established.** Reading the actual prior diff is cheaper and more consistent than re-deriving the tree,
+and it is the primed-context path that replaces a broad codebase sweep.
+
 ---
 
 This file captures tribal knowledge-the nuanced, non-obvious patterns that make the difference between a quick fix and hours of debugging.
@@ -104,5 +120,6 @@ Dark theme
 Misc. tribal knowledge
 - Kanban's native Cline agent is powered by the installed `@clinebot/core` and `@clinebot/llms` packages plus the local `src/cline-sdk/` boundary layer, so when Cline behavior is unclear, inspect those packages and `src/cline-sdk/` for the real implementation details.
 - Kanban is launched from the user's shell and inherits its environment. For agent detection and task-agent startup, prefer direct PATH checks and direct process launches over spawning an interactive shell. Avoid `zsh -i`, shell fallback command discovery, or "launch shell then type command into it" on hot paths. On setups with heavy shell init like `conda` or `nvm`, doing that per task can freeze the runtime and even make new Terminal.app windows feel hung when several tasks start at once. It's fine to use an actual interactive shell for explicit shell terminals, not for normal agent session work.
+- `task create/update --external-issue` stores one optional Linear/GitHub issue ref on a card. Bare Linear keys like `ENG-123` only become links when `KANBAN_LINEAR_WORKSPACE` is set to the Linear workspace URL slug; otherwise the chip intentionally shows the key without a link.
 - If CI hangs on Node 22 after tests seem to finish, suspect a live subprocess or SDK-host startup path before assuming a slow test body. Read `.plan/docs/node22-ci-hanging-tests-investigation.md` before repeating that investigation. `test/runtime/cline-sdk/cline-task-session-service.test.ts` was the big prior culprit because a unit-style suite was still booting the real Cline SDK host.
 - When Kanban runs on a headless remote Linux instance (for example over SSH+tunnel), native folder picker commands may be unavailable (`zenity`/`kdialog`). Treat this as a normal remote-runtime limitation and use manual path entry fallback instead of requiring desktop packages.

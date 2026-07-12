@@ -11,6 +11,7 @@ import type { RuntimeTaskSessionSummary, RuntimeTaskWorkspaceInfoResponse } from
 import {
 	applyDragResult,
 	clearColumnTasks,
+	completeTaskAndGetReadyLinkedTaskIds,
 	disableTaskAutoReview,
 	findCardSelection,
 	getTaskColumnId,
@@ -82,6 +83,7 @@ export interface UseBoardInteractionsResult {
 	handleDetailTaskDragEnd: (result: DropResult) => void;
 	handleCardSelect: (taskId: string) => void;
 	handleMoveToTrash: () => void;
+	handleMoveDoneCardToTrash: (taskId: string) => void;
 	handleMoveReviewCardToTrash: (taskId: string) => void;
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleCancelAutomaticTaskAction: (taskId: string) => void;
@@ -523,11 +525,49 @@ export function useBoardInteractions({
 		setRequestMoveTaskToTrashHandler(requestMoveTaskToTrash);
 	}, [requestMoveTaskToTrash, setRequestMoveTaskToTrashHandler]);
 
+	const startReadyBacklogTasks = useCallback(
+		async (readyTasks: BoardCard[]): Promise<void> => {
+			if (readyTasks.length === 0) {
+				return;
+			}
+			maybeRequestNotificationPermissionForTaskStart();
+			for (const [index, readyTask] of readyTasks.entries()) {
+				void startBacklogTaskWithAnimation(readyTask);
+				if (index < readyTasks.length - 1) {
+					await waitForProgrammaticCardMoveAvailability();
+				}
+			}
+		},
+		[
+			maybeRequestNotificationPermissionForTaskStart,
+			startBacklogTaskWithAnimation,
+			waitForProgrammaticCardMoveAvailability,
+		],
+	);
+
+	const completeReviewTask = useCallback(
+		async (taskId: string): Promise<void> => {
+			const completed = completeTaskAndGetReadyLinkedTaskIds(board, taskId);
+			if (!completed.moved) {
+				return;
+			}
+			setBoard(completed.board);
+			const readyTasks = completed.readyTaskIds
+				.map((readyTaskId) => findCardSelection(completed.board, readyTaskId)?.card ?? null)
+				.filter((readyTask): readyTask is BoardCard => readyTask !== null);
+			await startReadyBacklogTasks(readyTasks);
+		},
+		[board, setBoard, startReadyBacklogTasks],
+	);
+
 	useReviewAutoActions({
 		board,
+		sessionsByTaskId: sessions,
 		taskGitActionLoadingByTaskId,
 		runAutoReviewGitAction,
-		requestMoveTaskToTrash: requestMoveTaskToTrashWithAnimation,
+		requestMoveTaskToTrash: async (taskId) => {
+			await completeReviewTask(taskId);
+		},
 		resetKey: currentProjectId,
 	});
 
@@ -624,6 +664,17 @@ export function useBoardInteractions({
 				return;
 			}
 
+			if (moveEvent.fromColumnId === "review" && moveEvent.toColumnId === "done") {
+				setBoard(applied.board);
+				const completed = completeTaskAndGetReadyLinkedTaskIds(board, moveEvent.taskId);
+				const readyTasks = completed.readyTaskIds
+					.map((readyTaskId) => findCardSelection(completed.board, readyTaskId)?.card ?? null)
+					.filter((readyTask): readyTask is BoardCard => readyTask !== null);
+				void startReadyBacklogTasks(readyTasks);
+				resolvePendingProgrammaticStartMove(moveEvent.taskId, false);
+				return;
+			}
+
 			if (moveEvent.fromColumnId === "trash" && moveEvent.toColumnId === "review") {
 				setBoard(applied.board);
 				const movedSelection = findCardSelection(applied.board, moveEvent.taskId);
@@ -669,6 +720,7 @@ export function useBoardInteractions({
 			resolvePendingProgrammaticTrashMove,
 			setBoard,
 			setSelectedTaskId,
+			startReadyBacklogTasks,
 		],
 	);
 
@@ -768,7 +820,20 @@ export function useBoardInteractions({
 				return;
 			}
 			setTaskMoveToTrashLoading(taskId, true);
-			void requestMoveTaskToTrashWithAnimation(taskId, "review").finally(() => {
+			void completeReviewTask(taskId).finally(() => {
+				setTaskMoveToTrashLoading(taskId, false);
+			});
+		},
+		[completeReviewTask, setTaskMoveToTrashLoading],
+	);
+
+	const handleMoveDoneCardToTrash = useCallback(
+		(taskId: string) => {
+			if (moveToTrashLoadingByIdRef.current[taskId]) {
+				return;
+			}
+			setTaskMoveToTrashLoading(taskId, true);
+			void requestMoveTaskToTrashWithAnimation(taskId, "done").finally(() => {
 				setTaskMoveToTrashLoading(taskId, false);
 			});
 		},
@@ -896,6 +961,7 @@ export function useBoardInteractions({
 		handleDetailTaskDragEnd,
 		handleCardSelect,
 		handleMoveToTrash,
+		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,

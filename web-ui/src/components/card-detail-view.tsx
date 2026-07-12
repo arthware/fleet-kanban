@@ -12,6 +12,8 @@ import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/component
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
+import { ExternalIssueBadge } from "@/components/external-issue-badge";
+import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
@@ -271,12 +273,14 @@ function DiffToolbar({
 	onModeChange,
 	isExpanded,
 	onToggleExpand,
+	card,
 	hideExpand,
 }: {
 	mode: RuntimeWorkspaceChangesMode;
 	onModeChange: (mode: RuntimeWorkspaceChangesMode) => void;
 	isExpanded: boolean;
 	onToggleExpand: () => void;
+	card: BoardCard;
 	hideExpand?: boolean;
 }): React.ReactElement {
 	return (
@@ -299,6 +303,8 @@ function DiffToolbar({
 					Last Turn
 				</DiffModeButton>
 			</div>
+			<ExternalIssueBadge issue={card.externalIssue} />
+			<PrBadge card={card} />
 			{!hideExpand ? (
 				<Button
 					variant="ghost"
@@ -337,6 +343,7 @@ export function CardDetailView({
 	onAgentCommitTask,
 	onAgentOpenPrTask,
 	onMoveReviewCardToTrash,
+	onMoveDoneCardToTrash,
 	onRestoreTaskFromTrash,
 	onCancelAutomaticTaskAction,
 	commitTaskLoadingById,
@@ -397,6 +404,7 @@ export function CardDetailView({
 	onAgentCommitTask?: (taskId: string) => void;
 	onAgentOpenPrTask?: (taskId: string) => void;
 	onMoveReviewCardToTrash?: (taskId: string) => void;
+	onMoveDoneCardToTrash?: (taskId: string) => void;
 	onRestoreTaskFromTrash?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	commitTaskLoadingById?: Record<string, boolean>;
@@ -755,6 +763,7 @@ export function CardDetailView({
 									onModeChange={setDiffMode}
 									isExpanded={false}
 									onToggleExpand={handleToggleDiffExpand}
+									card={selection.card}
 									hideExpand
 								/>
 							) : null}
@@ -846,6 +855,7 @@ export function CardDetailView({
 							onCommitTask={onCommitTask}
 							onOpenPrTask={onOpenPrTask}
 							onMoveToTrashTask={onMoveReviewCardToTrash}
+							onMoveDoneTaskToTrash={onMoveDoneCardToTrash}
 							onRestoreFromTrashTask={onRestoreTaskFromTrash}
 							commitTaskLoadingById={commitTaskLoadingById}
 							openPrTaskLoadingById={openPrTaskLoadingById}
@@ -895,6 +905,7 @@ export function CardDetailView({
 										onModeChange={setDiffMode}
 										isExpanded={isDiffExpanded}
 										onToggleExpand={handleToggleDiffExpand}
+										card={selection.card}
 									/>
 								) : null}
 								<div className="flex min-h-0 flex-1">

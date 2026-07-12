@@ -14,6 +14,7 @@ import { quoteShellArg } from "../core/shell";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
 import { getRuntimeHomePath } from "../state/workspace-state";
+import { isClaudeCloudProviderBackend, resolveClaudePermissionStrategy } from "./claude-permission-strategy";
 import { configureCodexHooks, hasCodexConfigOverride } from "./codex-hook-config";
 import { createHookRuntimeEnv } from "./hook-runtime-context";
 import {
@@ -649,11 +650,22 @@ const claudeAdapter: AgentSessionAdapter = {
 		}
 		if (
 			input.autonomousModeEnabled &&
-			!input.startInPlanMode &&
 			!hasCliOption(args, "--permission-mode") &&
 			!hasCliOption(args, "--dangerously-skip-permissions")
 		) {
-			args.push("--permission-mode", "auto");
+			// Capability-tiered strategy: capable models (Opus/Sonnet) and cloud-provider
+			// backends keep auto mode (auto mode is a reliable unattended bypass there);
+			// weaker/unknown models on the Anthropic API get a real bypass so they don't
+			// stall on bash/git prompts — always behind the destructive-command guard hook.
+			const strategy = resolveClaudePermissionStrategy({
+				agentModel: input.agentModel,
+				cloudProviderBackend: isClaudeCloudProviderBackend(),
+			});
+			if (strategy === "bypass-guarded") {
+				args.push("--dangerously-skip-permissions");
+			} else {
+				args.push("--permission-mode", "auto");
+			}
 		}
 		const claudeSessionId = input.agentSessionId?.trim();
 		const claudeHasResumeFlag = hasCliOption(args, "--resume") || hasCliOption(args, "--continue");
@@ -671,30 +683,39 @@ const claudeAdapter: AgentSessionAdapter = {
 		} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
 			args.push("--continue");
 		}
-		if (input.startInPlanMode) {
-			const withoutImmediateBypass = args.filter((arg) => arg !== "--dangerously-skip-permissions");
-			args.length = 0;
-			args.push(...withoutImmediateBypass);
-			args.push("--permission-mode", "plan");
-		}
-
 		applyAgentModel(args, input.agentModel);
+
+		// The Bash-guard runs whenever this launch bypasses native permission checks
+		// (skip-permissions). It's a PreToolUse hook because hooks still run — and can
+		// still block — under `--dangerously-skip-permissions`, unlike settings.json
+		// permissions.deny prompts.
+		const bashGuardEnabled =
+			input.autonomousModeEnabled === true && hasCliOption(args, "--dangerously-skip-permissions");
 
 		const hooks = resolveHookContext(input);
 		if (hooks) {
 			const settingsPath = join(getHookAgentDirectory("claude"), "settings.json");
+			const preToolUseHooks = [
+				{
+					matcher: "*",
+					hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
+				},
+				...(bashGuardEnabled
+					? [
+							{
+								matcher: "Bash",
+								hooks: [{ type: "command", command: buildHooksCommand(["guard", "--source", "claude"]) }],
+							},
+						]
+					: []),
+			];
 			const hooksSettings = {
 				hooks: {
 					Stop: [{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] }],
 					SubagentStop: [
 						{ hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }] },
 					],
-					PreToolUse: [
-						{
-							matcher: "*",
-							hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
-						},
-					],
+					PreToolUse: preToolUseHooks,
 					PermissionRequest: [
 						{
 							matcher: "*",
@@ -765,13 +786,18 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--append-system-prompt", appendedSystemPrompt);
 		}
 
-		const withPromptLaunch = withPrompt(args, input.prompt, "append");
+		const trimmed = input.prompt.trim();
+		const deferredStartupInput = input.startInPlanMode
+			? toBracketedPasteSubmission(trimmed ? `/plan ${trimmed}` : "/plan")
+			: undefined;
+		const withPromptLaunch = withPrompt(args, input.startInPlanMode ? "" : input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
 				...withPromptLaunch.env,
 				...env,
 			},
+			deferredStartupInput,
 		};
 	},
 };

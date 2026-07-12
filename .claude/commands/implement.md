@@ -37,6 +37,10 @@ Between the gates, don't narrate routine progress.
 
 - Resolve the item: read the issue / board card (description, acceptance criteria, comments,
   relations) and any design note a prior phase produced. If none exists, work from `$ARGUMENTS`.
+- **Prior art first.** If the card cites prior-art commits (a `## Prior art` section listing SHAs of
+  similar past work), read them **before** exploring — `git show <sha>` on each (and `git log -p -1
+  <sha>` for the fuller diff) — and match the pattern they established. This primes context from git
+  history instead of re-deriving the tree; see the repo's implement profile / `AGENTS.md`.
 - Establish the branch: if you're already on the item's branch / worktree, use it; otherwise create
   `<id>-short-description` off the latest `main`.
 

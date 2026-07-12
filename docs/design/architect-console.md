@@ -223,6 +223,38 @@ derive-from-state fallback; the enrichment is the human-grade summary. Implement
 (it's independently valuable and unblocks Scope immediately), add (a)'s enrichment second via an
 `AGENTS.md` wrap-up contract.
 
+### 6.5 Manual precursor — the card `## Prior art` section (shipped)
+
+Before the automated ledger (R1/R2) exists, the same priming is available **by hand**: a card carries
+an optional, well-known section in its description that cites the commit(s) of similar past work, and
+the implementing agent reads those diffs first. This is the zero-infrastructure version of §6.3's read
+step — the operator plays the role the `index find` query will later automate.
+
+The section shape is a documented convention (not enforced by code — the card composer stays
+free-form):
+
+```
+## Prior art (read with `git show <sha>` before starting)
+- <sha> — <one line: what it did / why it's similar>
+```
+
+Two homes carry the rule so both sides of the loop honor it:
+
+- **Operator / agent convention** — `fleet-kanban/AGENTS.md` (§ "Don't research from zero" → "Prior-art
+  commits") defines the section shape and the read-first rule. It is the canonical definition.
+- **Implementing-agent instructions** — the launched card follows `/implement`, whose in-repo copy
+  lives at `.claude/commands/implement.md` (generic Intake rule) with fleet-kanban specifics in
+  `.claude/implement-profile.md`. Both say: *if the card lists Prior art commits, `git show <sha>`
+  (and `git log -p -1 <sha>`) each one BEFORE writing code, and match the established pattern.*
+
+**Relation to the parent `/implement`.** `/implement` is a generic skill; the copy under
+`fleet-kanban/.claude/` is the in-repo instance a board card actually runs. If a future parent-fleet
+`/implement` command (outside this repo) becomes the real home, the prior-art rule belongs there too —
+for now the in-repo half is implemented and this note is the record of intent. When R1/R2 land, the
+`## Prior art` section becomes the human-authored complement to `fleet task index find`: the ledger
+suggests refs, the operator still hand-cites the ones that matter, and the read-first contract is
+unchanged.
+
 ---
 
 ## 7. Per-card model + thinking (Dispatch, cost)

@@ -73,7 +73,10 @@ export interface UseTaskSessionsResult {
 	cancelTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	fetchTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
 	fetchTaskTranscript: (taskId: string) => Promise<TaskTranscriptResult | null>;
-	cleanupTaskWorkspace: (taskId: string) => Promise<RuntimeWorktreeDeleteResponse | null>;
+	cleanupTaskWorkspace: (
+		taskId: string,
+		options?: { discard?: boolean },
+	) => Promise<RuntimeWorktreeDeleteResponse | null>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
 }
 
@@ -249,14 +252,27 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 	);
 
 	const cleanupTaskWorkspace = useCallback(
-		async (taskId: string): Promise<RuntimeWorktreeDeleteResponse | null> => {
+		async (taskId: string, options?: { discard?: boolean }): Promise<RuntimeWorktreeDeleteResponse | null> => {
 			if (!currentProjectId) {
 				return null;
 			}
 			try {
 				const trpcClient = getRuntimeTrpcClient(currentProjectId);
-				const payload = await trpcClient.workspace.deleteWorktree.mutate({ taskId });
+				// Without an explicit Discard the runtime enforces the durability gate:
+				// a worktree whose work is not committed and landed/merged is retained
+				// rather than silently removed. `discard` is the operator's explicit
+				// "throw this away" — the only way unsaved work is ever removed.
+				const payload = await trpcClient.workspace.deleteWorktree.mutate({
+					taskId,
+					...(options?.discard === true ? { discard: true } : {}),
+				});
 				if (!payload.ok) {
+					if (payload.blocked === true) {
+						// Not an error: the gate intentionally kept the worktree because
+						// its work is not durably saved. The caller decides whether to
+						// surface this or retry as an explicit Discard.
+						return payload;
+					}
 					const message = payload.error ?? "Could not clean up task workspace.";
 					console.error(`[cleanupTaskWorkspace] ${message}`);
 					return null;

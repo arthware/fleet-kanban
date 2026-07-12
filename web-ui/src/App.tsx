@@ -53,6 +53,7 @@ import { useTaskBranchOptions } from "@/hooks/use-task-branch-options";
 import { useTaskEditor } from "@/hooks/use-task-editor";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useTaskStartActions } from "@/hooks/use-task-start-actions";
+import { useTaskTokenUsage } from "@/hooks/use-task-token-usage";
 import { useTerminalPanels } from "@/hooks/use-terminal-panels";
 import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { LayoutCustomizationsProvider } from "@/resize/layout-customizations";
@@ -233,6 +234,25 @@ export default function App(): ReactElement {
 		setSessions,
 	});
 
+	// Only cards with a captured agent session can have derivable usage; a fresh
+	// backlog card contributes nothing. Sorted so the batch key is stable.
+	const tokenUsageTaskIds = useMemo(
+		() =>
+			Object.keys(sessions)
+				.filter((taskId) => Boolean(sessions[taskId]?.agentSessionId))
+				.sort(),
+		[sessions],
+	);
+	const hasActiveTokenUsageSession = useMemo(
+		() => tokenUsageTaskIds.some((taskId) => sessions[taskId]?.state === "running"),
+		[sessions, tokenUsageTaskIds],
+	);
+	const tokenUsageById = useTaskTokenUsage({
+		currentProjectId,
+		taskIds: tokenUsageTaskIds,
+		isPolling: hasActiveTokenUsageSession,
+	});
+
 	const {
 		workspacePath,
 		workspaceGit,
@@ -330,6 +350,8 @@ export default function App(): ReactElement {
 		setNewTaskBranchRef,
 		newTaskAgentId,
 		setNewTaskAgentId,
+		newTaskAgentModel,
+		setNewTaskAgentModel,
 		newTaskClineSettings,
 		setNewTaskClineSettings,
 		editingTaskId,
@@ -348,6 +370,8 @@ export default function App(): ReactElement {
 		setEditTaskBranchRef,
 		editTaskAgentId,
 		setEditTaskAgentId,
+		editTaskAgentModel,
+		setEditTaskAgentModel,
 		editTaskClineSettings,
 		setEditTaskClineSettings,
 		handleOpenCreateTask,
@@ -596,6 +620,7 @@ export default function App(): ReactElement {
 		handleDetailTaskDragEnd,
 		handleCardSelect,
 		handleMoveToTrash,
+		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,
@@ -824,6 +849,8 @@ export default function App(): ReactElement {
 			onBranchRefChange={setEditTaskBranchRef}
 			agentId={editTaskAgentId}
 			onAgentIdChange={setEditTaskAgentId}
+			agentModel={editTaskAgentModel}
+			onAgentModelChange={setEditTaskAgentModel}
 			clineSettings={editTaskClineSettings}
 			onClineSettingsChange={setEditTaskClineSettings}
 			defaultAgentId={runtimeProjectConfig?.selectedAgentId ?? null}
@@ -975,6 +1002,7 @@ export default function App(): ReactElement {
 											<KanbanBoard
 												data={board}
 												taskSessions={sessions}
+												tokenUsageById={tokenUsageById}
 												workspacePath={workspacePath}
 												taskWorktreesRoot={taskWorktreesRoot}
 												onCardSelect={handleCardSelect}
@@ -993,6 +1021,7 @@ export default function App(): ReactElement {
 												openPrTaskLoadingById={openPrTaskLoadingById}
 												moveToTrashLoadingById={moveToTrashLoadingById}
 												onMoveToTrashTask={handleMoveReviewCardToTrash}
+												onMoveDoneTaskToTrash={handleMoveDoneCardToTrash}
 												onRestoreFromTrashTask={handleRestoreTaskFromTrash}
 												dependencies={board.dependencies}
 												onCreateDependency={handleCreateDependency}
@@ -1002,6 +1031,7 @@ export default function App(): ReactElement {
 												}
 												onDragEnd={handleDragEnd}
 												defaultClineModelId={runtimeProjectConfig?.clineProviderSettings?.modelId ?? null}
+												defaultAgentId={runtimeProjectConfig?.selectedAgentId ?? null}
 											/>
 										)}
 									</div>
@@ -1081,6 +1111,7 @@ export default function App(): ReactElement {
 									agentOpenPrTaskLoadingById={agentOpenPrTaskLoadingById}
 									moveToTrashLoadingById={moveToTrashLoadingById}
 									onMoveReviewCardToTrash={handleMoveReviewCardToTrash}
+									onMoveDoneCardToTrash={handleMoveDoneCardToTrash}
 									onRestoreTaskFromTrash={handleRestoreTaskFromTrash}
 									onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
 									onAddReviewComments={(taskId: string, text: string) => {
@@ -1175,6 +1206,8 @@ export default function App(): ReactElement {
 					onBranchRefChange={setNewTaskBranchRef}
 					agentId={newTaskAgentId}
 					onAgentIdChange={setNewTaskAgentId}
+					agentModel={newTaskAgentModel}
+					onAgentModelChange={setNewTaskAgentModel}
 					clineSettings={newTaskClineSettings}
 					onClineSettingsChange={setNewTaskClineSettings}
 					defaultAgentId={runtimeProjectConfig?.selectedAgentId ?? null}

@@ -4,6 +4,8 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
+	RuntimeCardPrState,
+	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
@@ -21,6 +23,7 @@ export interface RuntimeCreateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	externalIssue?: RuntimeExternalIssue;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -33,6 +36,8 @@ export interface RuntimeUpdateTaskInput {
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId | null;
+	agentModel?: string | null;
+	externalIssue?: RuntimeExternalIssue | null;
 	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
 }
@@ -62,6 +67,24 @@ function cloneTaskClineSettings(settings?: RuntimeTaskClineSettings | null): Run
 	};
 }
 
+function cloneExternalIssue(issue?: RuntimeExternalIssue | null): RuntimeExternalIssue | undefined {
+	if (issue === undefined || issue === null) {
+		return undefined;
+	}
+	const key = issue.key.trim();
+	const raw = issue.raw.trim();
+	const url = issue.url?.trim();
+	if (!key || !raw) {
+		return undefined;
+	}
+	return {
+		provider: issue.provider,
+		key,
+		...(url ? { url } : {}),
+		raw,
+	};
+}
+
 export interface RuntimeCreateTaskResult {
 	board: RuntimeBoardData;
 	task: RuntimeBoardCard;
@@ -83,7 +106,7 @@ export interface RuntimeUpdateTaskResult {
 export interface RuntimeAddTaskDependencyResult {
 	board: RuntimeBoardData;
 	added: boolean;
-	reason?: "missing_task" | "same_task" | "duplicate" | "trash_task" | "non_backlog";
+	reason?: "missing_task" | "same_task" | "duplicate" | "terminal_task" | "trash_task" | "non_backlog";
 	dependency?: RuntimeBoardDependency;
 }
 
@@ -187,8 +210,13 @@ function resolveDependencyEndpoints(
 	if (!firstColumnId || !secondColumnId) {
 		return { reason: "missing_task" };
 	}
-	if (firstColumnId === "trash" || secondColumnId === "trash") {
-		return { reason: "trash_task" };
+	if (
+		firstColumnId === "done" ||
+		firstColumnId === "trash" ||
+		secondColumnId === "done" ||
+		secondColumnId === "trash"
+	) {
+		return { reason: "terminal_task" };
 	}
 	const firstIsBacklog = firstColumnId === "backlog";
 	const secondIsBacklog = secondColumnId === "backlog";
@@ -206,7 +234,7 @@ function resolveDependencyEndpoints(
 		: { backlogTaskId: secondTaskId, linkedTaskId: firstTaskId };
 }
 
-function getLinkedBacklogTaskIdsReadyAfterTaskTrashed(
+function getLinkedBacklogTaskIdsReadyAfterTaskCompleted(
 	board: RuntimeBoardData,
 	taskId: string,
 	fromColumnId: RuntimeBoardColumnId | null,
@@ -300,6 +328,7 @@ export function addTaskToColumn(
 	if (explicitTaskId && existingIds.has(explicitTaskId)) {
 		throw new Error(`Task "${explicitTaskId}" already exists.`);
 	}
+	const externalIssue = cloneExternalIssue(input.externalIssue);
 	const task: RuntimeBoardCard = {
 		id: explicitTaskId || createUniqueTaskId(existingIds, randomUuid),
 		title: resolveTaskTitle(input.title, prompt),
@@ -310,6 +339,7 @@ export function addTaskToColumn(
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
 		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
+		...(externalIssue ? { externalIssue } : {}),
 		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,
 		createdAt: now,
@@ -412,8 +442,26 @@ export function removeTaskDependency(board: RuntimeBoardData, dependencyId: stri
 	};
 }
 
+export function getReadyLinkedTaskIdsForCompletedTask(board: RuntimeBoardData, taskId: string): string[] {
+	return getLinkedBacklogTaskIdsReadyAfterTaskCompleted(board, taskId, getTaskColumnId(board, taskId));
+}
+
 export function getReadyLinkedTaskIdsForTaskInTrash(board: RuntimeBoardData, taskId: string): string[] {
-	return getLinkedBacklogTaskIdsReadyAfterTaskTrashed(board, taskId, getTaskColumnId(board, taskId));
+	return getReadyLinkedTaskIdsForCompletedTask(board, taskId);
+}
+
+export function completeTaskAndGetReadyLinkedTaskIds(
+	board: RuntimeBoardData,
+	taskId: string,
+	now: number = Date.now(),
+): RuntimeTrashTaskResult {
+	const fromColumnId = getTaskColumnId(board, taskId);
+	const readyTaskIds = getLinkedBacklogTaskIdsReadyAfterTaskCompleted(board, taskId, fromColumnId);
+	const movedToDone = moveTaskToColumn(board, taskId, "done", now);
+	return {
+		...movedToDone,
+		readyTaskIds: movedToDone.moved ? readyTaskIds : [],
+	};
 }
 
 export function trashTaskAndGetReadyLinkedTaskIds(
@@ -421,12 +469,10 @@ export function trashTaskAndGetReadyLinkedTaskIds(
 	taskId: string,
 	now: number = Date.now(),
 ): RuntimeTrashTaskResult {
-	const fromColumnId = getTaskColumnId(board, taskId);
-	const readyTaskIds = getLinkedBacklogTaskIdsReadyAfterTaskTrashed(board, taskId, fromColumnId);
 	const movedToTrash = moveTaskToColumn(board, taskId, "trash", now);
 	return {
 		...movedToTrash,
-		readyTaskIds: movedToTrash.moved ? readyTaskIds : [],
+		readyTaskIds: [],
 	};
 }
 
@@ -547,7 +593,9 @@ export function moveTaskToColumn(
 		updatedAt: now,
 	};
 	const targetCards =
-		targetColumnId === "trash" ? [movedTask, ...targetColumn.cards] : [...targetColumn.cards, movedTask];
+		targetColumnId === "done" || targetColumnId === "trash"
+			? [movedTask, ...targetColumn.cards]
+			: [...targetColumn.cards, movedTask];
 
 	const columns = board.columns.map((column, index) => {
 		if (index === found.columnIndex) {
@@ -626,6 +674,13 @@ export function updateTask(
 				autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
+				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,
+				externalIssue:
+					input.externalIssue === undefined
+						? cloneExternalIssue(card.externalIssue)
+						: input.externalIssue === null
+							? undefined
+							: cloneExternalIssue(input.externalIssue),
 				clineSettings:
 					input.clineSettings === undefined
 						? cloneTaskClineSettings(card.clineSettings)
@@ -656,4 +711,56 @@ export function updateTask(
 		task: updatedTask,
 		updated: true,
 	};
+}
+
+export interface RuntimeCardPrRef {
+	url: string;
+	state: RuntimeCardPrState;
+	number: number;
+}
+
+/**
+ * Persist the GitHub PR a card's branch led to onto the card. Idempotent: when
+ * the card already stores this exact PR, the board is returned unchanged
+ * (`updated: false`) so the caller can skip the disk write. The workspace
+ * metadata monitor uses this to capture a card's PR once, at detection time,
+ * keeping the `gh` lookup off the render and poll paths.
+ */
+export function setCardPrUrl(
+	board: RuntimeBoardData,
+	taskId: string,
+	pr: RuntimeCardPrRef,
+): { board: RuntimeBoardData; updated: boolean } {
+	const normalizedTaskId = taskId.trim();
+	if (!normalizedTaskId) {
+		return { board, updated: false };
+	}
+
+	let updated = false;
+	const columns = board.columns.map((column) => {
+		let columnUpdated = false;
+		const cards = column.cards.map((card) => {
+			if (card.id !== normalizedTaskId) {
+				return card;
+			}
+			if (card.prUrl === pr.url && card.prState === pr.state && card.prNumber === pr.number) {
+				return card;
+			}
+			columnUpdated = true;
+			updated = true;
+			return {
+				...card,
+				prUrl: pr.url,
+				prState: pr.state,
+				prNumber: pr.number,
+			};
+		});
+		return columnUpdated ? { ...column, cards } : column;
+	});
+
+	if (!updated) {
+		return { board, updated: false };
+	}
+
+	return { board: { ...board, columns }, updated: true };
 }

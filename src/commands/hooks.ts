@@ -7,6 +7,7 @@ import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../core/api-cont
 import { buildKanbanCommandParts } from "../core/kanban-command";
 import { buildKanbanRuntimeUrl, getRuntimeFetch } from "../core/runtime-endpoint";
 import { buildWindowsCmdArgsArray, resolveWindowsComSpec, shouldUseWindowsCmdLaunch } from "../core/windows-cmd-launch";
+import { evaluateBashCommand } from "../security/dangerous-command-guard";
 import { parseHookRuntimeContextFromEnv } from "../terminal/hook-runtime-context";
 import type { RuntimeAppRouter } from "../trpc/app-router";
 import {
@@ -736,6 +737,75 @@ async function runHooksIngest(
 	}
 }
 
+function readRawStringField(record: Record<string, unknown>, key: string): string | null {
+	const value = record[key];
+	return typeof value === "string" ? value : null;
+}
+
+export interface PreToolUseGuardDenial {
+	hookSpecificOutput: {
+		hookEventName: "PreToolUse";
+		permissionDecision: "deny";
+		permissionDecisionReason: string;
+	};
+}
+
+/**
+ * Pure PreToolUse Bash-guard decision. Given a raw PreToolUse hook payload, returns a
+ * Claude Code `permissionDecision: "deny"` object when the Bash command is destructive,
+ * or `null` to let the call proceed. Fails open (returns null) for non-Bash tools and
+ * malformed payloads so ordinary dev work is never broken.
+ */
+export function evaluatePreToolUseGuardPayload(payload: Record<string, unknown> | null): PreToolUseGuardDenial | null {
+	if (!payload) {
+		return null;
+	}
+	const toolName = readStringField(payload, "tool_name") ?? readStringField(payload, "toolName");
+	if (!toolName || toolName.toLowerCase() !== "bash") {
+		return null;
+	}
+	const toolInput = extractToolInput(payload);
+	const command = toolInput ? readRawStringField(toolInput, "command") : null;
+	if (!command) {
+		return null;
+	}
+	const worktreePath = readStringField(payload, "cwd") ?? undefined;
+	const verdict = evaluateBashCommand(command, { worktreePath });
+	if (verdict.decision !== "deny") {
+		return null;
+	}
+	return {
+		hookSpecificOutput: {
+			hookEventName: "PreToolUse",
+			permissionDecision: "deny",
+			permissionDecisionReason:
+				verdict.reason ?? "This command is blocked by the autonomous destructive-command guard.",
+		},
+	};
+}
+
+/**
+ * PreToolUse Bash-guard entrypoint for autonomous launches that run with
+ * `--dangerously-skip-permissions`. Reads the PreToolUse payload from stdin, and when
+ * the tool is Bash, classifies the command with the destructive-command guard. A
+ * destructive command is denied by emitting Claude Code's structured
+ * `permissionDecision: "deny"` output (exit 0). Everything else — non-Bash tools,
+ * unparseable payloads, safe commands — passes through untouched so ordinary dev work
+ * keeps running unattended.
+ */
+async function runHooksGuard(): Promise<void> {
+	let payload: Record<string, unknown> | null = null;
+	try {
+		payload = parseJsonObject(await readStdinText());
+	} catch {
+		payload = null;
+	}
+	const denial = evaluatePreToolUseGuardPayload(payload);
+	if (denial) {
+		process.stdout.write(`${JSON.stringify(denial)}\n`);
+	}
+}
+
 export function registerHooksCommand(program: Command): void {
 	const hooks = program.command("hooks").description("Runtime hook helpers for agent integrations.");
 
@@ -778,6 +848,14 @@ export function registerHooksCommand(program: Command): void {
 				await runHooksNotify(options.event, options, payload);
 			},
 		);
+
+	hooks
+		.command("guard")
+		.description("PreToolUse destructive-command guard for autonomous skip-permissions launches.")
+		.option("--source <source>", "Hook source.")
+		.action(async () => {
+			await runHooksGuard();
+		});
 
 	hooks
 		.command("gemini-hook")

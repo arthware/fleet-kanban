@@ -4,6 +4,7 @@ import type { RuntimeBoardData } from "../../src/core/api-contract";
 import {
 	addTaskDependency,
 	addTaskToColumn,
+	completeTaskAndGetReadyLinkedTaskIds,
 	deleteTasksFromBoard,
 	moveTaskToColumn,
 	trashTaskAndGetReadyLinkedTaskIds,
@@ -16,11 +17,106 @@ function createBoard(): RuntimeBoardData {
 			{ id: "backlog", title: "Backlog", cards: [] },
 			{ id: "in_progress", title: "In Progress", cards: [] },
 			{ id: "review", title: "Review", cards: [] },
-			{ id: "trash", title: "Done", cards: [] },
+			{ id: "done", title: "Done", cards: [] },
+			{ id: "trash", title: "Trash", cards: [] },
 		],
 		dependencies: [],
 	};
 }
+
+describe("done/trash lifecycle mutations", () => {
+	it("moves a review task to done and returns ready linked backlog task ids", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.added).toBe(true);
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb", 123);
+
+		expect(completed.moved).toBe(true);
+		expect(completed.readyTaskIds).toEqual(["aaaaa"]);
+		expect(completed.board.columns.find((column) => column.id === "done")?.cards.map((card) => card.id)).toEqual([
+			"bbbbb",
+		]);
+		expect(completed.board.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+	});
+
+	it("moves a review task to trash without returning ready linked backlog task ids", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.added).toBe(true);
+
+		const trashed = trashTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb", 123);
+
+		expect(trashed.moved).toBe(true);
+		expect(trashed.readyTaskIds).toEqual([]);
+		expect(trashed.board.columns.find((column) => column.id === "trash")?.cards.map((card) => card.id)).toEqual([
+			"bbbbb",
+		]);
+	});
+
+	it("rejects creating a new dependency to a done task", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createDone = addTaskToColumn(
+			createBacklog.board,
+			"done",
+			{ prompt: "Finished task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+
+		const linked = addTaskDependency(createDone.board, "aaaaa", "bbbbb");
+
+		expect(linked.added).toBe(false);
+		expect(linked.reason).toBe("terminal_task");
+	});
+
+	it("prunes dependencies when a linked task moves to done", () => {
+		const createBacklog = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Dependent task", baseRef: "main" },
+			() => "aaaaa111",
+		);
+		const createReview = addTaskToColumn(
+			createBacklog.board,
+			"review",
+			{ prompt: "Prerequisite task", baseRef: "main" },
+			() => "bbbbb111",
+		);
+		const linked = addTaskDependency(createReview.board, "aaaaa", "bbbbb");
+		expect(linked.board.dependencies).toHaveLength(1);
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb");
+
+		expect(completed.board.dependencies).toEqual([]);
+	});
+});
 
 describe("deleteTasksFromBoard", () => {
 	it("removes a trashed task and any dependencies that reference it", () => {
@@ -266,6 +362,68 @@ describe("per-task agent/model/provider overrides", () => {
 		expect(updated.task?.clineSettings).toBeUndefined();
 	});
 
+	it("updates agentModel from undefined to a value", () => {
+		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
+		expect(created.task.agentModel).toBeUndefined();
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			agentModel: "claude-haiku-4-5",
+		});
+
+		expect(updated.updated).toBe(true);
+		expect(updated.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("preserves agentModel when update input omits it (undefined)", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Updated prompt",
+			baseRef: "main",
+			// agentModel is undefined, so the existing override should persist
+		});
+
+		expect(updated.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("clears agentModel when update input provides null", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			agentModel: null,
+		});
+
+		expect(updated.task?.agentModel).toBeUndefined();
+	});
+
+	it("preserves agentModel across move operations", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Movable task", baseRef: "main", agentModel: "claude-haiku-4-5" },
+			() => "aaaaa111",
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "in_progress");
+
+		expect(moved.moved).toBe(true);
+		expect(moved.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
 	it("preserves overrides across move operations", () => {
 		const created = addTaskToColumn(
 			createBoard(),
@@ -292,5 +450,85 @@ describe("per-task agent/model/provider overrides", () => {
 			modelId: "claude-sonnet-4-20250514",
 			reasoningEffort: "high",
 		});
+	});
+});
+
+describe("external issue metadata", () => {
+	const externalIssue = {
+		provider: "github" as const,
+		key: "owner/repo#42",
+		url: "https://github.com/owner/repo/issues/42",
+		raw: "owner/repo#42",
+	};
+
+	it("persists externalIssue on the card when creating a task", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Issue-backed task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		expect(created.task.externalIssue).toEqual(externalIssue);
+	});
+
+	it("updates externalIssue from undefined to a value", () => {
+		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			externalIssue,
+		});
+
+		expect(updated.updated).toBe(true);
+		expect(updated.task?.externalIssue).toEqual(externalIssue);
+	});
+
+	it("preserves externalIssue when update input omits it", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Updated prompt",
+			baseRef: "main",
+		});
+
+		expect(updated.task?.externalIssue).toEqual(externalIssue);
+	});
+
+	it("clears externalIssue when update input provides null", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			externalIssue: null,
+		});
+
+		expect(updated.task?.externalIssue).toBeUndefined();
+	});
+
+	it("preserves externalIssue across move operations", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Movable task", baseRef: "main", externalIssue },
+			() => "aaaaa111",
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "review");
+
+		expect(moved.moved).toBe(true);
+		expect(moved.task?.externalIssue).toEqual(externalIssue);
 	});
 });

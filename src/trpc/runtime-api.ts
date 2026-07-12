@@ -18,6 +18,7 @@ import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtim
 import type {
 	RuntimeCommandRunResponse,
 	RuntimeRunUpdateResponse,
+	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
 } from "../core/api-contract";
 import {
@@ -41,6 +42,7 @@ import {
 	parseTaskSessionInputRequest,
 	parseTaskSessionStartRequest,
 	parseTaskSessionStopRequest,
+	parseTaskTokenUsageRequest,
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
@@ -51,6 +53,7 @@ import { listWorkspaceIndexEntries } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
+import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
 import { captureTaskTurnCheckpoint } from "../workspace/turn-checkpoints";
@@ -403,19 +406,32 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				// PTY path: `fleet task say` wraps steering in a bracketed paste so a
 				// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
+				const wantsSubmit = body.submit ?? true;
+				// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
+				// treats a carriage return fused onto the paste-end marker (…[201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
 				const ptyPayload = body.bracketedPaste
-					? toBracketedPasteSubmission(body.text, body.submit ?? true)
+					? toBracketedPasteSubmission(body.text, false)
 					: body.appendNewline
 						? `${body.text}\n`
 						: body.text;
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
-				const summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
+				let summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
 				if (!summary) {
 					return {
 						ok: false,
 						summary: null,
 						error: "Task session is not running.",
 					};
+				}
+				// Send the Enter as a SEPARATE write so paste-mode has closed and the
+				// carriage return registers as a submit keypress. `--no-submit` skips this,
+				// leaving the text staged in the prompt.
+				if (body.bracketedPaste && wantsSubmit) {
+					const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
+					if (afterSubmit) {
+						summary = afterSubmit;
+					}
 				}
 				return {
 					ok: true,
@@ -478,6 +494,35 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return { ok: false, present: false, messages: [], error: message };
+			}
+		},
+		getTaskTokenUsage: async (workspaceScope, input) => {
+			try {
+				const body = parseTaskTokenUsageRequest(input);
+				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const usage: Record<string, RuntimeTaskTokenUsage | null> = {};
+				// Derive per card, tolerantly: a card with no captured session, or
+				// whose transcript is gone/empty, contributes a `null` entry rather
+				// than failing the whole batch. Callers get one entry per requested id.
+				await Promise.all(
+					body.taskIds.map(async (taskId) => {
+						const summary = terminalManager.getSummary(taskId);
+						if (!summary?.agentId || !summary.agentSessionId) {
+							usage[taskId] = null;
+							return;
+						}
+						const result = await readAgentUsage({
+							agentId: summary.agentId,
+							sessionId: summary.agentSessionId,
+							homePath: homedir(),
+						});
+						usage[taskId] = result.usage;
+					}),
+				);
+				return { ok: true, usage };
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, usage: {}, error: message };
 			}
 		},
 		getClineSlashCommands: async (workspaceScope) => {

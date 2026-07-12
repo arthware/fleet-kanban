@@ -1,5 +1,5 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { getRuntimeLaunchSupportedAgentCatalog } from "@runtime-agent-catalog";
+import { getRuntimeAgentCatalogEntry, getRuntimeLaunchSupportedAgentCatalog } from "@runtime-agent-catalog";
 import { ChevronDown } from "lucide-react";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -227,6 +227,8 @@ function cloneTaskClineSettings(settings?: RuntimeTaskClineSettings): RuntimeTas
 export function TaskAgentModelPicker({
 	agentId,
 	onAgentIdChange,
+	agentModel,
+	onAgentModelChange,
 	clineSettings,
 	onClineSettingsChange,
 	agentOptions,
@@ -244,6 +246,8 @@ export function TaskAgentModelPicker({
 }: {
 	agentId: RuntimeAgentId | undefined;
 	onAgentIdChange: (value: RuntimeAgentId | undefined) => void;
+	agentModel: string | undefined;
+	onAgentModelChange: (value: string | undefined) => void;
 	clineSettings?: RuntimeTaskClineSettings | undefined;
 	onClineSettingsChange?: (value: RuntimeTaskClineSettings | undefined) => void;
 	agentOptions: Array<{ value: string; label: string }>;
@@ -472,10 +476,17 @@ export function TaskAgentModelPicker({
 								value={agentId ?? ""}
 								onChange={(e) => {
 									const value = e.currentTarget.value;
-									onAgentIdChange(value ? (value as RuntimeAgentId) : undefined);
+									const nextAgentId = value ? (value as RuntimeAgentId) : undefined;
+									onAgentIdChange(nextAgentId);
 									if (value !== "cline") {
 										onClineSettingsChange?.(undefined);
 										setReasoningEffort("");
+									}
+									if (
+										!getRuntimeAgentCatalogEntry(nextAgentId ?? defaultAgentId ?? "cline")
+											?.supportsAgentModelOverride
+									) {
+										onAgentModelChange(undefined);
 									}
 								}}
 							>
@@ -486,6 +497,18 @@ export function TaskAgentModelPicker({
 								))}
 							</NativeSelect>
 						</div>
+						{effectiveAgentId && getRuntimeAgentCatalogEntry(effectiveAgentId)?.supportsAgentModelOverride ? (
+							<div className="w-full sm:w-1/2 min-w-0">
+								<span className="text-[11px] text-text-secondary block mb-1">Model</span>
+								<input
+									type="text"
+									value={agentModel ?? ""}
+									onChange={(e) => onAgentModelChange(e.target.value.trim() ? e.target.value : undefined)}
+									placeholder="e.g. claude-haiku-4-5"
+									className="w-full rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+								/>
+							</div>
+						) : null}
 						{showClineProviderPicker ? (
 							<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 								<div className="min-w-0">

@@ -8,6 +8,7 @@ import {
 	applyTaskDetailClineSettingsChange,
 	applyTaskDetailClineSettingsSelection,
 	clearColumnTasks,
+	completeTaskAndGetReadyLinkedTaskIds,
 	disableTaskAutoReview,
 	getTaskColumnId,
 	moveTaskToColumn,
@@ -139,7 +140,7 @@ describe("board dependency state", () => {
 		]);
 	});
 
-	it("only unlocks backlog cards when a review card is trashed", () => {
+	it("unlocks backlog cards when a review card is completed", () => {
 		const fixture = createBacklogBoard(["Task A", "Task B", "Task C"]);
 		const taskA = requireTaskId(fixture.taskIdByPrompt["Task A"], "Task A");
 		const taskB = requireTaskId(fixture.taskIdByPrompt["Task B"], "Task B");
@@ -154,14 +155,29 @@ describe("board dependency state", () => {
 		const dependencyB = addTaskDependency(dependencyA.board, taskC, taskB);
 		expect(dependencyB.added).toBe(true);
 
-		const moveATrash = trashTaskAndGetReadyLinkedTaskIds(dependencyB.board, taskA);
-		expect(moveATrash.moved).toBe(true);
-		expect(moveATrash.board.dependencies).toHaveLength(1);
-		expect(moveATrash.readyTaskIds).toEqual([taskC]);
+		const completeA = completeTaskAndGetReadyLinkedTaskIds(dependencyB.board, taskA);
+		expect(completeA.moved).toBe(true);
+		expect(completeA.board.dependencies).toHaveLength(1);
+		expect(completeA.readyTaskIds).toEqual([taskC]);
 
-		const moveBTrash = trashTaskAndGetReadyLinkedTaskIds(dependencyB.board, taskB);
-		expect(moveBTrash.moved).toBe(true);
-		expect(moveBTrash.readyTaskIds).toEqual([taskC]);
+		const completeB = completeTaskAndGetReadyLinkedTaskIds(completeA.board, taskB);
+		expect(completeB.moved).toBe(true);
+		expect(completeB.readyTaskIds).toEqual([taskC]);
+	});
+
+	it("does not unlock backlog cards when a review card is trashed", () => {
+		const fixture = createBacklogBoard(["Task A", "Task B"]);
+		const taskA = requireTaskId(fixture.taskIdByPrompt["Task A"], "Task A");
+		const taskB = requireTaskId(fixture.taskIdByPrompt["Task B"], "Task B");
+		const movedA = moveTaskToColumn(fixture.board, taskA, "review");
+		expect(movedA.moved).toBe(true);
+
+		const linked = addTaskDependency(movedA.board, taskB, taskA);
+		expect(linked.added).toBe(true);
+
+		const trashed = trashTaskAndGetReadyLinkedTaskIds(linked.board, taskA);
+		expect(trashed.readyTaskIds).toEqual([]);
+		expect(trashed.board.dependencies).toEqual([]);
 	});
 
 	it("does not unlock backlog cards when an in-progress card is trashed", () => {
@@ -225,10 +241,10 @@ describe("board dependency state", () => {
 		const trashA = trashTaskAndGetReadyLinkedTaskIds(secondLink.board, taskA);
 		expect(trashA.readyTaskIds).toEqual([]);
 
-		const trashB = trashTaskAndGetReadyLinkedTaskIds(trashA.board, taskB);
-		expect(trashB.readyTaskIds).toEqual([taskC]);
+		const completeB = completeTaskAndGetReadyLinkedTaskIds(trashA.board, taskB);
+		expect(completeB.readyTaskIds).toEqual([taskC]);
 
-		const autoStarted = moveTaskToColumn(trashB.board, taskC, "in_progress");
+		const autoStarted = moveTaskToColumn(completeB.board, taskC, "in_progress");
 		expect(autoStarted.moved).toBe(true);
 		expect(autoStarted.board.dependencies).toEqual([]);
 	});
@@ -568,6 +584,52 @@ describe("board dependency state", () => {
 		]);
 	});
 
+	it("carries agentModel through normalization", () => {
+		const rawBoard = {
+			columns: [
+				{
+					id: "backlog",
+					cards: [
+						{
+							id: "a",
+							prompt: "Task A",
+							startInPlanMode: false,
+							baseRef: "main",
+							agentModel: "claude-haiku-4-5",
+						},
+					],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		const normalized = normalizeBoardData(rawBoard);
+		const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(card?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("leaves agentModel unset for a board.json written before the field existed", () => {
+		const rawBoard = {
+			columns: [
+				{
+					id: "backlog",
+					cards: [{ id: "a", prompt: "Task A", startInPlanMode: false, baseRef: "main" }],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		};
+
+		const normalized = normalizeBoardData(rawBoard);
+		const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(card?.agentModel).toBeUndefined();
+	});
+
 	it("disables auto-review settings for a task", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {
@@ -640,6 +702,27 @@ describe("board dependency state", () => {
 		});
 	});
 
+	it("preserves task-level agentModel when updating the title", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "backlog", {
+			prompt: "Task with agent model",
+			agentId: "claude",
+			agentModel: "claude-haiku-4-5",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected backlog task to exist");
+		}
+
+		const updated = updateTaskTitle(board, task.id, "Updated title");
+		expect(updated.updated).toBe(true);
+		const updatedTask = updated.board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(updatedTask?.title).toBe("Updated title");
+		expect(updatedTask?.agentModel).toBe("claude-haiku-4-5");
+	});
+
 	it("preserves model fields when disabling auto-review", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {
@@ -677,6 +760,29 @@ describe("board dependency state", () => {
 			modelId: "my-model",
 			reasoningEffort: "high",
 		});
+	});
+
+	it("preserves agentModel when disabling auto-review", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "review", {
+			prompt: "Task with agent model",
+			autoReviewEnabled: true,
+			autoReviewMode: "commit",
+			agentId: "codex",
+			agentModel: "codex-mini",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected review task to exist");
+		}
+
+		const disabled = disableTaskAutoReview(board, task.id);
+		expect(disabled.updated).toBe(true);
+
+		const updatedTask = disabled.board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(updatedTask?.agentModel).toBe("codex-mini");
 	});
 
 	it("does not create task model overrides for tasks inheriting global agent settings", () => {
@@ -738,6 +844,32 @@ describe("board dependency state", () => {
 			modelId: "anthropic/claude-opus-4.6",
 			reasoningEffort: "high",
 		});
+	});
+
+	it("preserves agentModel when applying a Cline settings selection", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "backlog", {
+			prompt: "Task with agent model",
+			agentId: "cline",
+			agentModel: "claude-haiku-4-5",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected backlog task to exist");
+		}
+
+		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
+			agentId: "cline",
+			clineSettings: {
+				providerId: "openrouter",
+				modelId: "anthropic/claude-opus-4.6",
+			},
+		});
+		expect(result.updated).toBe(true);
+		const updatedTask = result.board.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(updatedTask?.agentModel).toBe("claude-haiku-4-5");
 	});
 
 	it("updates reasoning-only task overrides without forcing provider or model overrides", () => {

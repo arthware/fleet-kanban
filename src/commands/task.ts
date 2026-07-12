@@ -7,14 +7,17 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardDependency,
 	RuntimeClineReasoningEffort,
+	RuntimeExternalIssue,
 	RuntimeTaskClineSettings,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import { runtimeAgentIdSchema, runtimeClineReasoningEffortSchema } from "../core/api-contract";
+import { parseExternalIssueRef } from "../core/external-issue";
 import { buildKanbanRuntimeUrl, getKanbanRuntimeOrigin, getRuntimeFetch } from "../core/runtime-endpoint";
 import {
 	addTaskDependency,
 	addTaskToColumn,
+	completeTaskAndGetReadyLinkedTaskIds,
 	deleteTasksFromBoard,
 	getTaskColumnId,
 	moveTaskToColumn,
@@ -26,9 +29,10 @@ import {
 import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
+import { resolveRepoNameWithOwner } from "../workspace/repo-name";
 import { renderTranscriptTailLines, selectTranscriptTail } from "./task-transcript-tail";
 
-const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "trash"] as const;
+const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "done", "trash"] as const;
 type ListTaskColumn = (typeof LIST_TASK_COLUMNS)[number];
 type TaskCommandTarget = { taskId?: string; column?: ListTaskColumn };
 
@@ -64,13 +68,10 @@ function parseListColumn(value: string | undefined): ListTaskColumn | undefined 
 	if (value === undefined) {
 		return undefined;
 	}
-	if (value === "done") {
-		return "trash";
-	}
-	if (value === "backlog" || value === "in_progress" || value === "review" || value === "trash") {
+	if (value === "backlog" || value === "in_progress" || value === "review" || value === "done" || value === "trash") {
 		return value;
 	}
-	throw new Error(`Invalid column "${value}". Expected one of: ${LIST_TASK_COLUMNS.join(", ")}, done.`);
+	throw new Error(`Invalid column "${value}". Expected one of: ${LIST_TASK_COLUMNS.join(", ")}.`);
 }
 
 function parseAutoReviewMode(value: string | undefined): "commit" | "pr" | undefined {
@@ -148,6 +149,38 @@ function formatTaskClineSettings(settings?: RuntimeTaskClineSettings): JsonRecor
 	return {
 		clineSettings: cloneTaskClineSettings(settings) ?? {},
 	};
+}
+
+export async function resolveExternalIssueForTaskCommand(input: {
+	ref: string;
+	cwd: string;
+	env?: NodeJS.ProcessEnv;
+}): Promise<RuntimeExternalIssue> {
+	const parsed = parseExternalIssueRef(input.ref);
+	if (!parsed) {
+		throw new Error(
+			`Invalid external issue reference "${input.ref}". Expected a Linear issue (ENG-123 or Linear URL) or GitHub issue (#123, owner/repo#123, or issue URL).`,
+		);
+	}
+	if (parsed.url) {
+		return parsed;
+	}
+	if (parsed.provider === "linear") {
+		const workspaceSlug = input.env?.KANBAN_LINEAR_WORKSPACE?.trim();
+		return {
+			...parsed,
+			...(workspaceSlug ? { url: `https://linear.app/${workspaceSlug}/issue/${parsed.key}` } : {}),
+		};
+	}
+	if (parsed.provider === "github" && parsed.key.startsWith("#")) {
+		const issueNumber = parsed.key.slice(1);
+		const nameWithOwner = await resolveRepoNameWithOwner(input.cwd);
+		return {
+			...parsed,
+			...(nameWithOwner ? { url: `https://github.com/${nameWithOwner}/issues/${issueNumber}` } : {}),
+		};
+	}
+	return parsed;
 }
 
 function buildTaskClineSettingsForCreate(input: {
@@ -353,6 +386,8 @@ function formatTaskRecord(
 		autoReviewEnabled: task.autoReviewEnabled === true,
 		autoReviewMode: task.autoReviewMode ?? "commit",
 		...(task.agentId ? { agentId: task.agentId } : {}),
+		...(task.agentModel ? { agentModel: task.agentModel } : {}),
+		...(task.externalIssue ? { externalIssue: task.externalIssue } : {}),
 		...formatTaskClineSettings(task.clineSettings),
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
@@ -392,8 +427,8 @@ function getLinkFailureMessage(reason: RuntimeAddTaskDependencyResult["reason"])
 	if (reason === "duplicate") {
 		return "These tasks are already linked.";
 	}
-	if (reason === "trash_task") {
-		return "Links cannot include done tasks.";
+	if (reason === "terminal_task" || reason === "trash_task") {
+		return "Links cannot include done or trashed tasks.";
 	}
 	if (reason === "non_backlog") {
 		return "Links require at least one backlog task.";
@@ -484,9 +519,18 @@ async function createTask(input: {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	externalIssueRef?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const externalIssue =
+		input.externalIssueRef !== undefined
+			? await resolveExternalIssueForTaskCommand({
+					ref: input.externalIssueRef,
+					cwd: workspaceRepoPath,
+					env: process.env,
+				})
+			: undefined;
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const created = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (state) => {
@@ -505,6 +549,7 @@ async function createTask(input: {
 				autoReviewMode: input.autoReviewMode,
 				agentId: input.agentId,
 				agentModel: input.agentModel,
+				externalIssue,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
 			},
@@ -530,6 +575,7 @@ async function createTask(input: {
 			autoReviewMode: created.autoReviewMode ?? "commit",
 			...(created.agentId ? { agentId: created.agentId } : {}),
 			...(created.agentModel ? { agentModel: created.agentModel } : {}),
+			...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
 			...formatTaskClineSettings(created.clineSettings),
 		},
 	};
@@ -546,6 +592,8 @@ async function updateTaskCommand(input: {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId | null;
+	agentModel?: string | null;
+	externalIssueRef?: string | null;
 	clineProviderId?: string | null;
 	clineModelId?: string | null;
 	clineReasoningEffort?: ParsedTaskClineReasoningEffort;
@@ -558,6 +606,8 @@ async function updateTaskCommand(input: {
 		input.autoReviewEnabled === undefined &&
 		input.autoReviewMode === undefined &&
 		input.agentId === undefined &&
+		input.agentModel === undefined &&
+		input.externalIssueRef === undefined &&
 		input.clineProviderId === undefined &&
 		input.clineModelId === undefined &&
 		input.clineReasoningEffort === undefined
@@ -566,12 +616,31 @@ async function updateTaskCommand(input: {
 	}
 
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const externalIssue =
+		input.externalIssueRef === undefined
+			? undefined
+			: input.externalIssueRef === null
+				? null
+				: await resolveExternalIssueForTaskCommand({
+						ref: input.externalIssueRef,
+						cwd: workspaceRepoPath,
+						env: process.env,
+					});
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const updated = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
 		const taskRecord = findTaskRecord(runtimeState, input.taskId);
 		if (!taskRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
+		}
+		// baseRef/agentModel drive worktree creation and the CLI agent's launch
+		// args, both fixed once a task leaves backlog — changing them afterward
+		// wouldn't take effect and would be misleading, so reject rather than
+		// silently ignore.
+		if ((input.baseRef !== undefined || input.agentModel !== undefined) && taskRecord.columnId !== "backlog") {
+			throw new Error(
+				`Task "${input.taskId}" is in "${taskRecord.columnId}" — base-ref and agent-model can only be changed while a task is in backlog.`,
+			);
 		}
 		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
 			providerId: input.clineProviderId,
@@ -587,6 +656,8 @@ async function updateTaskCommand(input: {
 			autoReviewEnabled: input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
 			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
 			agentId: input.agentId,
+			agentModel: input.agentModel,
+			externalIssue,
 			clineSettings: nextTaskClineSettings,
 		});
 		if (!updatedTask.updated || !updatedTask.task) {
@@ -860,6 +931,15 @@ interface TrashTaskExecutionResult {
 	alreadyInTrash: boolean;
 }
 
+interface CompleteTaskExecutionResult {
+	task: JsonRecord;
+	taskId: string;
+	previousColumnId: ListTaskColumn;
+	readyTaskIds: string[];
+	autoStartedTasks: JsonRecord[];
+	alreadyDone: boolean;
+}
+
 interface TrashTaskMutationValue {
 	task: JsonRecord;
 	previousColumnId: ListTaskColumn;
@@ -867,8 +947,99 @@ interface TrashTaskMutationValue {
 	alreadyInTrash: boolean;
 }
 
+interface CompleteTaskMutationValue {
+	task: JsonRecord;
+	previousColumnId: ListTaskColumn;
+	readyTaskIds: string[];
+	alreadyDone: boolean;
+}
+
 function columnCanHaveLiveTaskSession(columnId: ListTaskColumn): boolean {
 	return columnId === "in_progress" || columnId === "review";
+}
+
+async function completeTaskById(input: {
+	cwd: string;
+	taskId: string;
+	projectPath?: string;
+	workspaceRepoPath: string;
+	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>;
+}): Promise<CompleteTaskExecutionResult> {
+	const mutation = await mutateWorkspaceState<CompleteTaskMutationValue>(input.workspaceRepoPath, (latestState) => {
+		const latestRecord = findTaskRecord(latestState, input.taskId);
+		if (!latestRecord) {
+			throw new Error(`Task "${input.taskId}" was not found in workspace ${input.workspaceRepoPath}.`);
+		}
+		if (latestRecord.columnId === "done") {
+			return {
+				board: latestState.board,
+				value: {
+					task: formatTaskRecord(latestState, latestRecord.task, latestRecord.columnId),
+					previousColumnId: latestRecord.columnId,
+					readyTaskIds: [] as string[],
+					alreadyDone: true,
+				},
+				save: false,
+			};
+		}
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(latestState.board, input.taskId);
+		if (!completed.moved || !completed.task) {
+			throw new Error(`Task "${input.taskId}" could not be moved to done.`);
+		}
+
+		const nextState: RuntimeWorkspaceStateResponse = {
+			...latestState,
+			board: completed.board,
+		};
+		return {
+			board: completed.board,
+			value: {
+				task: formatTaskRecord(nextState, completed.task, "done"),
+				previousColumnId: latestRecord.columnId,
+				readyTaskIds: completed.readyTaskIds,
+				alreadyDone: false,
+			},
+		};
+	});
+
+	if (mutation.saved) {
+		await notifyRuntimeWorkspaceStateUpdated(input.runtimeClient);
+	}
+
+	if (mutation.value.alreadyDone) {
+		return {
+			task: mutation.value.task,
+			taskId: input.taskId,
+			previousColumnId: mutation.value.previousColumnId,
+			readyTaskIds: [],
+			autoStartedTasks: [],
+			alreadyDone: true,
+		};
+	}
+
+	if (columnCanHaveLiveTaskSession(mutation.value.previousColumnId)) {
+		await stopTaskRuntimeSession(input.runtimeClient, input.taskId);
+	}
+
+	const autoStartedTasks: JsonRecord[] = [];
+	for (const readyTaskId of mutation.value.readyTaskIds) {
+		const started = await startTask({
+			cwd: input.cwd,
+			taskId: readyTaskId,
+			projectPath: input.projectPath,
+		});
+		autoStartedTasks.push(started);
+	}
+
+	return {
+		task: mutation.value.task,
+		taskId: input.taskId,
+		previousColumnId: mutation.value.previousColumnId,
+		readyTaskIds: mutation.value.readyTaskIds,
+		autoStartedTasks,
+		alreadyDone: false,
+	};
 }
 
 async function trashTaskById(input: {
@@ -898,7 +1069,7 @@ async function trashTaskById(input: {
 
 		const trashed = trashTaskAndGetReadyLinkedTaskIds(latestState.board, input.taskId);
 		if (!trashed.moved || !trashed.task) {
-			throw new Error(`Task "${input.taskId}" could not be moved to done.`);
+			throw new Error(`Task "${input.taskId}" could not be moved to trash.`);
 		}
 
 		const nextState: RuntimeWorkspaceStateResponse = {
@@ -936,27 +1107,98 @@ async function trashTaskById(input: {
 		await stopTaskRuntimeSession(input.runtimeClient, input.taskId);
 	}
 
-	const autoStartedTasks: JsonRecord[] = [];
-	for (const readyTaskId of mutation.value.readyTaskIds) {
-		const started = await startTask({
-			cwd: input.cwd,
-			taskId: readyTaskId,
-			projectPath: input.projectPath,
-		});
-		autoStartedTasks.push(started);
-	}
-
 	const deletedWorkspace = await deleteTaskWorkspace(input.runtimeClient, input.taskId);
 
 	return {
 		task: mutation.value.task,
 		taskId: input.taskId,
 		previousColumnId: mutation.value.previousColumnId,
-		readyTaskIds: mutation.value.readyTaskIds,
-		autoStartedTasks,
+		readyTaskIds: [],
+		autoStartedTasks: [],
 		worktreeDeleted: deletedWorkspace.removed,
 		worktreeDeleteError: deletedWorkspace.error,
 		alreadyInTrash: false,
+	};
+}
+
+async function completeTask(input: {
+	cwd: string;
+	taskId?: string;
+	column?: ListTaskColumn;
+	projectPath?: string;
+}): Promise<JsonRecord> {
+	const target = resolveTaskCommandTarget(input, "task done");
+	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
+	const runtimeClient = createRuntimeTrpcClient(workspaceId);
+
+	if (target.kind === "task") {
+		const completed = await completeTaskById({
+			cwd: input.cwd,
+			taskId: target.taskId,
+			projectPath: input.projectPath,
+			workspaceRepoPath,
+			runtimeClient,
+		});
+		if (completed.alreadyDone) {
+			return {
+				ok: true,
+				message: `Task "${target.taskId}" is already done.`,
+				task: completed.task,
+				workspacePath: workspaceRepoPath,
+				readyTaskIds: [],
+				autoStartedTasks: [],
+			};
+		}
+		return {
+			ok: true,
+			task: completed.task,
+			workspacePath: workspaceRepoPath,
+			readyTaskIds: completed.readyTaskIds,
+			autoStartedTasks: completed.autoStartedTasks,
+		};
+	}
+
+	const initialState = await runtimeClient.workspace.getState.query();
+	const targetTasks = findTasksInColumn(initialState, target.column);
+	if (targetTasks.length === 0) {
+		return {
+			ok: true,
+			column: target.column,
+			workspacePath: workspaceRepoPath,
+			completedTasks: [],
+			alreadyDoneTasks: [],
+			readyTaskIds: [],
+			autoStartedTasks: [],
+			count: 0,
+		};
+	}
+
+	const results: CompleteTaskExecutionResult[] = [];
+	for (const { task } of targetTasks) {
+		results.push(
+			await completeTaskById({
+				cwd: input.cwd,
+				taskId: task.id,
+				projectPath: input.projectPath,
+				workspaceRepoPath,
+				runtimeClient,
+			}),
+		);
+	}
+
+	const completedTasks = results.filter((result) => !result.alreadyDone);
+	const alreadyDoneTasks = results.filter((result) => result.alreadyDone);
+
+	return {
+		ok: true,
+		column: target.column,
+		workspacePath: workspaceRepoPath,
+		completedTasks: completedTasks.map((result) => result.task),
+		alreadyDoneTasks: alreadyDoneTasks.map((result) => result.task),
+		readyTaskIds: [...new Set(completedTasks.flatMap((result) => result.readyTaskIds))],
+		autoStartedTasks: completedTasks.flatMap((result) => result.autoStartedTasks),
+		count: completedTasks.length,
 	};
 }
 
@@ -966,7 +1208,7 @@ async function trashTask(input: {
 	column?: ListTaskColumn;
 	projectPath?: string;
 }): Promise<JsonRecord> {
-	const target = resolveTaskCommandTarget(input, "task done");
+	const target = resolveTaskCommandTarget(input, "task trash");
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
@@ -982,7 +1224,7 @@ async function trashTask(input: {
 		if (trashed.alreadyInTrash) {
 			return {
 				ok: true,
-				message: `Task "${target.taskId}" is already done.`,
+				message: `Task "${target.taskId}" is already trashed.`,
 				task: trashed.task,
 				workspacePath: workspaceRepoPath,
 				readyTaskIds: [],
@@ -1232,6 +1474,11 @@ export function registerTaskCommand(program: Command): void {
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
 		.option(
+			"--external-issue <ref>",
+			"External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.",
+		)
+		.option("--issue <ref>", "Alias for --external-issue.")
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" for workspace default.',
 		)
@@ -1254,6 +1501,8 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				externalIssue?: string;
+				issue?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1271,6 +1520,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId) ?? undefined,
 							agentModel: parseOptionalStringOrDefault(options.agentModel) ?? undefined,
+							externalIssueRef: options.externalIssue ?? options.issue,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
 								modelId: parseOptionalStringOrDefault(options.clineModel) ?? undefined,
@@ -1297,6 +1547,15 @@ export function registerTaskCommand(program: Command): void {
 			'Agent override: cline | claude | codex | droid | gemini | opencode. Use "default" to clear.',
 		)
 		.option(
+			"--agent-model <id>",
+			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',
+		)
+		.option(
+			"--external-issue <ref>",
+			'External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Use "default" to clear. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.',
+		)
+		.option("--issue <ref>", "Alias for --external-issue.")
+		.option(
 			"--cline-provider <id>",
 			'Cline provider override (e.g. anthropic, openai, cline). Use "default" to clear.',
 		)
@@ -1316,6 +1575,9 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewEnabled?: unknown;
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
+				agentModel?: string;
+				externalIssue?: string;
+				issue?: string;
 				clineProvider?: string;
 				clineModel?: string;
 				clineReasoningEffort?: string;
@@ -1333,6 +1595,8 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
+							agentModel: parseOptionalStringOrDefault(options.agentModel),
+							externalIssueRef: parseOptionalStringOrDefault(options.externalIssue ?? options.issue),
 							clineProviderId: parseOptionalStringOrDefault(options.clineProvider),
 							clineModelId: parseOptionalStringOrDefault(options.clineModel),
 							clineReasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),
@@ -1342,13 +1606,34 @@ export function registerTaskCommand(program: Command): void {
 		);
 
 	task
-		.command("trash")
-		.alias("done")
-		.description("Move a task or an entire column to done and clean up task workspaces.")
+		.command("done")
+		.description("Complete a task or an entire column by moving it to done, keeping task worktrees.")
 		.option("--task-id <id>", "Task ID.")
 		.option(
 			"--column <column>",
-			"Column to move to done: backlog | in_progress | review | done. trash is also accepted.",
+			"Column to move to done: backlog | in_progress | review | done | trash.",
+			parseListColumn,
+		)
+		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
+		.action(async (options: { taskId?: string; column?: ListTaskColumn; projectPath?: string }) => {
+			await runTaskCommand(
+				async () =>
+					await completeTask({
+						cwd: process.cwd(),
+						taskId: options.taskId,
+						column: options.column,
+						projectPath: options.projectPath,
+					}),
+			);
+		});
+
+	task
+		.command("trash")
+		.description("Archive a task or an entire column by moving it to trash and cleaning up task workspaces.")
+		.option("--task-id <id>", "Task ID.")
+		.option(
+			"--column <column>",
+			"Column to move to trash: backlog | in_progress | review | done | trash.",
 			parseListColumn,
 		)
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")

@@ -26,6 +26,7 @@ export interface TaskDraft {
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
+	agentModel?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -60,7 +61,7 @@ function withUpdatedColumns(board: BoardData, columns: BoardColumn[]): BoardData
 }
 
 function normalizeColumnId(id: string): BoardColumnId | null {
-	if (id === "backlog" || id === "in_progress" || id === "review" || id === "trash") {
+	if (id === "backlog" || id === "in_progress" || id === "review" || id === "done" || id === "trash") {
 		return id;
 	}
 	return null;
@@ -158,6 +159,11 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		images?: unknown;
 		baseRef?: unknown;
 		agentId?: unknown;
+		agentModel?: unknown;
+		prUrl?: unknown;
+		prState?: unknown;
+		prNumber?: unknown;
+		externalIssue?: unknown;
 		clineSettings?: unknown;
 		clineProviderId?: unknown;
 		clineModelId?: unknown;
@@ -198,10 +204,32 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		images: normalizeTaskImages(card.images),
 		baseRef,
 		...(typeof card.agentId === "string" && card.agentId ? { agentId: card.agentId as RuntimeAgentId } : {}),
+		...(typeof card.agentModel === "string" && card.agentModel ? { agentModel: card.agentModel } : {}),
+		...(typeof card.prUrl === "string" && card.prUrl ? { prUrl: card.prUrl } : {}),
+		...(card.prState === "open" || card.prState === "merged" || card.prState === "closed"
+			? { prState: card.prState }
+			: {}),
+		...(typeof card.prNumber === "number" && Number.isInteger(card.prNumber) ? { prNumber: card.prNumber } : {}),
+		...(isExternalIssue(card.externalIssue) ? { externalIssue: card.externalIssue } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,
 	};
+}
+
+function isExternalIssue(value: unknown): value is NonNullable<BoardCard["externalIssue"]> {
+	if (value === null || typeof value !== "object") {
+		return false;
+	}
+	const issue = value as { provider?: unknown; key?: unknown; url?: unknown; raw?: unknown };
+	return (
+		(issue.provider === "linear" || issue.provider === "github") &&
+		typeof issue.key === "string" &&
+		issue.key.trim().length > 0 &&
+		(issue.url === undefined || (typeof issue.url === "string" && issue.url.trim().length > 0)) &&
+		typeof issue.raw === "string" &&
+		issue.raw.trim().length > 0
+	);
 }
 
 function createDependencyId(): string {
@@ -345,6 +373,7 @@ export function addTaskToColumnWithResult(
 			autoReviewMode: draft.autoReviewMode,
 			images: draft.images,
 			agentId: draft.agentId,
+			agentModel: draft.agentModel,
 			clineSettings: draft.clineSettings,
 			baseRef: draft.baseRef,
 		},
@@ -377,6 +406,13 @@ export function removeTaskDependency(board: BoardData, dependencyId: string): { 
 
 export function getReadyLinkedTaskIdsForTaskInTrash(board: BoardData, taskId: string): string[] {
 	return runtimeTaskState.getReadyLinkedTaskIdsForTaskInTrash(board, taskId);
+}
+
+export function completeTaskAndGetReadyLinkedTaskIds(
+	board: BoardData,
+	taskId: string,
+): { board: BoardData; moved: boolean; readyTaskIds: string[] } {
+	return runtimeTaskState.completeTaskAndGetReadyLinkedTaskIds(board, taskId);
 }
 
 export function trashTaskAndGetReadyLinkedTaskIds(
@@ -543,6 +579,7 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 							? draft.images.map((image) => ({ ...image }))
 							: undefined,
 				agentId: draft.agentId,
+				agentModel: draft.agentModel,
 				clineSettings: draft.clineSettings,
 				baseRef,
 				updatedAt: Date.now(),
@@ -574,6 +611,7 @@ export function updateTaskTitle(
 		autoReviewMode: selection.card.autoReviewMode,
 		images: selection.card.images,
 		agentId: selection.card.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: selection.card.clineSettings,
 		baseRef: selection.card.baseRef,
 	});
@@ -605,6 +643,7 @@ export function applyTaskDetailClineSettingsSelection(
 		autoReviewMode: selection.card.autoReviewMode,
 		images: selection.card.images,
 		agentId: settings.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: settings.clineSettings ?? undefined,
 		baseRef: selection.card.baseRef,
 	});
@@ -663,6 +702,7 @@ export function disableTaskAutoReview(board: BoardData, taskId: string): { board
 		autoReviewMode: DEFAULT_TASK_AUTO_REVIEW_MODE,
 		images: selection.card.images,
 		agentId: selection.card.agentId,
+		agentModel: selection.card.agentModel,
 		clineSettings: selection.card.clineSettings,
 		baseRef: selection.card.baseRef,
 	});

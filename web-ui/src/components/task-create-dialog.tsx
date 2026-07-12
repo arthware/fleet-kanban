@@ -120,6 +120,8 @@ export function TaskCreateDialog({
 	onBranchRefChange,
 	agentId,
 	onAgentIdChange,
+	agentModel,
+	onAgentModelChange,
 	clineSettings,
 	onClineSettingsChange,
 	defaultAgentId,
@@ -151,6 +153,8 @@ export function TaskCreateDialog({
 	onBranchRefChange: (value: string) => void;
 	agentId?: RuntimeAgentId | undefined;
 	onAgentIdChange?: (value: RuntimeAgentId | undefined) => void;
+	agentModel?: string | undefined;
+	onAgentModelChange?: (value: string | undefined) => void;
 	clineSettings?: RuntimeTaskClineSettings | undefined;
 	onClineSettingsChange?: (value: RuntimeTaskClineSettings | undefined) => void;
 	/** Default agent ID from runtimeConfig.selectedAgentId, used to show "Default (AgentName)" in picker */
@@ -580,6 +584,8 @@ export function TaskCreateDialog({
 						<TaskAgentModelPicker
 							agentId={agentId}
 							onAgentIdChange={onAgentIdChange}
+							agentModel={agentModel}
+							onAgentModelChange={onAgentModelChange ?? (() => {})}
 							clineSettings={clineSettings}
 							onClineSettingsChange={onClineSettingsChange}
 							agentOptions={agentOptions}

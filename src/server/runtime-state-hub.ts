@@ -20,6 +20,8 @@ import type {
 	RuntimeStateStreamWorkspaceStateMessage,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
+import { setCardPrUrl } from "../core/task-board-mutations";
+import { mutateWorkspaceState } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
@@ -85,6 +87,18 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			};
 			for (const client of clients) {
 				sendRuntimeStateMessage(client, payload);
+			}
+		},
+		// Persist a first-detected PR onto the card, then push the updated board to
+		// clients so the card renders its PR link. `setCardPrUrl` is idempotent and
+		// `mutateWorkspaceState` skips the write when nothing changed.
+		persistCardPr: async ({ workspaceId, workspacePath, taskId, pr }) => {
+			const mutation = await mutateWorkspaceState(workspacePath, (state) => {
+				const result = setCardPrUrl(state.board, taskId, pr);
+				return { board: result.board, value: result.updated, save: result.updated };
+			});
+			if (mutation.value) {
+				await broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
 			}
 		},
 	});

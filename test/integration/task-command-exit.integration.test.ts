@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-
+import { ensureTaskWorktreeIfDoesntExist } from "../../src/workspace/task-worktree";
 import { createGitTestEnv } from "../utilities/git-env";
 import {
 	getAvailablePort,
@@ -50,6 +50,27 @@ function commitAll(cwd: string, message: string): string {
 	runGit(cwd, ["add", "."]);
 	runGit(cwd, ["commit", "-qm", message]);
 	return runGit(cwd, ["rev-parse", "HEAD"]);
+}
+
+async function withHomeEnv<T>(homeDir: string, run: () => Promise<T>): Promise<T> {
+	const previousHome = process.env.HOME;
+	const previousUserProfile = process.env.USERPROFILE;
+	process.env.HOME = homeDir;
+	process.env.USERPROFILE = homeDir;
+	try {
+		return await run();
+	} finally {
+		if (previousHome === undefined) {
+			delete process.env.HOME;
+		} else {
+			process.env.HOME = previousHome;
+		}
+		if (previousUserProfile === undefined) {
+			delete process.env.USERPROFILE;
+		} else {
+			process.env.USERPROFILE = previousUserProfile;
+		}
+	}
 }
 
 function installBrowserOpenStub(binDir: string, logPath: string): void {
@@ -292,7 +313,7 @@ describe("source task commands", () => {
 		}
 	});
 
-	it("supports done and trash aliases when moving and deleting tasks", { timeout: 60_000 }, async () => {
+	it("keeps done, trash, and delete as separate task lifecycles", { timeout: 60_000 }, async () => {
 		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-done-delete-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-done-delete-");
 
@@ -357,17 +378,43 @@ describe("source task commands", () => {
 				}
 				expect(taskIds).toHaveLength(3);
 
-				const movedByDoneAlias = await runCliCommandAndCollectOutput({
+				const doneWorktreePath = await withHomeEnv(homeDir, async () => {
+					const ensured = await ensureTaskWorktreeIfDoesntExist({
+						cwd: projectPath,
+						taskId: taskIds[0] ?? "",
+						baseRef: "main",
+					});
+					if (!ensured.ok) {
+						throw new Error(ensured.error ?? "Could not ensure done task worktree.");
+					}
+					return ensured.path;
+				});
+				const trashWorktreePath = await withHomeEnv(homeDir, async () => {
+					const ensured = await ensureTaskWorktreeIfDoesntExist({
+						cwd: projectPath,
+						taskId: taskIds[1] ?? "",
+						baseRef: "main",
+					});
+					if (!ensured.ok) {
+						throw new Error(ensured.error ?? "Could not ensure trash task worktree.");
+					}
+					return ensured.path;
+				});
+				expect(existsSync(doneWorktreePath)).toBe(true);
+				expect(existsSync(trashWorktreePath)).toBe(true);
+
+				const movedToDone = await runCliCommandAndCollectOutput({
 					args: ["task", "done", "--task-id", taskIds[0] ?? "", "--project-path", projectPath],
 					cwd: projectPath,
 					env,
 				});
 				expect(
-					movedByDoneAlias.didExit,
-					`task done did not exit in time.\nstdout:\n${movedByDoneAlias.stdout}\nstderr:\n${movedByDoneAlias.stderr}`,
+					movedToDone.didExit,
+					`task done did not exit in time.\nstdout:\n${movedToDone.stdout}\nstderr:\n${movedToDone.stderr}`,
 				).toBe(true);
-				expect(movedByDoneAlias.exitCode).toBe(0);
-				expect(movedByDoneAlias.stdout).toContain('"ok": true');
+				expect(movedToDone.exitCode).toBe(0);
+				expect(movedToDone.stdout).toContain('"ok": true');
+				expect(existsSync(doneWorktreePath)).toBe(true);
 
 				const movedByTrashCommand = await runCliCommandAndCollectOutput({
 					args: ["task", "trash", "--column", "backlog", "--project-path", projectPath],
@@ -382,6 +429,7 @@ describe("source task commands", () => {
 				expect(movedByTrashCommand.stdout).toContain('"ok": true');
 				expect(movedByTrashCommand.stdout).toContain('"column": "backlog"');
 				expect(movedByTrashCommand.stdout).toContain('"count": 2');
+				expect(existsSync(trashWorktreePath)).toBe(false);
 
 				const listedDoneBeforeDelete = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "done", "--project-path", projectPath],
@@ -393,7 +441,7 @@ describe("source task commands", () => {
 					`task list --column done did not exit in time.\nstdout:\n${listedDoneBeforeDelete.stdout}\nstderr:\n${listedDoneBeforeDelete.stderr}`,
 				).toBe(true);
 				expect(listedDoneBeforeDelete.exitCode).toBe(0);
-				expect(listedDoneBeforeDelete.stdout).toContain('"count": 3');
+				expect(listedDoneBeforeDelete.stdout).toContain('"count": 1');
 
 				const listedTrashBeforeDelete = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "trash", "--project-path", projectPath],
@@ -405,7 +453,7 @@ describe("source task commands", () => {
 					`task list --column trash did not exit in time.\nstdout:\n${listedTrashBeforeDelete.stdout}\nstderr:\n${listedTrashBeforeDelete.stderr}`,
 				).toBe(true);
 				expect(listedTrashBeforeDelete.exitCode).toBe(0);
-				expect(listedTrashBeforeDelete.stdout).toContain('"count": 3');
+				expect(listedTrashBeforeDelete.stdout).toContain('"count": 2');
 
 				const deletedDone = await runCliCommandAndCollectOutput({
 					args: ["task", "delete", "--column", "done", "--project-path", projectPath],
@@ -418,8 +466,9 @@ describe("source task commands", () => {
 				).toBe(true);
 				expect(deletedDone.exitCode).toBe(0);
 				expect(deletedDone.stdout).toContain('"ok": true');
-				expect(deletedDone.stdout).toContain('"column": "trash"');
-				expect(deletedDone.stdout).toContain('"count": 3');
+				expect(deletedDone.stdout).toContain('"column": "done"');
+				expect(deletedDone.stdout).toContain('"count": 1');
+				expect(existsSync(doneWorktreePath)).toBe(false);
 
 				const listedTrash = await runCliCommandAndCollectOutput({
 					args: ["task", "list", "--column", "trash", "--project-path", projectPath],
@@ -431,7 +480,7 @@ describe("source task commands", () => {
 					`task list --column trash did not exit in time.\nstdout:\n${listedTrash.stdout}\nstderr:\n${listedTrash.stderr}`,
 				).toBe(true);
 				expect(listedTrash.exitCode).toBe(0);
-				expect(listedTrash.stdout).toContain('"count": 0');
+				expect(listedTrash.stdout).toContain('"count": 2');
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);
@@ -529,6 +578,295 @@ describe("source task commands", () => {
 				};
 				expect(defaultPayload.ok).toBe(true);
 				expect(defaultPayload.task?.clineSettings).toEqual({});
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it(
+		"updates and clears a backlog task's agent model, and rejects the override once the task leaves backlog",
+		{ timeout: 60_000 },
+		async () => {
+			const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-agent-model-");
+			const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-agent-model-");
+
+			try {
+				initGitRepository(projectPath);
+				writeFileSync(join(projectPath, "README.md"), "# Task Agent Model Test\n", "utf8");
+				commitAll(projectPath, "init");
+
+				const port = String(await getAvailablePort());
+				const env = createGitTestEnv({
+					HOME: homeDir,
+					USERPROFILE: homeDir,
+					KANBAN_RUNTIME_PORT: port,
+				});
+
+				const serverProcess = spawn(
+					process.execPath,
+					[
+						"--require",
+						resolveShutdownIpcHookPath(),
+						"--import",
+						resolveTsxLoaderImportSpecifier(),
+						resolve(process.cwd(), "src/cli.ts"),
+						"--no-open",
+					],
+					{
+						cwd: projectPath,
+						env,
+						stdio: ["ignore", "pipe", "pipe", "ipc"],
+					},
+				);
+
+				try {
+					await waitForServerStart(serverProcess);
+
+					const created = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"create",
+							"--prompt",
+							"Create a task whose agent model gets updated",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(created.exitCode).toBe(0);
+					const createdPayload = JSON.parse(created.stdout) as { ok?: boolean; task?: { id?: string } };
+					const taskId = createdPayload.task?.id ?? "";
+					expect(taskId).not.toBe("");
+
+					const updatedWithModel = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"claude-haiku-4-5",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(
+						updatedWithModel.exitCode,
+						`task update --agent-model failed.\nstdout:\n${updatedWithModel.stdout}\nstderr:\n${updatedWithModel.stderr}`,
+					).toBe(0);
+					const updatedPayload = JSON.parse(updatedWithModel.stdout) as {
+						ok?: boolean;
+						task?: { agentModel?: string };
+					};
+					expect(updatedPayload.task?.agentModel).toBe("claude-haiku-4-5");
+
+					const listed = await runCliCommandAndCollectOutput({
+						args: ["task", "list", "--column", "backlog", "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(listed.exitCode).toBe(0);
+					expect(listed.stdout).toContain('"agentModel": "claude-haiku-4-5"');
+
+					const clearedModel = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"default",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(clearedModel.exitCode).toBe(0);
+					const clearedPayload = JSON.parse(clearedModel.stdout) as { task?: { agentModel?: string } };
+					expect(clearedPayload.task?.agentModel).toBeUndefined();
+
+					const trashed = await runCliCommandAndCollectOutput({
+						args: ["task", "trash", "--task-id", taskId, "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(trashed.exitCode).toBe(0);
+
+					const rejectedUpdate = await runCliCommandAndCollectOutput({
+						args: [
+							"task",
+							"update",
+							"--task-id",
+							taskId,
+							"--agent-model",
+							"claude-haiku-4-5",
+							"--project-path",
+							projectPath,
+						],
+						cwd: projectPath,
+						env,
+					});
+					expect(rejectedUpdate.exitCode).not.toBe(0);
+					expect(rejectedUpdate.stdout).toContain("can only be changed while a task is in backlog");
+				} finally {
+					await requestGracefulShutdown(serverProcess);
+					const stopped = await waitForExit(serverProcess, 5_000);
+					if (!stopped) {
+						serverProcess.kill("SIGKILL");
+						await waitForExit(serverProcess, 5_000);
+					}
+				}
+			} finally {
+				cleanupProject();
+				cleanupHome();
+			}
+		},
+	);
+
+	it("creates, updates, and clears external issue metadata through the task CLI", { timeout: 60_000 }, async () => {
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-external-issue-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-external-issue-");
+
+		try {
+			initGitRepository(projectPath);
+			writeFileSync(join(projectPath, "README.md"), "# Task External Issue Test\n", "utf8");
+			commitAll(projectPath, "init");
+			runGit(projectPath, ["remote", "add", "origin", "https://github.com/owner/repo.git"]);
+
+			const port = String(await getAvailablePort());
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			try {
+				await waitForServerStart(serverProcess);
+
+				const created = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"create",
+						"--prompt",
+						"Create a task with an external issue",
+						"--issue",
+						"owner/repo#42",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(
+					created.exitCode,
+					`task create failed.\nstdout:\n${created.stdout}\nstderr:\n${created.stderr}`,
+				).toBe(0);
+				const createdPayload = JSON.parse(created.stdout) as {
+					task?: { id?: string; externalIssue?: { key?: string; url?: string; raw?: string } };
+				};
+				const taskId = createdPayload.task?.id ?? "";
+				expect(taskId).not.toBe("");
+				expect(createdPayload.task?.externalIssue).toEqual({
+					provider: "github",
+					key: "owner/repo#42",
+					url: "https://github.com/owner/repo/issues/42",
+					raw: "owner/repo#42",
+				});
+
+				const updatedToUnlinkedLinear = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						taskId,
+						"--external-issue",
+						"ENG-123",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(updatedToUnlinkedLinear.exitCode).toBe(0);
+				const linearPayload = JSON.parse(updatedToUnlinkedLinear.stdout) as {
+					task?: { externalIssue?: { provider?: string; key?: string; url?: string; raw?: string } };
+				};
+				expect(linearPayload.task?.externalIssue).toEqual({
+					provider: "linear",
+					key: "ENG-123",
+					raw: "ENG-123",
+				});
+
+				const trashed = await runCliCommandAndCollectOutput({
+					args: ["task", "trash", "--task-id", taskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(trashed.exitCode).toBe(0);
+
+				const updatedOutsideBacklog = await runCliCommandAndCollectOutput({
+					args: ["task", "update", "--task-id", taskId, "--external-issue", "#7", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(updatedOutsideBacklog.exitCode).toBe(0);
+				const outsideBacklogPayload = JSON.parse(updatedOutsideBacklog.stdout) as {
+					task?: { externalIssue?: { key?: string; url?: string; raw?: string } };
+				};
+				expect(outsideBacklogPayload.task?.externalIssue).toEqual({
+					provider: "github",
+					key: "#7",
+					url: "https://github.com/owner/repo/issues/7",
+					raw: "#7",
+				});
+
+				const cleared = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						taskId,
+						"--external-issue",
+						"default",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(cleared.exitCode).toBe(0);
+				const clearedPayload = JSON.parse(cleared.stdout) as { task?: { externalIssue?: unknown } };
+				expect(clearedPayload.task?.externalIssue).toBeUndefined();
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);

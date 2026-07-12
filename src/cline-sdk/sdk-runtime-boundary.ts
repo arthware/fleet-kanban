@@ -17,6 +17,7 @@ import {
 	type MessageWithMetadata,
 	type RuleConfig,
 	resolveClineDataDir,
+	type SessionAccumulatedUsage,
 	type SessionHistoryRecord,
 	type ToolApprovalRequest,
 	type ToolApprovalResult,
@@ -32,6 +33,9 @@ export type ClineSdkBasicLogger = BasicLogger;
 export type ClineSdkAgentEvent = AgentEvent;
 
 export type ClineSdkSessionEvent = CoreSessionEvent;
+
+/** Cline's own accumulated per-session usage totals (`ClineCore.getAccumulatedUsage`). */
+export type ClineSdkAccumulatedUsage = SessionAccumulatedUsage;
 
 export type ClineSdkStartSessionInput = ClineCoreStartInput;
 export type ClineSdkSessionRecord = SessionHistoryRecord;

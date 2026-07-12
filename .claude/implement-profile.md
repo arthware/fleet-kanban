@@ -13,6 +13,10 @@ exploration-mode — no unit tests there**; don't run this flow for CLI-only cha
   card on the board (`http://127.0.0.1:3500`) is the implementation card; read any prior design note
   (`docs/design/<id>.md`) if a design phase produced one.
 - Kanban runs each task in its own worktree + branch — if you're already in one, use it.
+- **Read the card's `## Prior art` commits first (if any).** When the card cites prior-art SHAs, run
+  `git show <sha>` (and `git log -p -1 <sha>`) on each before writing code and follow the established
+  pattern — this is the primed-context path that replaces a broad codebase sweep (see `AGENTS.md` →
+  "Don't research from zero" / "Prior-art commits").
 
 ## Tests
 

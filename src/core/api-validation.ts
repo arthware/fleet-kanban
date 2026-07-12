@@ -23,9 +23,11 @@ import {
 	type RuntimeTaskChatMessagesRequest,
 	type RuntimeTaskChatReloadRequest,
 	type RuntimeTaskChatSendRequest,
+	type RuntimeTaskDurabilityRequest,
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
+	type RuntimeTaskTokenUsageRequest,
 	type RuntimeTaskTranscriptRequest,
 	type RuntimeTaskWorkspaceInfoRequest,
 	type RuntimeTerminalWsClientMessage,
@@ -56,9 +58,11 @@ import {
 	runtimeTaskChatMessagesRequestSchema,
 	runtimeTaskChatReloadRequestSchema,
 	runtimeTaskChatSendRequestSchema,
+	runtimeTaskDurabilityRequestSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
+	runtimeTaskTokenUsageRequestSchema,
 	runtimeTaskTranscriptRequestSchema,
 	runtimeTaskWorkspaceInfoRequestSchema,
 	runtimeTerminalWsClientMessageSchema,
@@ -173,6 +177,18 @@ export function parseWorktreeDeleteRequest(value: unknown): RuntimeWorktreeDelet
 	}
 	return {
 		taskId,
+		...(parsed.discard === true ? { discard: true } : {}),
+	};
+}
+
+export function parseTaskDurabilityRequest(value: unknown): RuntimeTaskDurabilityRequest {
+	const parsed = parseWithSchema(runtimeTaskDurabilityRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Invalid task durability payload.");
+	}
+	return {
+		taskId,
 	};
 }
 
@@ -279,6 +295,16 @@ export function parseTaskTranscriptRequest(value: unknown): RuntimeTaskTranscrip
 	}
 	return {
 		taskId,
+	};
+}
+
+export function parseTaskTokenUsageRequest(value: unknown): RuntimeTaskTokenUsageRequest {
+	const parsed = parseWithSchema(runtimeTaskTokenUsageRequestSchema, value);
+	// Trim and drop blanks so the batch only carries usable ids; duplicates are
+	// harmless (the response is keyed by id) but empty strings never are.
+	const taskIds = parsed.taskIds.map((taskId) => taskId.trim()).filter(Boolean);
+	return {
+		taskIds,
 	};
 }
 

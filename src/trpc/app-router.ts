@@ -75,12 +75,16 @@ import type {
 	RuntimeTaskChatReloadResponse,
 	RuntimeTaskChatSendRequest,
 	RuntimeTaskChatSendResponse,
+	RuntimeTaskDurabilityRequest,
+	RuntimeTaskDurabilityResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
 	RuntimeTaskSessionStartResponse,
 	RuntimeTaskSessionStopRequest,
 	RuntimeTaskSessionStopResponse,
+	RuntimeTaskTokenUsageRequest,
+	RuntimeTaskTokenUsageResponse,
 	RuntimeTaskTranscriptRequest,
 	RuntimeTaskTranscriptResponse,
 	RuntimeTaskWorkspaceInfoRequest,
@@ -168,12 +172,16 @@ import {
 	runtimeTaskChatReloadResponseSchema,
 	runtimeTaskChatSendRequestSchema,
 	runtimeTaskChatSendResponseSchema,
+	runtimeTaskDurabilityRequestSchema,
+	runtimeTaskDurabilityResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStartResponseSchema,
 	runtimeTaskSessionStopRequestSchema,
 	runtimeTaskSessionStopResponseSchema,
+	runtimeTaskTokenUsageRequestSchema,
+	runtimeTaskTokenUsageResponseSchema,
 	runtimeTaskTranscriptRequestSchema,
 	runtimeTaskTranscriptResponseSchema,
 	runtimeTaskWorkspaceInfoRequestSchema,
@@ -238,6 +246,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskTranscriptRequest,
 		) => Promise<RuntimeTaskTranscriptResponse>;
+		getTaskTokenUsage: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskTokenUsageRequest,
+		) => Promise<RuntimeTaskTokenUsageResponse>;
 		getClineSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
 		sendTaskChatMessage: (
 			scope: RuntimeTrpcWorkspaceScope,
@@ -334,6 +346,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorktreeDeleteRequest,
 		) => Promise<RuntimeWorktreeDeleteResponse>;
+		assessTaskDurability: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskDurabilityRequest,
+		) => Promise<RuntimeTaskDurabilityResponse>;
 		loadTaskContext: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskWorkspaceInfoRequest,
@@ -492,6 +508,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeTaskTranscriptResponseSchema)
 			.query(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.getTaskTranscript(ctx.workspaceScope, input);
+			}),
+		getTaskTokenUsage: workspaceProcedure
+			.input(runtimeTaskTokenUsageRequestSchema)
+			.output(runtimeTaskTokenUsageResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.runtimeApi.getTaskTokenUsage(ctx.workspaceScope, input);
 			}),
 		getClineSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getClineSlashCommands(ctx.workspaceScope);
@@ -655,6 +677,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeWorktreeDeleteResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.deleteWorktree(ctx.workspaceScope, input);
+			}),
+		assessTaskDurability: workspaceProcedure
+			.input(runtimeTaskDurabilityRequestSchema)
+			.output(runtimeTaskDurabilityResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.assessTaskDurability(ctx.workspaceScope, input);
 			}),
 		getTaskContext: workspaceProcedure
 			.input(runtimeTaskWorkspaceInfoRequestSchema)

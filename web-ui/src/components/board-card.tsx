@@ -6,6 +6,7 @@ import {
 	AlertCircle,
 	AlertTriangle,
 	Bot,
+	CheckCircle2,
 	GitBranch,
 	MessageCircleQuestion,
 	Pencil,
@@ -21,14 +22,18 @@ import {
 	formatClineSelectedModelButtonText,
 	resolveClineModelDisplayName,
 } from "@/components/detail-panels/cline-model-picker-options";
+import { ExternalIssueBadge } from "@/components/external-issue-badge";
+import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
+import { cardKind, getTaskCompletionPolicyBadgeLabel } from "@/utils/card-completion-policy";
+import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
 import {
@@ -60,6 +65,22 @@ const DESCRIPTION_EXPAND_LABEL = "See more";
 const DESCRIPTION_COLLAPSE_LABEL = "Less";
 const DESCRIPTION_COLLAPSE_SUFFIX = `… ${DESCRIPTION_EXPAND_LABEL}`;
 const DESCRIPTION_EXPANDED_SUFFIX = `… ${DESCRIPTION_COLLAPSE_LABEL}`;
+
+// Short display names for the handful of Claude model ids a card's agentModel
+// override can carry. An id absent here (another provider's, or a future
+// Claude model) falls back to the raw id rather than hiding it.
+const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+	"claude-opus-4-8": "Opus 4.8",
+	"claude-sonnet-5": "Sonnet 5",
+	"claude-haiku-4-5": "Haiku 4.5",
+};
+
+function resolveAgentModelDisplayName(agentId: RuntimeAgentId | null, modelId: string): string {
+	if (agentId === "cline") {
+		return resolveClineModelDisplayName(modelId);
+	}
+	return KNOWN_MODEL_DISPLAY_NAMES[modelId] ?? modelId;
+}
 
 function reconstructTaskWorktreeDisplayPath(
 	taskId: string,
@@ -240,6 +261,7 @@ export function BoardCard({
 	index,
 	columnId,
 	sessionSummary,
+	tokenUsage = null,
 	selected = false,
 	onClick,
 	onStart,
@@ -260,11 +282,13 @@ export function BoardCard({
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId = null,
+	defaultAgentId = null,
 }: {
 	card: BoardCardModel;
 	index: number;
 	columnId: BoardColumnId;
 	sessionSummary?: RuntimeTaskSessionSummary;
+	tokenUsage?: RuntimeTaskTokenUsage | null;
 	selected?: boolean;
 	onClick?: () => void;
 	onStart?: (taskId: string) => void;
@@ -285,6 +309,7 @@ export function BoardCard({
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
+	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -297,6 +322,7 @@ export function BoardCard({
 	const [descriptionFont, setDescriptionFont] = useState(DEFAULT_TEXT_MEASURE_FONT);
 	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 	const reviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(card.id);
+	const isDoneCard = columnId === "done";
 	const isTrashCard = columnId === "trash";
 	const isCardInteractive = !isTrashCard;
 	const descriptionWidth = descriptionRect.width > 0 ? descriptionRect.width : descriptionWidthFallback;
@@ -438,7 +464,7 @@ export function BoardCard({
 		return null;
 	};
 	const statusMarker = renderStatusMarker();
-	const showWorkspaceStatus = columnId === "in_progress" || columnId === "review" || isTrashCard;
+	const showWorkspaceStatus = columnId === "in_progress" || columnId === "review" || isDoneCard || isTrashCard;
 	const reviewWorkspacePath = reviewWorkspaceSnapshot
 		? formatPathForDisplay(reviewWorkspaceSnapshot.path)
 		: isTrashCard
@@ -464,9 +490,13 @@ export function BoardCard({
 			: sessionSummary?.agentSessionLifecycle === "resumable"
 				? "Resume"
 				: "Restore";
-	const agentOverrideLabel = useMemo(
-		() => (card.agentId ? (getRuntimeAgentCatalogEntry(card.agentId)?.label ?? card.agentId) : null),
-		[card.agentId],
+	// The agent always renders, even for a card that never set an override —
+	// falling back to the workspace's default agent so operators can see what a
+	// card actually runs on, not just what it explicitly overrode.
+	const effectiveAgentId = card.agentId ?? defaultAgentId ?? null;
+	const agentLabel = useMemo(
+		() => (effectiveAgentId ? (getRuntimeAgentCatalogEntry(effectiveAgentId)?.label ?? effectiveAgentId) : null),
+		[effectiveAgentId],
 	);
 	const modelOverrideLabel = useMemo(() => {
 		if (card.clineSettings === undefined) {
@@ -496,10 +526,61 @@ export function BoardCard({
 			showReasoningEffort: Boolean(inheritedReasoningEffort),
 		});
 	}, [card.clineSettings, defaultClineModelId]);
-	const taskAgentSettingsLabel = useMemo(() => {
-		const parts = [agentOverrideLabel, modelOverrideLabel].filter((value): value is string => Boolean(value));
-		return parts.length > 0 ? parts.join(" · ") : null;
-	}, [agentOverrideLabel, modelOverrideLabel]);
+	// Model source priority: the Cline picker's own structured override (already
+	// resolved above) wins when present; otherwise the card's plain agentModel
+	// override; otherwise a muted "default" once the agent itself is known — a
+	// card that has never set anything model-specific still tells you it's
+	// running the workspace default rather than showing nothing.
+	const resolvedModelLabel = useMemo(() => {
+		if (modelOverrideLabel) {
+			return { text: modelOverrideLabel, isDefault: false };
+		}
+		if (card.agentModel) {
+			return { text: resolveAgentModelDisplayName(effectiveAgentId, card.agentModel), isDefault: false };
+		}
+		if (effectiveAgentId) {
+			return { text: "default", isDefault: true };
+		}
+		return null;
+	}, [modelOverrideLabel, card.agentModel, effectiveAgentId]);
+	const taskAgentSettings = useMemo(() => {
+		if (!agentLabel && !resolvedModelLabel) {
+			return null;
+		}
+		return { agentLabel, modelLabel: resolvedModelLabel };
+	}, [agentLabel, resolvedModelLabel]);
+	const isPlanCard = cardKind(card) === "plan";
+	const completionPolicyBadgeLabel = getTaskCompletionPolicyBadgeLabel(card);
+	// Cumulative token usage, derived on read from the agent's own transcript.
+	// The headline counts only real conversational work (input + output); cache
+	// lanes are excluded because re-read context dominates the raw total ~100×
+	// and would make a card read far heavier than it is (see realWorkTokenCount).
+	// A fresh card (unknown, or no work and no cost) shows nothing so the board
+	// stays clean; the chip only appears once there is real work or a cost to
+	// report. When the agent's model is priced, an estimated cost is appended
+	// (`· $X.XX`); an unpriced model shows tokens alone rather than a wrong dollar
+	// figure. The tooltip carries the full per-lane breakdown and the grand total
+	// so the headline↔total gap is self-explaining vs ccusage-style tools.
+	const tokenUsageChip = useMemo(() => {
+		if (!tokenUsage) {
+			return null;
+		}
+		const realWork = realWorkTokenCount(tokenUsage);
+		const hasCost = tokenUsage.costUsd != null && tokenUsage.costUsd > 0;
+		if (realWork <= 0 && !hasCost) {
+			return null;
+		}
+		const costLabel = tokenUsage.costUsd != null ? ` · ${formatCostUsd(tokenUsage.costUsd)}` : "";
+		return {
+			label: `${formatTokenCount(realWork)}${costLabel}`,
+			title:
+				`${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out · ` +
+				`${tokenUsage.cacheReadTokens.toLocaleString()} cache read · ` +
+				`${tokenUsage.cacheCreationTokens.toLocaleString()} cache write · ` +
+				`${totalTokenCount(tokenUsage).toLocaleString()} total` +
+				(tokenUsage.costUsd != null ? ` · ${formatCostUsd(tokenUsage.costUsd)} est.` : ""),
+		};
+	}, [tokenUsage]);
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
 
@@ -576,13 +657,22 @@ export function BoardCard({
 						<div
 							className={cn(
 								"rounded-md border border-border-bright bg-surface-2 p-2.5",
+								isDoneCard && "border-status-green/50 bg-status-green/5",
 								isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
+								isDoneCard && isCardInteractive && "hover:border-status-green/60 hover:bg-status-green/10",
 								isDragging && "shadow-lg",
 								isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
+								isDoneCard && isHovered && isCardInteractive && "border-status-green/60 bg-status-green/10",
 								isDependencySource && "kb-board-card-dependency-source",
 								isDependencyTarget && "kb-board-card-dependency-target",
 							)}
 						>
+							{card.externalIssue || card.prUrl ? (
+								<div className="mb-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-meta-row">
+									<ExternalIssueBadge issue={card.externalIssue} />
+									<PrBadge card={card} />
+								</div>
+							) : null}
 							<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
 								{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
 								<div className="flex-1 min-w-0">
@@ -600,6 +690,9 @@ export function BoardCard({
 										/>
 									) : onSaveTitle ? (
 										<div className="flex items-center gap-1 min-w-0">
+											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+												{card.id}
+											</span>
 											<p
 												className={cn(
 													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
@@ -626,14 +719,19 @@ export function BoardCard({
 											</button>
 										</div>
 									) : (
-										<p
-											className={cn(
-												"kb-line-clamp-1 m-0 font-medium text-sm",
-												isTrashCard && "line-through text-text-tertiary",
-											)}
-										>
-											{displayTitle}
-										</p>
+										<div className="flex items-center gap-1 min-w-0">
+											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+												{card.id}
+											</span>
+											<p
+												className={cn(
+													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
+													isTrashCard && "line-through text-text-tertiary",
+												)}
+											>
+												{displayTitle}
+											</p>
+										</div>
 									)}
 								</div>
 								{columnId === "backlog" ? (
@@ -650,7 +748,7 @@ export function BoardCard({
 									/>
 								) : columnId === "review" ? (
 									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <CheckCircle2 size={13} />}
 										variant="ghost"
 										size="sm"
 										disabled={isMoveToTrashLoading}
@@ -661,7 +759,20 @@ export function BoardCard({
 											onMoveToTrash?.(card.id);
 										}}
 									/>
-								) : columnId === "trash" ? (
+								) : isDoneCard ? (
+									<Button
+										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+										variant="ghost"
+										size="sm"
+										disabled={isMoveToTrashLoading}
+										aria-label="Trash task"
+										onMouseDown={stopEvent}
+										onClick={(event) => {
+											stopEvent(event);
+											onMoveToTrash?.(card.id);
+										}}
+									/>
+								) : isTrashCard ? (
 									<Tooltip
 										side="bottom"
 										content={
@@ -682,7 +793,7 @@ export function BoardCard({
 											}
 											variant="ghost"
 											size="sm"
-											aria-label={`${trashRestoreLabel} task from done`}
+											aria-label={`${trashRestoreLabel} task from archive`}
 											onMouseDown={stopEvent}
 											onClick={(event) => {
 												stopEvent(event);
@@ -760,19 +871,56 @@ export function BoardCard({
 									</p>
 								</div>
 							) : null}
-							{taskAgentSettingsLabel ? (
-								<div className="mt-1">
-									<span
-										className={cn(
-											"inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-											isTrashCard
-												? "border-border text-text-tertiary bg-surface-1"
-												: "border-status-blue/30 bg-status-blue/10 text-status-blue",
-										)}
-									>
-										<Bot size={12} className="shrink-0" />
-										<span className="truncate">{taskAgentSettingsLabel}</span>
-									</span>
+							{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
+								<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
+									{isPlanCard ? (
+										<span
+											className={cn(
+												"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+												isTrashCard
+													? "border-border text-text-tertiary bg-surface-1"
+													: "border-status-purple/30 bg-status-purple/10 text-status-purple",
+											)}
+										>
+											Plan
+										</span>
+									) : null}
+									{taskAgentSettings ? (
+										<span
+											className={cn(
+												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+												isTrashCard
+													? "border-border text-text-tertiary bg-surface-1"
+													: "border-status-blue/30 bg-status-blue/10 text-status-blue",
+											)}
+										>
+											<Bot size={12} className="shrink-0" />
+											<span className="truncate">
+												{taskAgentSettings.agentLabel}
+												{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
+												{taskAgentSettings.modelLabel ? (
+													<span
+														className={cn(taskAgentSettings.modelLabel.isDefault && "text-text-tertiary")}
+													>
+														{taskAgentSettings.modelLabel.text}
+													</span>
+												) : null}
+											</span>
+										</span>
+									) : null}
+									{tokenUsageChip ? (
+										<span
+											className="shrink-0 font-mono text-[11px] text-text-tertiary"
+											title={tokenUsageChip.title}
+										>
+											{tokenUsageChip.label}
+										</span>
+									) : null}
+									{completionPolicyBadgeLabel ? (
+										<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+											{completionPolicyBadgeLabel}
+										</span>
+									) : null}
 								</div>
 							) : null}
 							{sessionActivity ? (
@@ -811,17 +959,20 @@ export function BoardCard({
 									}}
 								>
 									{isTrashCard ? (
-										<span
-											style={{
-												color: SESSION_ACTIVITY_COLOR.muted,
-												textDecoration: "line-through",
-											}}
-										>
-											{reviewWorkspacePath}
-										</span>
+										<>
+											{reviewWorkspacePath ? (
+												<span
+													style={{
+														color: SESSION_ACTIVITY_COLOR.muted,
+														textDecoration: "line-through",
+													}}
+												>
+													{reviewWorkspacePath}
+												</span>
+											) : null}
+										</>
 									) : reviewWorkspaceSnapshot ? (
 										<>
-											<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewWorkspacePath}</span>
 											<GitBranch
 												size={10}
 												style={{

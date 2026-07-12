@@ -135,8 +135,8 @@ function ColumnSection({
 						className="text-status-red hover:text-status-red"
 						onClick={onClearTrash}
 						disabled={column.cards.length === 0}
-						aria-label="Clear done"
-						title={column.cards.length > 0 ? "Clear done items permanently" : "Done is empty"}
+						aria-label="Clear archived tasks"
+						title={column.cards.length > 0 ? "Clear archived tasks permanently" : "Archive is empty"}
 						style={{ marginRight: 4 }}
 					/>
 				) : null}
@@ -245,6 +245,7 @@ export function ColumnContextPanel({
 	onCommitTask,
 	onOpenPrTask,
 	onMoveToTrashTask,
+	onMoveDoneTaskToTrash,
 	onRestoreFromTrashTask,
 	commitTaskLoadingById,
 	openPrTaskLoadingById,
@@ -267,6 +268,7 @@ export function ColumnContextPanel({
 	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
+	onMoveDoneTaskToTrash?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
 	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
@@ -355,11 +357,19 @@ export function ColumnContextPanel({
 							onSaveTitle={column.id !== "trash" ? onSaveTaskTitle : undefined}
 							onCommitTask={column.id === "review" ? onCommitTask : undefined}
 							onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
-							onMoveToTrashTask={column.id === "review" ? onMoveToTrashTask : undefined}
+							onMoveToTrashTask={
+								column.id === "review"
+									? onMoveToTrashTask
+									: column.id === "done"
+										? onMoveDoneTaskToTrash
+										: undefined
+							}
 							onRestoreFromTrashTask={column.id === "trash" ? onRestoreFromTrashTask : undefined}
 							commitTaskLoadingById={column.id === "review" ? commitTaskLoadingById : undefined}
 							openPrTaskLoadingById={column.id === "review" ? openPrTaskLoadingById : undefined}
-							moveToTrashLoadingById={column.id === "review" ? moveToTrashLoadingById : undefined}
+							moveToTrashLoadingById={
+								column.id === "review" || column.id === "done" ? moveToTrashLoadingById : undefined
+							}
 							activeDragSourceColumnId={activeDragSourceColumnId}
 							workspacePath={workspacePath}
 							defaultClineModelId={defaultClineModelId}

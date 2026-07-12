@@ -34,7 +34,8 @@ const BOARD_COLUMNS: Array<{ id: RuntimeBoardColumnId; title: string }> = [
 	{ id: "backlog", title: "Backlog" },
 	{ id: "in_progress", title: "In Progress" },
 	{ id: "review", title: "Review" },
-	{ id: "trash", title: "Done" },
+	{ id: "done", title: "Done" },
+	{ id: "trash", title: "Trash" },
 ];
 
 interface WorkspaceIndexEntry {
@@ -594,8 +595,20 @@ export async function loadWorkspaceContextById(workspaceId: string): Promise<Run
 	if (!entry) {
 		return null;
 	}
+	// Resolve directly from the index entry. Do NOT round-trip through
+	// loadWorkspaceContext(entry.repoPath): that re-resolves the path via git and
+	// takes the index WRITE lock (and may rewrite the index), so a transient — a
+	// contended/stale lock, a git hiccup, a momentarily unwritable store — would make
+	// this throw and every workspace-SCOPED request fail with "Unknown workspace ID"
+	// for a workspace that plainly exists in the index (while unscoped reads like
+	// projects.list keep working). A known entry needs no lock, no write, no re-resolve.
 	try {
-		return await loadWorkspaceContext(entry.repoPath);
+		return {
+			repoPath: entry.repoPath,
+			workspaceId: entry.workspaceId,
+			statePath: getWorkspaceDirectoryPath(entry.workspaceId),
+			git: detectGitRepositoryInfo(entry.repoPath),
+		};
 	} catch {
 		return null;
 	}

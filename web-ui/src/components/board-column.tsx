@@ -5,13 +5,15 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { BoardCard } from "@/components/board-card";
 import { Button } from "@/components/ui/button";
 import { ColumnIndicator } from "@/components/ui/column-indicator";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { TaskTokenUsageById } from "@/hooks/use-task-token-usage";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { isCardDropDisabled, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard as BoardCardModel, BoardColumnId, BoardColumn as BoardColumnModel } from "@/types";
 
 export function BoardColumn({
 	column,
 	taskSessions,
+	tokenUsageById,
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
@@ -40,9 +42,11 @@ export function BoardColumn({
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId,
+	defaultAgentId,
 }: {
 	column: BoardColumnModel;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
+	tokenUsageById?: TaskTokenUsageById;
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
@@ -71,6 +75,7 @@ export function BoardColumn({
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
+	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
@@ -91,6 +96,7 @@ export function BoardColumn({
 
 	return (
 		<section
+			id={column.id === "trash" ? "kb-archived-column" : undefined}
 			data-column-id={column.id}
 			className="flex flex-col min-w-0 min-h-0 bg-surface-1 rounded-lg overflow-hidden border border-border"
 			style={{
@@ -129,8 +135,8 @@ export function BoardColumn({
 							className="text-status-red hover:text-status-red"
 							onClick={onClearTrash}
 							disabled={column.cards.length === 0}
-							aria-label="Clear done"
-							title={column.cards.length > 0 ? "Clear done items permanently" : "Done is empty"}
+							aria-label="Clear archived tasks"
+							title={column.cards.length > 0 ? "Clear archived tasks permanently" : "Archive is empty"}
 						/>
 					) : null}
 				</div>
@@ -174,6 +180,7 @@ export function BoardColumn({
 											index={draggableIndex}
 											columnId={column.id}
 											sessionSummary={taskSessions[card.id]}
+											tokenUsage={tokenUsageById?.[card.id] ?? null}
 											onStart={onStartTask}
 											onMoveToTrash={onMoveToTrashTask}
 											onRestoreFromTrash={onRestoreFromTrashTask}
@@ -191,6 +198,7 @@ export function BoardColumn({
 											workspacePath={workspacePath}
 											taskWorktreesRoot={taskWorktreesRoot}
 											defaultClineModelId={defaultClineModelId}
+											defaultAgentId={defaultAgentId}
 											onSaveTitle={onSaveTitle}
 											onClick={() => {
 												if (column.id === "backlog") {

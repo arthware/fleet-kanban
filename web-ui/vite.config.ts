@@ -1,10 +1,19 @@
 import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin, type ResolvedConfig, transformWithEsbuild } from "vite";
 
 const rootPkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf-8")) as { version: string };
+
+function getGitCommitSha(): string {
+	try {
+		return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
+	} catch {
+		return "unknown";
+	}
+}
 const XTERM_CHUNK_NAME = "xterm-vendor";
 
 function isXtermModule(id: string): boolean {
@@ -59,6 +68,7 @@ export default defineConfig({
 	envPrefix: ["VITE_", "POSTHOG_"],
 	define: {
 		__APP_VERSION__: JSON.stringify(rootPkg.version),
+		__APP_COMMIT__: JSON.stringify(getGitCommitSha()),
 	},
 	build: {
 		// esbuild minification corrupts xterm's DECRQM requestMode helper in the
