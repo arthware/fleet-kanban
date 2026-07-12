@@ -25,10 +25,15 @@ export function isNeedsInputReviewHook(metadata: Partial<RuntimeTaskHookActivity
 	}
 	const notificationType = metadata.notificationType?.trim().toLowerCase() ?? "";
 	const hookEventName = metadata.hookEventName?.trim().toLowerCase() ?? "";
+	const toolName = metadata.toolName?.trim().toLowerCase() ?? "";
 	return (
 		notificationType === "permission_prompt" ||
 		notificationType === "permission.asked" ||
-		hookEventName === "permissionrequest"
+		notificationType === "request_user_input" ||
+		hookEventName === "permissionrequest" ||
+		toolName === "askuserquestion" ||
+		toolName === "ask_user_question" ||
+		toolName === "request_user_input"
 	);
 }
 

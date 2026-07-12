@@ -29,6 +29,95 @@ function createRolloutLine(line: Record<string, unknown>, includeTrailingNewline
 }
 
 describe("startCodexSessionWatcher", () => {
+	describe("given Codex asks the user for input in a rollout log", () => {
+		it("when the watcher receives the function call, then it emits a needs-input review signal", async () => {
+			// given
+			const tempDir = await mkdtemp(join(tmpdir(), "kanban-codex-watcher-"));
+			const logPath = join(tempDir, "session.jsonl");
+			const sessionsRoot = join(tempDir, "sessions");
+			const taskCwd = "/tmp/kanban/task-rollout-input";
+			const rolloutDir = join(sessionsRoot, "2026", "04", "23");
+			const rolloutPath = join(rolloutDir, "rollout-2026-04-23T00-00-01-input.jsonl");
+			const events: Array<{ event: string; metadata?: Record<string, unknown> }> = [];
+			const stopWatcher = await startCodexSessionWatcher(
+				logPath,
+				(mapped) => {
+					events.push(mapped as { event: string; metadata?: Record<string, unknown> });
+				},
+				60_000,
+				{
+					cwd: taskCwd,
+					sessionsRoot,
+					rolloutPollIntervalMs: 0,
+				},
+			);
+
+			try {
+				await mkdir(rolloutDir, { recursive: true });
+				await writeFile(
+					rolloutPath,
+					[
+						createRolloutLine({
+							type: "session_meta",
+							payload: { cwd: taskCwd },
+						}),
+						createRolloutLine(
+							{
+								type: "response_item",
+								payload: {
+									type: "function_call",
+									name: "request_user_input",
+									call_id: "call-input-789",
+									arguments: '{"question":"Which approach?","options":["A","B"]}',
+								},
+							},
+							false,
+						),
+					].join(""),
+					"utf8",
+				);
+
+				// when
+				await writeFile(
+					logPath,
+					createCodexOpLine(
+						{
+							type: "user_turn",
+							items: [{ type: "text", text: "continue" }],
+						},
+						false,
+					),
+					"utf8",
+				);
+				await stopWatcher();
+			} finally {
+				await rm(tempDir, { recursive: true, force: true });
+			}
+
+			// then
+			expect(events).toEqual([
+				{
+					event: "to_in_progress",
+					metadata: {
+						source: "codex",
+						hookEventName: "user_turn",
+						activityText: "Resumed after user input",
+					},
+				},
+				{
+					event: "to_review",
+					metadata: {
+						source: "codex",
+						hookEventName: "function_call",
+						notificationType: "request_user_input",
+						toolName: "request_user_input",
+						activityText: "Waiting for input",
+					},
+				},
+			]);
+		});
+	});
+
 	it("flushes completion events on stop even when the log file appears late", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "kanban-codex-watcher-"));
 		const logPath = join(tempDir, "session.jsonl");
