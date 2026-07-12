@@ -83,6 +83,7 @@ export interface UseBoardInteractionsResult {
 	handleDetailTaskDragEnd: (result: DropResult) => void;
 	handleCardSelect: (taskId: string) => void;
 	handleMoveToTrash: () => void;
+	handleMoveDoneCardToTrash: (taskId: string) => void;
 	handleMoveReviewCardToTrash: (taskId: string) => void;
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleCancelAutomaticTaskAction: (taskId: string) => void;
@@ -826,6 +827,19 @@ export function useBoardInteractions({
 		[completeReviewTask, setTaskMoveToTrashLoading],
 	);
 
+	const handleMoveDoneCardToTrash = useCallback(
+		(taskId: string) => {
+			if (moveToTrashLoadingByIdRef.current[taskId]) {
+				return;
+			}
+			setTaskMoveToTrashLoading(taskId, true);
+			void requestMoveTaskToTrashWithAnimation(taskId, "done").finally(() => {
+				setTaskMoveToTrashLoading(taskId, false);
+			});
+		},
+		[requestMoveTaskToTrashWithAnimation, setTaskMoveToTrashLoading],
+	);
+
 	const handleRestoreTaskFromTrash = useCallback(
 		(taskId: string) => {
 			const programmaticMoveAttempt = tryProgrammaticCardMove(taskId, "trash", "review");
@@ -947,6 +961,7 @@ export function useBoardInteractions({
 		handleDetailTaskDragEnd,
 		handleCardSelect,
 		handleMoveToTrash,
+		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,

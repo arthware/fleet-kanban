@@ -96,6 +96,7 @@ export function BoardColumn({
 
 	return (
 		<section
+			id={column.id === "trash" ? "kb-archived-column" : undefined}
 			data-column-id={column.id}
 			className="flex flex-col min-w-0 min-h-0 bg-surface-1 rounded-lg overflow-hidden border border-border"
 			style={{
@@ -134,8 +135,8 @@ export function BoardColumn({
 							className="text-status-red hover:text-status-red"
 							onClick={onClearTrash}
 							disabled={column.cards.length === 0}
-							aria-label="Clear done"
-							title={column.cards.length > 0 ? "Clear done items permanently" : "Done is empty"}
+							aria-label="Clear archived tasks"
+							title={column.cards.length > 0 ? "Clear archived tasks permanently" : "Archive is empty"}
 						/>
 					) : null}
 				</div>

@@ -12,6 +12,7 @@ import {
 	Pencil,
 	Play,
 	RotateCcw,
+	Trash2,
 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -763,6 +764,19 @@ export function BoardCard({
 											onMoveToTrash?.(card.id);
 										}}
 									/>
+								) : isDoneCard ? (
+									<Button
+										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+										variant="ghost"
+										size="sm"
+										disabled={isMoveToTrashLoading}
+										aria-label="Trash task"
+										onMouseDown={stopEvent}
+										onClick={(event) => {
+											stopEvent(event);
+											onMoveToTrash?.(card.id);
+										}}
+									/>
 								) : isTrashCard ? (
 									<Tooltip
 										side="bottom"
@@ -784,7 +798,7 @@ export function BoardCard({
 											}
 											variant="ghost"
 											size="sm"
-											aria-label={`${trashRestoreLabel} task from done`}
+											aria-label={`${trashRestoreLabel} task from archive`}
 											onMouseDown={stopEvent}
 											onClick={(event) => {
 												stopEvent(event);

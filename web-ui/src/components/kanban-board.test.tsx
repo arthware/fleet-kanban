@@ -38,8 +38,19 @@ vi.mock("@hello-pangea/dnd", async () => {
 });
 
 vi.mock("@/components/board-column", () => ({
-	BoardColumn: ({ column }: { column: BoardData["columns"][number] }): React.ReactElement => (
+	BoardColumn: ({
+		column,
+		onClearTrash,
+	}: {
+		column: BoardData["columns"][number];
+		onClearTrash?: () => void;
+	}): React.ReactElement => (
 		<section data-column-id={column.id}>
+			{onClearTrash ? (
+				<button type="button" aria-label="Clear archived tasks" onClick={onClearTrash}>
+					Clear
+				</button>
+			) : null}
 			<div className="kb-column-cards">
 				{column.cards.map((card) => (
 					<div key={card.id} data-task-id={card.id} />
@@ -257,5 +268,83 @@ describe("KanbanBoard", () => {
 		);
 		expect(columnIds).toEqual(["backlog", "in_progress", "review", "done"]);
 		expect(columnIds).not.toContain("trash");
+	});
+
+	it("reveals archived cards with a count and scopes Clear to the archived view", async () => {
+		const onClearTrash = vi.fn();
+		const board: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "done", title: "Done", cards: [] },
+				{
+					id: "trash",
+					title: "Archived",
+					cards: [
+						{
+							id: "archived-task-1",
+							title: "Archived task 1",
+							prompt: "Archived task 1",
+							startInPlanMode: false,
+							autoReviewEnabled: false,
+							autoReviewMode: "commit",
+							baseRef: "main",
+							createdAt: 1,
+							updatedAt: 1,
+						},
+						{
+							id: "archived-task-2",
+							title: "Archived task 2",
+							prompt: "Archived task 2",
+							startInPlanMode: false,
+							autoReviewEnabled: false,
+							autoReviewMode: "commit",
+							baseRef: "main",
+							createdAt: 2,
+							updatedAt: 2,
+						},
+					],
+				},
+			],
+			dependencies: [],
+		};
+
+		await act(async () => {
+			root.render(
+				<KanbanBoard
+					data={board}
+					taskSessions={{}}
+					onCardSelect={() => {}}
+					onCreateTask={() => {}}
+					onClearTrash={onClearTrash}
+					dependencies={[]}
+					onDragEnd={() => {}}
+				/>,
+			);
+		});
+
+		expect(container.querySelector('section[data-column-id="trash"]')).toBeNull();
+		expect(container.querySelector('[data-task-id="archived-task-1"]')).toBeNull();
+
+		const toggle = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent === "Archived (2)",
+		);
+		expect(toggle).toBeDefined();
+
+		await act(async () => {
+			toggle?.click();
+		});
+
+		expect(container.querySelector('section[data-column-id="trash"]')).not.toBeNull();
+		expect(container.querySelector('[data-task-id="archived-task-1"]')).not.toBeNull();
+		const clearButton = container.querySelector<HTMLButtonElement>('button[aria-label="Clear archived tasks"]');
+		expect(clearButton).not.toBeNull();
+
+		await act(async () => {
+			clearButton?.click();
+		});
+
+		expect(onClearTrash).toHaveBeenCalledTimes(1);
 	});
 });

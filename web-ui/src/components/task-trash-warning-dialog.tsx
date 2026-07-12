@@ -22,7 +22,7 @@ export interface TaskTrashWarningViewModel {
 
 function getTrashWarningGuidance(workspaceInfo: RuntimeTaskWorkspaceInfoResponse | null): string[] {
 	if (!workspaceInfo) {
-		return ["Save your changes before marking this task as done."];
+		return ["Save your changes before archiving this task and removing its worktree."];
 	}
 
 	if (workspaceInfo.isDetached) {
@@ -35,7 +35,7 @@ function getTrashWarningGuidance(workspaceInfo: RuntimeTaskWorkspaceInfoResponse
 	const branch = workspaceInfo.branch ?? workspaceInfo.baseRef;
 	return [
 		`Commit your changes in the worktree branch (${branch}), then open a PR or cherry-pick as needed.`,
-		"After preserving the work, you can safely move this task to Done.",
+		"After preserving the work, you can safely archive this task and remove its worktree.",
 	];
 }
 
@@ -68,7 +68,7 @@ export function TaskTrashWarningDialog({
 						? `${warning.taskTitle} has ${warning.fileCount} changed file(s).`
 						: "This task has uncommitted changes."}
 				</AlertDialogDescription>
-				<p>Moving to Done will delete this task worktree. Preserve your work first, then move the task to done.</p>
+				<p>Archiving will remove this task worktree. Preserve your work first, then trash the task.</p>
 				{warning?.workspaceInfo?.path ? (
 					<pre className="overflow-auto rounded-md bg-surface-0 p-3 font-mono text-xs text-text-secondary whitespace-pre-wrap">
 						{formatPathForDisplay(warning.workspaceInfo.path)}
@@ -88,7 +88,7 @@ export function TaskTrashWarningDialog({
 				</AlertDialogCancel>
 				<AlertDialogAction asChild>
 					<Button variant="danger" onClick={onConfirm}>
-						Move to Done Anyway
+						Trash Anyway
 					</Button>
 				</AlertDialogAction>
 			</AlertDialogFooter>
