@@ -55,11 +55,22 @@ is costly. If it's clear, say so in one line and proceed.
 
 Two test layers, **both written before the implementation**, in this order:
 
-1. **User-facing interface tests — BDD (first, if any).** If the change has a user-facing interface
-   — a component/hook a user drives, an API/procedure a client calls, a CLI command — write
-   behavior-driven tests for that surface first: "given `<situation>`, the interface does `<the
-   user-visible thing>`." Exercise the **real interface / seam**, not just an outermost black box.
-   If there is no user-facing interface, skip this layer.
+1. **Behavior tests — explicit Given / When / Then (first, if any).** If the change has a user-facing
+   interface — a component/hook a user drives, an API/procedure a client calls, a CLI command — write
+   behavior-driven tests for that surface first, and structure each one as **Given / When / Then**:
+   *Given* the starting state/context, *When* the one trigger happens, *Then* the observable outcome
+   holds. This is a discipline, not a slogan — make the three parts explicit in both the name and the
+   body:
+   - **Name** = the spec sentence: `given <context>, when <trigger>, then <outcome>`. A nested
+     `describe("given …")` › `it("when …, then …")` split reads the same and is preferred when several
+     cases share a Given.
+   - **Body** = three visible phases (Given = arrange, When = the single act, Then = assert),
+     separated by `// given` / `// when` / `// then` markers or blank-line blocks, so the intent is
+     legible without reading the implementation.
+   - **One When, one Then per test.** A second trigger or an unrelated second outcome is a second test.
+   Exercise the **real interface / seam**, not just an outermost black box. If there is no user-facing
+   interface, skip this layer — but a purely internal change still gets Given/When/Then in its unit
+   layer wherever a real behavior (not a mechanic) is under test.
 2. **Unit tests — classic TDD, RED (then).** Write RED unit tests that pin the **intended behavior**
    of the implementation's own units: branches, edge cases, invariants, error paths. These are the
    tests that drive the implementation — watch them fail before writing any code.
@@ -74,19 +85,39 @@ behavior:
 
 - **Name the behavior, not the mechanics.** A test description states *what the software is for* and
   *why*, never how the code does it. It should still make sense if the implementation is rewritten.
-- **Read each name as a specification sentence** — `<subject> <expected outcome> when <condition>`.
-  For the BDD surface layer, prefer given / when / then framing.
-- **One behavior per test**, so the name predicts the single assertion. A failing test's name alone
-  should tell you exactly which capability regressed.
-- **Group by capability**, not by method — `describe` blocks name the behavior under test, not the
-  file or function.
+- **Read each name as a Given/When/Then specification sentence** — `given <context>, when <trigger>,
+  then <outcome>`. This is the default form for every behavior test, not just an option; keep the
+  three clauses even when one is trivial (`given a fresh board, …`).
+- **Capture intent, not just assertions.** The test — its name, its Given setup, its Then — must make
+  the *contract* legible to a future agent changing this behavior: what capability is protected and
+  why, so they can tell an intended change from an accidental regression. The suite is the living
+  behavior spec; write it to be read by whoever edits the behavior next.
+- **One behavior per test** (one When, one Then), so the name predicts the single assertion. A failing
+  test's name alone should tell you exactly which capability regressed.
+- **Group by capability**, not by method — `describe` blocks name the behavior (often the shared
+  *Given*) under test, not the file or function.
 
-| ✅ documents intent | ❌ describes mechanics / says nothing |
+| ✅ Given / When / Then — documents intent | ❌ mechanics / says nothing |
 |---|---|
-| `registers each configured repo as a project on start` | `calls projects.add` |
-| `skips a repo that is already on the board` | `test dedupe` / `works correctly` |
-| `rejects an expired session token` | `isExpired returns true → 401` |
-| `re-init prints the config and leaves it unchanged` | `test 2` |
+| `given a configured repo, when the board starts, then it is registered as a project` | `calls projects.add` |
+| `given a repo already on the board, when init runs again, then it is left unchanged` | `test dedupe` / `works correctly` |
+| `given an expired session token, when a request arrives, then it is rejected with 401` | `isExpired returns true → 401` |
+| `given a review card with a linked backlog card, when it is moved to done, then the linked card auto-starts` | `test 2` |
+
+A behavior test then reads as its own spec — the three phases visible in the body:
+
+```ts
+describe("given a review card with a linked backlog card", () => {
+  it("when the review card is moved to done, then the linked card auto-starts", async () => {
+    // given
+    const board = seedBoard({ review: ["A"], backlog: ["B"], links: [["B", "A"]] });
+    // when
+    await moveToColumn(board, "A", "done");
+    // then
+    expect(columnOf(board, "B")).toBe("in_progress");
+  });
+});
+```
 
 **Clean logging — a test run should tell a story.** A passing run reads as a spec (nested
 `describe`/`it` names that flow top to bottom); a failing run should hand you the diagnosis, not a
