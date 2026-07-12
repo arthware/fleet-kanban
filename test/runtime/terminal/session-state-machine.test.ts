@@ -107,6 +107,17 @@ describe("reduceSessionTransition", () => {
 			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "PermissionRequest" })).toBe(true);
 		});
 
+		it("flags a Codex request_user_input tool call as needs-input", () => {
+			expect(
+				isNeedsInputReviewHook({
+					source: "codex",
+					hookEventName: "raw_response_item",
+					notificationType: "request_user_input",
+					toolName: "request_user_input",
+				}),
+			).toBe(true);
+		});
+
 		it("does NOT flag an end-of-turn Stop hook", () => {
 			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "Stop" })).toBe(false);
 		});
