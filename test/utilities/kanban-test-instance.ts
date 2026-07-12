@@ -155,6 +155,7 @@ export interface StartKanbanServerInput {
 	homeDir: string;
 	port: number;
 	extraArgs?: string[];
+	env?: NodeJS.ProcessEnv;
 }
 
 export interface KanbanServerHandle {
@@ -177,6 +178,7 @@ export async function startKanbanServer(input: StartKanbanServerInput): Promise<
 		HOME: input.homeDir,
 		USERPROFILE: input.homeDir,
 		KANBAN_RUNTIME_PORT: String(input.port),
+		...input.env,
 	});
 	// Never let an inherited CLINE_HOME (e.g. from a dogfood shell) leak into the
 	// child: that would resolve the runtime home to a real board. Stripping it
@@ -224,6 +226,7 @@ export async function startKanbanServer(input: StartKanbanServerInput): Promise<
 export interface IsolatedKanbanInstanceOptions {
 	cwd?: string;
 	extraArgs?: string[];
+	env?: NodeJS.ProcessEnv;
 }
 
 export interface IsolatedKanbanInstance {
@@ -254,6 +257,7 @@ export async function startIsolatedKanbanInstance(
 			homeDir: home.path,
 			port,
 			extraArgs: opts.extraArgs,
+			env: opts.env,
 		});
 	} catch (error) {
 		workdir?.cleanup();
