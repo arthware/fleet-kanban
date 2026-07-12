@@ -22,6 +22,7 @@ import {
 	formatClineSelectedModelButtonText,
 	resolveClineModelDisplayName,
 } from "@/components/detail-panels/cline-model-picker-options";
+import { ExternalIssueBadge } from "@/components/external-issue-badge";
 import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
@@ -666,8 +667,9 @@ export function BoardCard({
 								isDependencyTarget && "kb-board-card-dependency-target",
 							)}
 						>
-							{card.prUrl ? (
+							{card.externalIssue || card.prUrl ? (
 								<div className="mb-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-meta-row">
+									<ExternalIssueBadge issue={card.externalIssue} />
 									<PrBadge card={card} />
 								</div>
 							) : null}

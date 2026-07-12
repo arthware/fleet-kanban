@@ -735,4 +735,149 @@ describe("source task commands", () => {
 			}
 		},
 	);
+
+	it("creates, updates, and clears external issue metadata through the task CLI", { timeout: 60_000 }, async () => {
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-task-external-issue-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-task-external-issue-");
+
+		try {
+			initGitRepository(projectPath);
+			writeFileSync(join(projectPath, "README.md"), "# Task External Issue Test\n", "utf8");
+			commitAll(projectPath, "init");
+			runGit(projectPath, ["remote", "add", "origin", "https://github.com/owner/repo.git"]);
+
+			const port = String(await getAvailablePort());
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			try {
+				await waitForServerStart(serverProcess);
+
+				const created = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"create",
+						"--prompt",
+						"Create a task with an external issue",
+						"--issue",
+						"owner/repo#42",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(
+					created.exitCode,
+					`task create failed.\nstdout:\n${created.stdout}\nstderr:\n${created.stderr}`,
+				).toBe(0);
+				const createdPayload = JSON.parse(created.stdout) as {
+					task?: { id?: string; externalIssue?: { key?: string; url?: string; raw?: string } };
+				};
+				const taskId = createdPayload.task?.id ?? "";
+				expect(taskId).not.toBe("");
+				expect(createdPayload.task?.externalIssue).toEqual({
+					provider: "github",
+					key: "owner/repo#42",
+					url: "https://github.com/owner/repo/issues/42",
+					raw: "owner/repo#42",
+				});
+
+				const updatedToUnlinkedLinear = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						taskId,
+						"--external-issue",
+						"ENG-123",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(updatedToUnlinkedLinear.exitCode).toBe(0);
+				const linearPayload = JSON.parse(updatedToUnlinkedLinear.stdout) as {
+					task?: { externalIssue?: { provider?: string; key?: string; url?: string; raw?: string } };
+				};
+				expect(linearPayload.task?.externalIssue).toEqual({
+					provider: "linear",
+					key: "ENG-123",
+					raw: "ENG-123",
+				});
+
+				const trashed = await runCliCommandAndCollectOutput({
+					args: ["task", "trash", "--task-id", taskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(trashed.exitCode).toBe(0);
+
+				const updatedOutsideBacklog = await runCliCommandAndCollectOutput({
+					args: ["task", "update", "--task-id", taskId, "--external-issue", "#7", "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(updatedOutsideBacklog.exitCode).toBe(0);
+				const outsideBacklogPayload = JSON.parse(updatedOutsideBacklog.stdout) as {
+					task?: { externalIssue?: { key?: string; url?: string; raw?: string } };
+				};
+				expect(outsideBacklogPayload.task?.externalIssue).toEqual({
+					provider: "github",
+					key: "#7",
+					url: "https://github.com/owner/repo/issues/7",
+					raw: "#7",
+				});
+
+				const cleared = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"update",
+						"--task-id",
+						taskId,
+						"--external-issue",
+						"default",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(cleared.exitCode).toBe(0);
+				const clearedPayload = JSON.parse(cleared.stdout) as { task?: { externalIssue?: unknown } };
+				expect(clearedPayload.task?.externalIssue).toBeUndefined();
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
 });

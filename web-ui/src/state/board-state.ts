@@ -163,6 +163,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		prUrl?: unknown;
 		prState?: unknown;
 		prNumber?: unknown;
+		externalIssue?: unknown;
 		clineSettings?: unknown;
 		clineProviderId?: unknown;
 		clineModelId?: unknown;
@@ -209,10 +210,26 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 			? { prState: card.prState }
 			: {}),
 		...(typeof card.prNumber === "number" && Number.isInteger(card.prNumber) ? { prNumber: card.prNumber } : {}),
+		...(isExternalIssue(card.externalIssue) ? { externalIssue: card.externalIssue } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,
 	};
+}
+
+function isExternalIssue(value: unknown): value is NonNullable<BoardCard["externalIssue"]> {
+	if (value === null || typeof value !== "object") {
+		return false;
+	}
+	const issue = value as { provider?: unknown; key?: unknown; url?: unknown; raw?: unknown };
+	return (
+		(issue.provider === "linear" || issue.provider === "github") &&
+		typeof issue.key === "string" &&
+		issue.key.trim().length > 0 &&
+		(issue.url === undefined || (typeof issue.url === "string" && issue.url.trim().length > 0)) &&
+		typeof issue.raw === "string" &&
+		issue.raw.trim().length > 0
+	);
 }
 
 function createDependencyId(): string {

@@ -12,6 +12,7 @@ import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/component
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
+import { ExternalIssueBadge } from "@/components/external-issue-badge";
 import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
@@ -302,6 +303,7 @@ function DiffToolbar({
 					Last Turn
 				</DiffModeButton>
 			</div>
+			<ExternalIssueBadge issue={card.externalIssue} />
 			<PrBadge card={card} />
 			{!hideExpand ? (
 				<Button

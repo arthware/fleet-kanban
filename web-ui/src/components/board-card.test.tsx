@@ -129,6 +129,13 @@ function findPrBadge(
 	return container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
 }
 
+function findExternalIssueLink(
+	container: HTMLElement,
+	href = "https://github.com/owner/repo/issues/42",
+): HTMLAnchorElement | null {
+	return container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -1019,6 +1026,154 @@ describe("BoardCard", () => {
 
 			expect(findPrBadge(container)).not.toBeNull();
 		}
+	});
+
+	it("renders the external issue chip as the leading top meta-row chip before the PR badge", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "github",
+							key: "owner/repo#42",
+							url: "https://github.com/owner/repo/issues/42",
+							raw: "owner/repo#42",
+						},
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const metaRow = container.querySelector<HTMLElement>('[data-testid="board-card-meta-row"]');
+		const issueLink = findExternalIssueLink(container);
+		const prBadge = findPrBadge(container);
+
+		expect(metaRow).toBeInstanceOf(HTMLElement);
+		expect(issueLink).not.toBeNull();
+		expect(prBadge).not.toBeNull();
+		expect(metaRow?.contains(issueLink)).toBe(true);
+		expect(metaRow?.contains(prBadge)).toBe(true);
+		if (!(issueLink instanceof HTMLElement) || !(prBadge instanceof HTMLElement)) {
+			throw new Error("Expected issue and PR badges to render.");
+		}
+		expect(issueLink.compareDocumentPosition(prBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("renders a linked external issue chip with new-tab attributes", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "github",
+							key: "owner/repo#42",
+							url: "https://github.com/owner/repo/issues/42",
+							raw: "owner/repo#42",
+						},
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const link = findExternalIssueLink(container);
+		expect(link).not.toBeNull();
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+		expect(link?.textContent).toContain("owner/repo#42");
+		expect(link?.className).toContain("border-border");
+		expect(link?.querySelector("svg.lucide-github")).toBeInstanceOf(SVGSVGElement);
+	});
+
+	it("renders an unlinked external issue chip as a plain span", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "linear",
+							key: "ENG-123",
+							raw: "ENG-123",
+						},
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const issueChip = findSpanByExactText(container, "ENG-123");
+		expect(issueChip).toBeInstanceOf(HTMLSpanElement);
+		expect(container.querySelector('a[href*="linear.app"]')).toBeNull();
+		expect(issueChip?.className).toContain("text-status-purple");
+	});
+
+	it("uses provider styling for external issue chips", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "linear",
+							key: "ENG-123",
+							url: "https://linear.app/acme/issue/ENG-123",
+							raw: "ENG-123",
+						},
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const link = findExternalIssueLink(container, "https://linear.app/acme/issue/ENG-123");
+		expect(link?.className).toContain("border-status-purple/30");
+		expect(link?.querySelector("svg.lucide-circle-dot")).toBeInstanceOf(SVGSVGElement);
+	});
+
+	it("does not select the card on external issue chip mousedown or click", async () => {
+		const onClick = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						externalIssue: {
+							provider: "github",
+							key: "owner/repo#42",
+							url: "https://github.com/owner/repo/issues/42",
+							raw: "owner/repo#42",
+						},
+					})}
+					index={0}
+					columnId="backlog"
+					onClick={onClick}
+				/>,
+			);
+		});
+
+		const link = findExternalIssueLink(container);
+		await act(async () => {
+			link?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+			link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		});
+
+		expect(onClick).not.toHaveBeenCalled();
+	});
+
+	it("does not render an external issue chip when absent", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
+		});
+
+		expect(container.querySelector('a[href*="/issues/"]')).toBeNull();
+		expect(container.querySelector("svg.lucide-github")).toBeNull();
 	});
 
 	it.each([

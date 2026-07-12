@@ -131,6 +131,19 @@ function normalizeRuntimeTaskClineSettings(input: {
 export const runtimeCardPrStateSchema = z.enum(["open", "merged", "closed"]);
 export type RuntimeCardPrState = z.infer<typeof runtimeCardPrStateSchema>;
 
+// A single external issue this card corresponds to (Linear or GitHub), for
+// cross-linking the board to the source of record. Optional and informational.
+export const runtimeExternalIssueProviderSchema = z.enum(["linear", "github"]);
+export type RuntimeExternalIssueProvider = z.infer<typeof runtimeExternalIssueProviderSchema>;
+
+export const runtimeExternalIssueSchema = z.object({
+	provider: runtimeExternalIssueProviderSchema,
+	key: z.string(),
+	url: z.string().optional(),
+	raw: z.string(),
+});
+export type RuntimeExternalIssue = z.infer<typeof runtimeExternalIssueSchema>;
+
 export const runtimeBoardCardSchema = z
 	.object({
 		id: z.string(),
@@ -154,6 +167,7 @@ export const runtimeBoardCardSchema = z
 		prUrl: z.string().optional(),
 		prState: runtimeCardPrStateSchema.optional(),
 		prNumber: z.number().int().optional(),
+		externalIssue: runtimeExternalIssueSchema.optional(),
 		clineSettings: runtimeTaskClineSettingsSchema.optional(),
 		clineProviderId: z.string().optional(),
 		clineModelId: z.string().optional(),

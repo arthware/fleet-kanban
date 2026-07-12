@@ -200,7 +200,7 @@ Parameters:
 Purpose: create a new task in \`backlog\`, with optional plan mode and auto-review behavior.
 
 Command:
-\`${kanbanCommand} task create [--title "<text>"] --prompt "<text>" [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr]\`
+\`${kanbanCommand} task create [--title "<text>"] --prompt "<text>" [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr] [--external-issue <ref>]\`
 
 Parameters:
 - \`--title "<text>"\` optional task title. If omitted, Kanban derives one from the prompt.
@@ -210,13 +210,14 @@ Parameters:
 - \`--start-in-plan-mode <true|false>\` optional. Default false. Set true only when explicitly requested.
 - \`--auto-review-enabled <true|false>\` optional. Default false. Enables automatic action once task reaches review.
 - \`--auto-review-mode commit|pr\` optional auto-review action. Default \`commit\`.
+- \`--external-issue <ref>\` optional external issue correlation. Alias: \`--issue <ref>\`. Accepted forms: Linear \`ENG-123\` or full Linear URL; GitHub \`#123\`, \`123\`, \`owner/repo#123\`, or full GitHub issue URL. Bare Linear keys link only when \`KANBAN_LINEAR_WORKSPACE\` is set to the Linear workspace URL slug.
 
 ## task update
 
 Purpose: update an existing task, including prompt, base ref, plan mode, and auto-review behavior.
 
 Command:
-\`${kanbanCommand} task update --task-id <task_id> [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr]\`
+\`${kanbanCommand} task update --task-id <task_id> [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr] [--external-issue <ref>|default]\`
 
 Parameters:
 - \`--task-id <task_id>\` required task ID.
@@ -227,6 +228,7 @@ Parameters:
 - \`--start-in-plan-mode <true|false>\` optional replacement of plan-mode behavior.
 - \`--auto-review-enabled <true|false>\` optional replacement of auto-review toggle. Set false to cancel pending automatic review actions.
 - \`--auto-review-mode commit|pr\` optional replacement auto-review action.
+- \`--external-issue <ref>\` optional external issue correlation. Alias: \`--issue <ref>\`. Use \`default\` to clear it. This is editable in any column. Accepted forms: Linear \`ENG-123\` or full Linear URL; GitHub \`#123\`, \`123\`, \`owner/repo#123\`, or full GitHub issue URL. Bare Linear keys link only when \`KANBAN_LINEAR_WORKSPACE\` is set to the Linear workspace URL slug.
 
 Notes:
 - Provide at least one field to change in addition to \`--task-id\`.
