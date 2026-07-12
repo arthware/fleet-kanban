@@ -86,11 +86,13 @@ describe("agent-registry", () => {
 });
 
 describe("buildRuntimeConfigResponse", () => {
-	it("keeps curated agent default args independent of autonomous mode", () => {
+	it("given Gemini is launch-supported, when building the runtime config response, then Gemini is listed with its base CLI args", () => {
+		// given
 		const config = createRuntimeConfigState({
 			agentAutonomousModeEnabled: true,
 		});
 
+		// when
 		const response = buildRuntimeConfigResponse(config, {
 			providerId: null,
 			modelId: null,
@@ -103,8 +105,17 @@ describe("buildRuntimeConfigResponse", () => {
 			oauthExpiresAt: null,
 		});
 
+		// then
 		expect(response.agentAutonomousModeEnabled).toBe(true);
-		expect(response.agents.map((agent) => agent.id)).toEqual(["claude", "codex", "cursor", "cline", "droid", "kiro"]);
+		expect(response.agents.map((agent) => agent.id)).toEqual([
+			"claude",
+			"codex",
+			"cursor",
+			"cline",
+			"droid",
+			"kiro",
+			"gemini",
+		]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "cursor")?.defaultArgs).toEqual([]);
@@ -112,9 +123,11 @@ describe("buildRuntimeConfigResponse", () => {
 		expect(response.agents.find((agent) => agent.id === "droid")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "kiro")?.defaultArgs).toEqual(["chat"]);
 		expect(response.agents.find((agent) => agent.id === "cline")?.installed).toBe(true);
+		expect(response.agents.find((agent) => agent.id === "gemini")?.defaultArgs).toEqual([]);
 	});
 
-	it("omits autonomous flags from curated agent commands when disabled", () => {
+	it("given autonomous mode is disabled, when building the runtime config response, then Gemini command omits autonomous flags", () => {
+		// given
 		const config = createRuntimeConfigState({
 			agentAutonomousModeEnabled: false,
 		});
@@ -122,6 +135,7 @@ describe("buildRuntimeConfigResponse", () => {
 			(binary: string) => binary === "claude" || binary === "agent",
 		);
 
+		// when
 		const response = buildRuntimeConfigResponse(config, {
 			providerId: null,
 			modelId: null,
@@ -134,8 +148,17 @@ describe("buildRuntimeConfigResponse", () => {
 			oauthExpiresAt: null,
 		});
 
+		// then
 		expect(response.agentAutonomousModeEnabled).toBe(false);
-		expect(response.agents.map((agent) => agent.id)).toEqual(["claude", "codex", "cursor", "cline", "droid", "kiro"]);
+		expect(response.agents.map((agent) => agent.id)).toEqual([
+			"claude",
+			"codex",
+			"cursor",
+			"cline",
+			"droid",
+			"kiro",
+			"gemini",
+		]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "cursor")?.defaultArgs).toEqual([]);
@@ -148,6 +171,7 @@ describe("buildRuntimeConfigResponse", () => {
 		expect(response.agents.find((agent) => agent.id === "cursor")?.command).toBe("agent");
 		expect(response.agents.find((agent) => agent.id === "droid")?.command).toBe("droid");
 		expect(response.agents.find((agent) => agent.id === "kiro")?.command).toBe("kiro-cli chat");
+		expect(response.agents.find((agent) => agent.id === "gemini")?.command).toBe("gemini");
 	});
 
 	it("sets debug mode from runtime environment variables", () => {
