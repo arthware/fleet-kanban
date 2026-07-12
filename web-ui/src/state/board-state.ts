@@ -11,6 +11,7 @@ import {
 	type BoardColumnId,
 	type BoardData,
 	type BoardDependency,
+	type BoardTransition,
 	type CardSelection,
 	DEFAULT_TASK_AUTO_REVIEW_MODE,
 	resolveTaskAutoReviewMode,
@@ -65,6 +66,25 @@ function normalizeColumnId(id: string): BoardColumnId | null {
 		return id;
 	}
 	return null;
+}
+
+function normalizeTransitions(rawTransitions: unknown): BoardTransition[] | undefined {
+	if (!Array.isArray(rawTransitions)) {
+		return undefined;
+	}
+	const transitions: BoardTransition[] = [];
+	for (const rawTransition of rawTransitions) {
+		if (!rawTransition || typeof rawTransition !== "object") {
+			continue;
+		}
+		const transition = rawTransition as { column?: unknown; at?: unknown };
+		const column = typeof transition.column === "string" ? normalizeColumnId(transition.column) : null;
+		if (!column || typeof transition.at !== "number") {
+			continue;
+		}
+		transitions.push({ column, at: transition.at });
+	}
+	return transitions.length > 0 ? transitions : undefined;
 }
 
 function createBrowserUuid(): string {
@@ -164,6 +184,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		prState?: unknown;
 		prNumber?: unknown;
 		externalIssue?: unknown;
+		transitions?: unknown;
 		clineSettings?: unknown;
 		clineProviderId?: unknown;
 		clineModelId?: unknown;
@@ -189,6 +210,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		legacyModelId: card.clineModelId,
 		legacyReasoningEffort: card.clineReasoningEffort,
 	});
+	const transitions = normalizeTransitions(card.transitions);
 
 	const now = Date.now();
 
@@ -211,6 +233,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 			: {}),
 		...(typeof card.prNumber === "number" && Number.isInteger(card.prNumber) ? { prNumber: card.prNumber } : {}),
 		...(isExternalIssue(card.externalIssue) ? { externalIssue: card.externalIssue } : {}),
+		...(transitions ? { transitions } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,
@@ -339,10 +362,12 @@ export function normalizeBoardData(rawBoard: unknown): BoardData | null {
 		}
 	}
 
-	return runtimeTaskState.updateTaskDependencies({
-		columns: normalizedColumns,
-		dependencies: normalizedDependencies,
-	});
+	return runtimeTaskState.normalizeBoardTransitionsAndOrdering(
+		runtimeTaskState.updateTaskDependencies({
+			columns: normalizedColumns,
+			dependencies: normalizedDependencies,
+		}),
+	);
 }
 
 export function addTaskToColumn(board: BoardData, columnId: BoardColumnId, draft: TaskDraft): BoardData {

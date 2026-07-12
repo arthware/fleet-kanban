@@ -11,7 +11,10 @@ import type {
 	RuntimeTaskImage,
 } from "./api-contract";
 import { createUniqueTaskId } from "./task-id";
+import { normalizeBoardTransitionsAndOrdering, sortCardsForColumn } from "./task-lifecycle";
 import { resolveTaskTitle } from "./task-title";
+
+export { getTaskCompletedAt, getTaskStartedAt, normalizeBoardTransitionsAndOrdering } from "./task-lifecycle";
 
 export interface RuntimeCreateTaskInput {
 	taskId?: string;
@@ -344,6 +347,7 @@ export function addTaskToColumn(
 		baseRef,
 		createdAt: now,
 		updatedAt: now,
+		transitions: [{ column: columnId, at: now }],
 	};
 
 	const targetColumnIndex = board.columns.findIndex((column) => column.id === columnId);
@@ -357,7 +361,7 @@ export function addTaskToColumn(
 		}
 		return {
 			...column,
-			cards: [task, ...column.cards],
+			cards: sortCardsForColumn(column.id, [task, ...column.cards]),
 		};
 	});
 
@@ -591,6 +595,7 @@ export function moveTaskToColumn(
 	const movedTask: RuntimeBoardCard = {
 		...task,
 		updatedAt: now,
+		transitions: [...(task.transitions ?? []), { column: targetColumnId, at: now }],
 	};
 	const targetCards =
 		targetColumnId === "done" || targetColumnId === "trash"
@@ -607,7 +612,7 @@ export function moveTaskToColumn(
 		if (index === targetColumnIndex) {
 			return {
 				...column,
-				cards: targetCards,
+				cards: sortCardsForColumn(column.id, targetCards),
 			};
 		}
 		return column;
@@ -615,10 +620,12 @@ export function moveTaskToColumn(
 
 	return {
 		moved: true,
-		board: updateTaskDependencies({
-			...board,
-			columns,
-		}),
+		board: normalizeBoardTransitionsAndOrdering(
+			updateTaskDependencies({
+				...board,
+				columns,
+			}),
+		),
 		task: movedTask,
 		fromColumnId: found.columnId,
 	};

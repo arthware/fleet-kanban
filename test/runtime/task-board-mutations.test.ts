@@ -6,6 +6,8 @@ import {
 	addTaskToColumn,
 	completeTaskAndGetReadyLinkedTaskIds,
 	deleteTasksFromBoard,
+	getTaskCompletedAt,
+	getTaskStartedAt,
 	moveTaskToColumn,
 	trashTaskAndGetReadyLinkedTaskIds,
 	updateTask,
@@ -115,6 +117,142 @@ describe("done/trash lifecycle mutations", () => {
 		const completed = completeTaskAndGetReadyLinkedTaskIds(linked.board, "bbbbb");
 
 		expect(completed.board.dependencies).toEqual([]);
+	});
+});
+
+describe("task lifecycle transitions", () => {
+	it("seeds the initial transition when creating a task", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		expect(created.task.transitions).toEqual([{ column: "backlog", at: 10 }]);
+	});
+
+	it("appends exactly one transition when moving a task to another column", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "in_progress", 20);
+
+		expect(moved.moved).toBe(true);
+		expect(moved.task?.transitions).toEqual([
+			{ column: "backlog", at: 10 },
+			{ column: "in_progress", at: 20 },
+		]);
+	});
+
+	it("does not append a transition when the task is already in the target column", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		const moved = moveTaskToColumn(created.board, created.task.id, "backlog", 20);
+
+		expect(moved.moved).toBe(false);
+		expect(moved.task?.transitions).toEqual([{ column: "backlog", at: 10 }]);
+	});
+
+	it("appends a done transition through the auto-complete helper", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"review",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		const completed = completeTaskAndGetReadyLinkedTaskIds(created.board, created.task.id, 20);
+
+		expect(completed.moved).toBe(true);
+		expect(completed.task?.transitions).toEqual([
+			{ column: "review", at: 10 },
+			{ column: "done", at: 20 },
+		]);
+	});
+
+	it("appends a trash transition through the trash helper", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"review",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		const trashed = trashTaskAndGetReadyLinkedTaskIds(created.board, created.task.id, 20);
+
+		expect(trashed.moved).toBe(true);
+		expect(trashed.task?.transitions).toEqual([
+			{ column: "review", at: 10 },
+			{ column: "trash", at: 20 },
+		]);
+	});
+
+	it("derives startedAt and completedAt from transitions", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+		const inProgress = moveTaskToColumn(created.board, created.task.id, "in_progress", 20);
+		const review = moveTaskToColumn(inProgress.board, created.task.id, "review", 30);
+		const done = completeTaskAndGetReadyLinkedTaskIds(review.board, created.task.id, 40);
+
+		expect(done.task).not.toBeNull();
+		if (!done.task) {
+			throw new Error("Expected completed task.");
+		}
+		expect(getTaskStartedAt(done.task)).toBe(20);
+		expect(getTaskCompletedAt(done.task)).toBe(40);
+		expect(getTaskCompletedAt(created.task)).toBeUndefined();
+	});
+
+	it("sorts done cards by completedAt after several bulk-style completions", () => {
+		const createOlder = addTaskToColumn(
+			createBoard(),
+			"review",
+			{ prompt: "Older", baseRef: "main" },
+			() => "aaaaa111",
+			1,
+		);
+		const createNewer = addTaskToColumn(
+			createOlder.board,
+			"review",
+			{ prompt: "Newer", baseRef: "main" },
+			() => "bbbbb111",
+			2,
+		);
+		const createMiddle = addTaskToColumn(
+			createNewer.board,
+			"review",
+			{ prompt: "Middle", baseRef: "main" },
+			() => "ccccc111",
+			3,
+		);
+
+		const completeOlder = completeTaskAndGetReadyLinkedTaskIds(createMiddle.board, createOlder.task.id, 100);
+		const completeNewer = completeTaskAndGetReadyLinkedTaskIds(completeOlder.board, createNewer.task.id, 300);
+		const completeMiddle = completeTaskAndGetReadyLinkedTaskIds(completeNewer.board, createMiddle.task.id, 200);
+
+		expect(
+			completeMiddle.board.columns.find((column) => column.id === "done")?.cards.map((card) => card.prompt),
+		).toEqual(["Newer", "Middle", "Older"]);
 	});
 });
 

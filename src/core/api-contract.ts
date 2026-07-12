@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeBoardTransitionsAndOrdering } from "./task-lifecycle";
 import { resolveTaskTitle } from "./task-title.js";
 
 export const runtimeWorkspaceFileStatusSchema = z.enum([
@@ -144,6 +145,12 @@ export const runtimeExternalIssueSchema = z.object({
 });
 export type RuntimeExternalIssue = z.infer<typeof runtimeExternalIssueSchema>;
 
+export const runtimeBoardTransitionSchema = z.object({
+	column: runtimeBoardColumnIdSchema,
+	at: z.number(),
+});
+export type RuntimeBoardTransition = z.infer<typeof runtimeBoardTransitionSchema>;
+
 export const runtimeBoardCardSchema = z
 	.object({
 		id: z.string(),
@@ -168,6 +175,7 @@ export const runtimeBoardCardSchema = z
 		prState: runtimeCardPrStateSchema.optional(),
 		prNumber: z.number().int().optional(),
 		externalIssue: runtimeExternalIssueSchema.optional(),
+		transitions: z.array(runtimeBoardTransitionSchema).optional(),
 		clineSettings: runtimeTaskClineSettingsSchema.optional(),
 		clineProviderId: z.string().optional(),
 		clineModelId: z.string().optional(),
@@ -222,15 +230,15 @@ export const runtimeBoardDataSchema = z
 		const hasDoneColumn = board.columns.some((column) => column.id === "done");
 		const hasTrashColumn = board.columns.some((column) => column.id === "trash");
 		if (hasDoneColumn || !hasTrashColumn) {
-			return board;
+			return normalizeBoardTransitionsAndOrdering(board);
 		}
-		return {
+		return normalizeBoardTransitionsAndOrdering({
 			...board,
 			columns: [
 				...board.columns.map((column) => (column.id === "trash" ? { ...column, id: "done" as const } : column)),
 				{ id: "trash" as const, title: "Trash", cards: [] },
 			],
-		};
+		});
 	});
 export type RuntimeBoardData = z.infer<typeof runtimeBoardDataSchema>;
 
