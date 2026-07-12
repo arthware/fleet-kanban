@@ -519,7 +519,7 @@ export function CardDetailView({
 	const isWorkspaceChangesPending = isRuntimeAvailable && workspaceChanges === null;
 	const hasNoWorkspaceFileChanges =
 		isRuntimeAvailable && workspaceChanges !== null && runtimeFiles !== null && runtimeFiles.length === 0;
-	const emptyDiffTitle = diffMode === "last_turn" ? "No changes since last turn" : "No working changes";
+	const emptyDiffTitle = diffMode === "last_turn" ? "No changes since last turn" : "No changes for this card";
 	const taskCardsPanelPercent = `${(taskCardsPanelRatio * 100).toFixed(1)}%`;
 	const detailContentPanelPercent = `${((1 - taskCardsPanelRatio) * 100).toFixed(1)}%`;
 	const agentPanelPercent = `${(agentPanelRatio * 100).toFixed(1)}%`;

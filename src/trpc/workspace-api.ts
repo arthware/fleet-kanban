@@ -27,6 +27,7 @@ import {
 	getWorkspaceChanges,
 	getWorkspaceChangesBetweenRefs,
 	getWorkspaceChangesFromRef,
+	resolveTaskForkPoint,
 } from "../workspace/get-workspace-changes";
 import { getCommitDiff, getGitLog, getGitRefs } from "../workspace/git-history";
 import { discardGitChanges, getGitSyncSummary, runGitCheckoutAction, runGitSyncAction } from "../workspace/git-sync";
@@ -342,6 +343,13 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					cwd: taskCwd,
 					fromRef: fromCheckpoint.commit,
 					toRef: toCheckpoint.commit,
+				});
+			}
+			const forkPoint = await resolveTaskForkPoint(taskCwd, normalizedInput.baseRef);
+			if (forkPoint) {
+				return await getWorkspaceChangesFromRef({
+					cwd: taskCwd,
+					fromRef: forkPoint,
 				});
 			}
 			return await getWorkspaceChanges(taskCwd);

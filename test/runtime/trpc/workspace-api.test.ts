@@ -11,6 +11,7 @@ const workspaceChangesMocks = vi.hoisted(() => ({
 	getWorkspaceChanges: vi.fn(),
 	getWorkspaceChangesBetweenRefs: vi.fn(),
 	getWorkspaceChangesFromRef: vi.fn(),
+	resolveTaskForkPoint: vi.fn(),
 }));
 
 vi.mock("../../../src/workspace/task-worktree.js", () => ({
@@ -25,6 +26,7 @@ vi.mock("../../../src/workspace/get-workspace-changes.js", () => ({
 	getWorkspaceChanges: workspaceChangesMocks.getWorkspaceChanges,
 	getWorkspaceChangesBetweenRefs: workspaceChangesMocks.getWorkspaceChangesBetweenRefs,
 	getWorkspaceChangesFromRef: workspaceChangesMocks.getWorkspaceChangesFromRef,
+	resolveTaskForkPoint: workspaceChangesMocks.resolveTaskForkPoint,
 }));
 
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
@@ -65,12 +67,70 @@ describe("createWorkspaceApi loadChanges", () => {
 		workspaceChangesMocks.getWorkspaceChanges.mockReset();
 		workspaceChangesMocks.getWorkspaceChangesBetweenRefs.mockReset();
 		workspaceChangesMocks.getWorkspaceChangesFromRef.mockReset();
+		workspaceChangesMocks.resolveTaskForkPoint.mockReset();
 
 		workspaceTaskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/worktree");
 		workspaceChangesMocks.createEmptyWorkspaceChangesResponse.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChanges.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChangesBetweenRefs.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChangesFromRef.mockResolvedValue(createChangesResponse());
+		workspaceChangesMocks.resolveTaskForkPoint.mockResolvedValue("base-sha");
+	});
+
+	it("loads working-copy changes from the task fork point", async () => {
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await api.loadChanges(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				mode: "working_copy",
+			},
+		);
+
+		expect(workspaceChangesMocks.resolveTaskForkPoint).toHaveBeenCalledWith("/tmp/worktree", "main");
+		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).toHaveBeenCalledWith({
+			cwd: "/tmp/worktree",
+			fromRef: "base-sha",
+		});
+		expect(workspaceChangesMocks.getWorkspaceChanges).not.toHaveBeenCalled();
+	});
+
+	it("falls back to the current working-tree diff when the task fork point cannot be resolved", async () => {
+		workspaceChangesMocks.resolveTaskForkPoint.mockResolvedValue(null);
+
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await api.loadChanges(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				mode: "working_copy",
+			},
+		);
+
+		expect(workspaceChangesMocks.getWorkspaceChanges).toHaveBeenCalledWith("/tmp/worktree");
+		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).not.toHaveBeenCalled();
 	});
 
 	it("shows the completed turn diff while awaiting review", async () => {
