@@ -714,7 +714,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("auto");
 	});
 
-	it("starts Claude plan mode without bypass flags and keeps auto mode reachable", async () => {
+	it("defers Claude plan cards as manifested /plan startup input without native plan mode", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-claude-plan",
@@ -723,18 +723,38 @@ describe("prepareAgentLaunch hook strategies", () => {
 			args: [],
 			autonomousModeEnabled: true,
 			cwd: "/tmp",
-			prompt: "",
+			prompt: "Design the migration path",
+			agentModel: "claude-haiku-4-5",
 			startInPlanMode: true,
 		});
-		const permissionModeIndex = launch.args.indexOf("--permission-mode");
-		expect(permissionModeIndex).toBeGreaterThan(-1);
-		expect(launch.args[permissionModeIndex + 1]).toBe("plan");
-		expect(launch.args).not.toContain("--dangerously-skip-permissions");
+		expect(launch.args).not.toContain("--permission-mode");
+		expect(launch.args).not.toContain("plan");
+		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--allow-dangerously-skip-permissions");
+		expect(launch.args).not.toContain("Design the migration path");
+		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Design the migration path"));
 		expect(launch.env.CLAUDE_CODE_ENABLE_AUTO_MODE).toBe("1");
 	});
 
-	it("strips an explicit Claude bypass arg in plan mode", async () => {
+	it("defers a bare /plan command for Claude plan cards with no prompt text", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-plan-empty",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+			startInPlanMode: true,
+		});
+
+		const permissionModeIndex = launch.args.indexOf("--permission-mode");
+		expect(launch.args[permissionModeIndex + 1]).not.toBe("plan");
+		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan"));
+	});
+
+	it("preserves an explicit Claude bypass arg for manifested plan cards", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-claude-plan-bypass",
@@ -743,13 +763,13 @@ describe("prepareAgentLaunch hook strategies", () => {
 			args: ["--dangerously-skip-permissions"],
 			autonomousModeEnabled: false,
 			cwd: "/tmp",
-			prompt: "",
+			prompt: "Document the approach",
 			startInPlanMode: true,
 		});
-		expect(launch.args).not.toContain("--dangerously-skip-permissions");
-		expect(launch.args).not.toContain("--allow-dangerously-skip-permissions");
-		const permissionModeIndex = launch.args.indexOf("--permission-mode");
-		expect(launch.args[permissionModeIndex + 1]).toBe("plan");
+
+		expect(launch.args).toContain("--dangerously-skip-permissions");
+		expect(launch.args).not.toContain("--permission-mode");
+		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Document the approach"));
 	});
 
 	it("starts a fresh Claude session under a minted session id", async () => {
@@ -1133,7 +1153,7 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 		}
 	});
 
-	it("uses plan mode (no bypass, no guard) for a weak model started in plan mode", async () => {
+	it("uses manifested /plan with write-capable guarded bypass for a weak model plan card", async () => {
 		setupTempHome();
 		clearProviderEnv();
 		try {
@@ -1144,17 +1164,17 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 				args: [],
 				autonomousModeEnabled: true,
 				cwd: "/tmp",
-				prompt: "",
+				prompt: "Write the rollout design",
 				workspaceId: "workspace-1",
 				agentModel: "claude-haiku-4-5",
 				startInPlanMode: true,
 			});
 
-			const permissionModeIndex = launch.args.indexOf("--permission-mode");
-			expect(permissionModeIndex).toBeGreaterThan(-1);
-			expect(launch.args[permissionModeIndex + 1]).toBe("plan");
-			expect(launch.args).not.toContain("--dangerously-skip-permissions");
-			expect(findBashGuardHook(readClaudeSettings())).toBeUndefined();
+			expect(launch.args).not.toContain("--permission-mode");
+			expect(launch.args).not.toContain("plan");
+			expect(launch.args).toContain("--dangerously-skip-permissions");
+			expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Write the rollout design"));
+			expect(findBashGuardHook(readClaudeSettings())).toBeDefined();
 		} finally {
 			restoreProviderEnv();
 		}
