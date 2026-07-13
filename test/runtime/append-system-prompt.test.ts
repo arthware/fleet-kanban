@@ -144,6 +144,27 @@ describe("resolveHomeAgentAppendSystemPrompt", () => {
 		expect(prompt).toContain("droid mcp add linear https://mcp.linear.app/mcp --type http");
 	});
 
+	it("given Cursor is the home sidebar agent, when the prompt is rendered, then Cursor MCP guidance is included", () => {
+		// given
+		const taskId = "__home_agent__:workspace-1:cursor";
+
+		// when
+		const prompt = resolveHomeAgentAppendSystemPrompt(taskId, {
+			currentVersion: "0.1.10",
+			cwd: "/Users/example/repo",
+			execPath: "/usr/local/bin/node",
+			execArgv: [],
+			argv: ["node", "/Users/example/repo/dist/cli.js"],
+			resolveRealPath: (path) => path,
+		});
+
+		// then
+		expect(prompt).toContain("Current home agent: `cursor`");
+		expect(prompt).toContain(".cursor/mcp.json");
+		expect(prompt).toContain("cursor-agent mcp login linear");
+		expect(prompt).toContain("agent mcp login linear");
+	});
+
 	it("returns active-agent guidance for kiro home sidebar sessions", () => {
 		const prompt = resolveHomeAgentAppendSystemPrompt("__home_agent__:workspace-1:kiro", {
 			currentVersion: "0.1.10",
@@ -156,5 +177,24 @@ describe("resolveHomeAgentAppendSystemPrompt", () => {
 		expect(prompt).toContain("Current home agent: `kiro`");
 		expect(prompt).toContain("kiro-cli mcp add --name linear --url https://mcp.linear.app/mcp --scope global");
 		expect(prompt).not.toContain("--scope user");
+	});
+
+	it("given Gemini is the home sidebar agent, when resolving the appended system prompt, then Gemini-specific setup guidance is used", () => {
+		// given
+		const taskId = "__home_agent__:workspace-1:gemini";
+
+		// when
+		const prompt = resolveHomeAgentAppendSystemPrompt(taskId, {
+			currentVersion: "0.1.10",
+			cwd: "/Users/example/repo",
+			execPath: "/usr/local/bin/node",
+			execArgv: [],
+			argv: ["node", "/Users/example/repo/dist/cli.js"],
+			resolveRealPath: (path) => path,
+		});
+
+		// then
+		expect(prompt).toContain("Current home agent: `gemini`");
+		expect(prompt).toContain("gemini mcp add linear https://mcp.linear.app/mcp --transport http --scope user");
 	});
 });

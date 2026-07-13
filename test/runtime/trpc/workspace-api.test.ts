@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary, RuntimeWorkspaceChangesResponse } from "../../../src/core/api-contract";
 
@@ -11,6 +14,7 @@ const workspaceChangesMocks = vi.hoisted(() => ({
 	getWorkspaceChanges: vi.fn(),
 	getWorkspaceChangesBetweenRefs: vi.fn(),
 	getWorkspaceChangesFromRef: vi.fn(),
+	resolveTaskForkPoint: vi.fn(),
 }));
 
 vi.mock("../../../src/workspace/task-worktree.js", () => ({
@@ -25,9 +29,28 @@ vi.mock("../../../src/workspace/get-workspace-changes.js", () => ({
 	getWorkspaceChanges: workspaceChangesMocks.getWorkspaceChanges,
 	getWorkspaceChangesBetweenRefs: workspaceChangesMocks.getWorkspaceChangesBetweenRefs,
 	getWorkspaceChangesFromRef: workspaceChangesMocks.getWorkspaceChangesFromRef,
+	resolveTaskForkPoint: workspaceChangesMocks.resolveTaskForkPoint,
 }));
 
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
+
+let tempDirs: string[] = [];
+
+async function createTempProjectRoot(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "fleet-kanban-workspace-api-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
+function createWorkspaceApiForTests(): ReturnType<typeof createWorkspaceApi> {
+	return createWorkspaceApi({
+		ensureTerminalManagerForWorkspace: vi.fn(),
+		getScopedClineTaskSessionService: vi.fn(),
+		broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+		broadcastRuntimeProjectsUpdated: vi.fn(),
+		buildWorkspaceStateSnapshot: vi.fn(),
+	});
+}
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -58,6 +81,11 @@ function createChangesResponse(): RuntimeWorkspaceChangesResponse {
 	};
 }
 
+afterEach(async () => {
+	await Promise.all(tempDirs.map(async (dir) => await rm(dir, { recursive: true, force: true })));
+	tempDirs = [];
+});
+
 describe("createWorkspaceApi loadChanges", () => {
 	beforeEach(() => {
 		workspaceTaskWorktreeMocks.resolveTaskCwd.mockReset();
@@ -65,12 +93,70 @@ describe("createWorkspaceApi loadChanges", () => {
 		workspaceChangesMocks.getWorkspaceChanges.mockReset();
 		workspaceChangesMocks.getWorkspaceChangesBetweenRefs.mockReset();
 		workspaceChangesMocks.getWorkspaceChangesFromRef.mockReset();
+		workspaceChangesMocks.resolveTaskForkPoint.mockReset();
 
 		workspaceTaskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/worktree");
 		workspaceChangesMocks.createEmptyWorkspaceChangesResponse.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChanges.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChangesBetweenRefs.mockResolvedValue(createChangesResponse());
 		workspaceChangesMocks.getWorkspaceChangesFromRef.mockResolvedValue(createChangesResponse());
+		workspaceChangesMocks.resolveTaskForkPoint.mockResolvedValue("base-sha");
+	});
+
+	it("loads working-copy changes from the task fork point", async () => {
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await api.loadChanges(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				mode: "working_copy",
+			},
+		);
+
+		expect(workspaceChangesMocks.resolveTaskForkPoint).toHaveBeenCalledWith("/tmp/worktree", "main");
+		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).toHaveBeenCalledWith({
+			cwd: "/tmp/worktree",
+			fromRef: "base-sha",
+		});
+		expect(workspaceChangesMocks.getWorkspaceChanges).not.toHaveBeenCalled();
+	});
+
+	it("falls back to the current working-tree diff when the task fork point cannot be resolved", async () => {
+		workspaceChangesMocks.resolveTaskForkPoint.mockResolvedValue(null);
+
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await api.loadChanges(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				mode: "working_copy",
+			},
+		);
+
+		expect(workspaceChangesMocks.getWorkspaceChanges).toHaveBeenCalledWith("/tmp/worktree");
+		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).not.toHaveBeenCalled();
 	});
 
 	it("shows the completed turn diff while awaiting review", async () => {
@@ -324,5 +410,64 @@ describe("createWorkspaceApi loadChanges", () => {
 		expect(response).toBe(emptyResponse);
 		expect(workspaceChangesMocks.createEmptyWorkspaceChangesResponse).toHaveBeenCalledWith("/tmp/repo");
 		expect(workspaceChangesMocks.getWorkspaceChanges).not.toHaveBeenCalled();
+	});
+});
+
+describe("createWorkspaceApi loadDesignDoc", () => {
+	it("returns exists false when the design directory is missing or no file matches", async () => {
+		const projectRoot = await createTempProjectRoot();
+		const api = createWorkspaceApiForTests();
+
+		await expect(
+			api.loadDesignDoc(
+				{
+					workspaceId: "workspace-1",
+					workspacePath: projectRoot,
+				},
+				{
+					taskId: "05506",
+				},
+			),
+		).resolves.toEqual({ exists: false });
+
+		await mkdir(join(projectRoot, "docs", "design"), { recursive: true });
+
+		await expect(
+			api.loadDesignDoc(
+				{
+					workspaceId: "workspace-1",
+					workspacePath: projectRoot,
+				},
+				{
+					taskId: "05506",
+				},
+			),
+		).resolves.toEqual({ exists: false });
+	});
+
+	it("returns the first sorted matching markdown file content", async () => {
+		const projectRoot = await createTempProjectRoot();
+		const designDir = join(projectRoot, "docs", "design");
+		await mkdir(designDir, { recursive: true });
+		await writeFile(join(designDir, "ENG-123-z-later.md"), "later");
+		await writeFile(join(designDir, "ENG-123-a-first.md"), "# First");
+		const api = createWorkspaceApiForTests();
+
+		const result = await api.loadDesignDoc(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: projectRoot,
+			},
+			{
+				taskId: "05506",
+				externalIssueKey: "ENG-123",
+			},
+		);
+
+		expect(result).toEqual({
+			exists: true,
+			path: join(designDir, "ENG-123-a-first.md"),
+			content: "# First",
+		});
 	});
 });

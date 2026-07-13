@@ -666,6 +666,21 @@ async function runUpdateCommand(): Promise<void> {
 	throw new Error(result.message);
 }
 
+async function flushWritableStream(stream: NodeJS.WriteStream): Promise<void> {
+	if (stream.destroyed || stream.writableEnded || stream.writableLength <= 0) {
+		return;
+	}
+	await new Promise<void>((resolve) => {
+		stream.write("", () => {
+			resolve();
+		});
+	});
+}
+
+async function flushStdio(): Promise<void> {
+	await Promise.all([flushWritableStream(process.stdout), flushWritableStream(process.stderr)]);
+}
+
 function createProgram(invocationArgs: string[]): Command {
 	const shouldAutoOpenBrowser = shouldAutoOpenBrowserTabForInvocation(invocationArgs);
 	const program = new Command();
@@ -736,6 +751,7 @@ async function run(): Promise<void> {
 	await program.parseAsync(argv, { from: "user" });
 	if (!shouldAutoOpenBrowserTabForInvocation(argv)) {
 		await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
+		await flushStdio();
 		process.exit(process.exitCode ?? 0);
 	}
 }
@@ -745,5 +761,6 @@ void run().catch(async (error) => {
 	await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(`Failed to start Kanban: ${message}`);
+	await flushStdio();
 	process.exit(1);
 });

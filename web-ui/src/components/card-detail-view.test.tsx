@@ -15,6 +15,7 @@ const {
 	mockDiffViewerPanel,
 	mockClineAppendToDraft,
 	mockClineSendText,
+	mockGetDesignDoc,
 } = vi.hoisted(() => ({
 	mockAgentTerminalPanel: vi.fn(
 		(_props: { panelBackgroundColor?: string; terminalBackgroundColor?: string; terminalEnabled?: boolean }) => null,
@@ -23,6 +24,7 @@ const {
 	mockDiffViewerPanel: vi.fn((..._args: unknown[]) => null),
 	mockClineAppendToDraft: vi.fn(),
 	mockClineSendText: vi.fn(async () => {}),
+	mockGetDesignDoc: vi.fn(),
 }));
 
 vi.mock("react-hotkeys-hook", () => ({
@@ -73,6 +75,16 @@ vi.mock("@/runtime/use-runtime-workspace-changes", () => ({
 
 vi.mock("@/stores/workspace-metadata-store", () => ({
 	useTaskWorkspaceStateVersionValue: () => 0,
+}));
+
+vi.mock("@/runtime/trpc-client", () => ({
+	getRuntimeTrpcClient: () => ({
+		workspace: {
+			getDesignDoc: {
+				query: mockGetDesignDoc,
+			},
+		},
+	}),
 }));
 
 vi.mock("@/resize/layout-customizations", () => ({
@@ -223,6 +235,8 @@ describe("CardDetailView", () => {
 		mockDiffViewerPanel.mockClear();
 		mockClineAppendToDraft.mockClear();
 		mockClineSendText.mockClear();
+		mockGetDesignDoc.mockReset();
+		mockGetDesignDoc.mockResolvedValue({ exists: false });
 		mockUseRuntimeWorkspaceChanges.mockReturnValue({
 			changes: {
 				files: [
@@ -250,6 +264,7 @@ describe("CardDetailView", () => {
 		mockDiffViewerPanel.mockClear();
 		mockClineAppendToDraft.mockClear();
 		mockClineSendText.mockClear();
+		mockGetDesignDoc.mockReset();
 		vi.restoreAllMocks();
 		container.remove();
 		if (previousActEnvironment === undefined) {
@@ -337,6 +352,51 @@ describe("CardDetailView", () => {
 		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
 		expect(link?.textContent).toContain("PR #42");
 		expect(link?.querySelector("svg.lucide-git-merge")).toBeInstanceOf(SVGSVGElement);
+	});
+
+	it("shows the design badge in the detail header and opens the markdown dialog", async () => {
+		mockGetDesignDoc.mockResolvedValue({
+			exists: true,
+			path: "/tmp/repo/docs/design/task-1-detail.md",
+			content: "## Detail Design\n\nRendered from markdown.",
+		});
+		const selection = createSelection();
+
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={selection}
+					currentProjectId="workspace-1"
+					workspacePath="/tmp/repo"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const button = Array.from(container.querySelectorAll("button")).find(
+			(candidate) => candidate.textContent?.trim() === "Design",
+		);
+		expect(button).toBeInstanceOf(HTMLButtonElement);
+
+		await act(async () => {
+			button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		});
+
+		expect(document.body.textContent).toContain("Detail Design");
+		expect(document.body.textContent).toContain("Rendered from markdown.");
 	});
 
 	it("shows the external issue chip in the detail header next to the PR badge", async () => {
@@ -550,6 +610,52 @@ describe("CardDetailView", () => {
 		expect(getDiffModeButton("Last Turn").getAttribute("style")).toContain(
 			"background-color: color-mix(in srgb, var(--color-surface-3) 80%, var(--color-text-primary))",
 		);
+	});
+
+	it("uses card-scoped empty-state copy for all changes", async () => {
+		mockUseRuntimeWorkspaceChanges.mockReturnValue({
+			changes: {
+				files: [],
+			},
+			isRuntimeAvailable: true,
+		});
+
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={createSelection()}
+					currentProjectId="workspace-1"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("No changes for this card");
+		expect(container.textContent).not.toContain("No working changes");
+
+		const lastTurnButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "Last Turn",
+		);
+		expect(lastTurnButton).toBeInstanceOf(HTMLButtonElement);
+		if (!(lastTurnButton instanceof HTMLButtonElement)) {
+			throw new Error("Expected a Last Turn button.");
+		}
+
+		await act(async () => {
+			lastTurnButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			lastTurnButton.click();
+		});
+
+		expect(container.textContent).toContain("No changes since last turn");
 	});
 
 	it("closes git history before handling other Escape behavior", async () => {

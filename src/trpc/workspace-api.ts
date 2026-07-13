@@ -15,6 +15,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import {
+	parseDesignDocRequest,
 	parseGitCheckoutRequest,
 	parseTaskDurabilityRequest,
 	parseWorktreeDeleteRequest,
@@ -22,11 +23,13 @@ import {
 } from "../core/api-validation";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
+import { readTaskDesignDoc } from "../workspace/design-doc";
 import {
 	createEmptyWorkspaceChangesResponse,
 	getWorkspaceChanges,
 	getWorkspaceChangesBetweenRefs,
 	getWorkspaceChangesFromRef,
+	resolveTaskForkPoint,
 } from "../workspace/get-workspace-changes";
 import { getCommitDiff, getGitLog, getGitRefs } from "../workspace/git-history";
 import { discardGitChanges, getGitSyncSummary, runGitCheckoutAction, runGitSyncAction } from "../workspace/git-sync";
@@ -344,6 +347,13 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					toRef: toCheckpoint.commit,
 				});
 			}
+			const forkPoint = await resolveTaskForkPoint(taskCwd, normalizedInput.baseRef);
+			if (forkPoint) {
+				return await getWorkspaceChangesFromRef({
+					cwd: taskCwd,
+					fromRef: forkPoint,
+				});
+			}
 			return await getWorkspaceChanges(taskCwd);
 		},
 		ensureWorktree: async (workspaceScope, input) => {
@@ -398,6 +408,14 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 				query,
 				files,
 			} satisfies RuntimeWorkspaceFileSearchResponse;
+		},
+		loadDesignDoc: async (workspaceScope, input) => {
+			const body = parseDesignDocRequest(input);
+			return await readTaskDesignDoc({
+				projectRoot: workspaceScope.workspacePath,
+				taskId: body.taskId,
+				externalIssueKey: body.externalIssueKey,
+			});
 		},
 		loadState: async (workspaceScope) => {
 			return await deps.buildWorkspaceStateSnapshot(workspaceScope.workspaceId, workspaceScope.workspacePath);

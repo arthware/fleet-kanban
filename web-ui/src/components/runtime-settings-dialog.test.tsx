@@ -88,6 +88,8 @@ vi.mock("@runtime-agent-catalog", () => ({
 	getRuntimeLaunchSupportedAgentCatalog: vi.fn(() => [
 		{ id: "cline", label: "Cline", binary: "cline" },
 		{ id: "claude", label: "Claude Code", binary: "claude" },
+		{ id: "cursor", label: "Cursor Agent", binary: "cursor-agent" },
+		{ id: "gemini", label: "Gemini CLI", binary: "gemini" },
 	]),
 }));
 
@@ -195,6 +197,13 @@ const savedClineOauthConfig = {
 			command: "claude",
 			installed: true,
 		},
+		{
+			id: "gemini",
+			label: "Gemini CLI",
+			binary: "gemini",
+			command: "gemini",
+			installed: true,
+		},
 	],
 	clineProviderSettings: {
 		providerId: null,
@@ -208,6 +217,35 @@ const savedClineOauthConfig = {
 		oauthAccountId: "acc-1",
 		oauthExpiresAt: 1_800_000_000_000,
 	},
+} as unknown as RuntimeConfigResponse;
+
+const savedCursorConfig = {
+	...savedClineOauthConfig,
+	selectedAgentId: "cursor",
+	effectiveCommand: "cursor-agent",
+	agents: [
+		{
+			id: "cline",
+			label: "Cline",
+			binary: "cline",
+			command: "cline",
+			installed: true,
+		},
+		{
+			id: "claude",
+			label: "Claude Code",
+			binary: "claude",
+			command: "claude",
+			installed: true,
+		},
+		{
+			id: "cursor",
+			label: "Cursor Agent",
+			binary: "cursor-agent",
+			command: "cursor-agent",
+			installed: true,
+		},
+	],
 } as unknown as RuntimeConfigResponse;
 
 describe("RuntimeSettingsDialog", () => {
@@ -258,6 +296,49 @@ describe("RuntimeSettingsDialog", () => {
 
 		expect(findButtonByText(document.body, "Send feedback")).toBeNull();
 		expect(findButtonByText(document.body, "Report issue")).toBeNull();
+	});
+
+	it("given Cursor is registered, when settings render, then Cursor Agent appears in the agent list", async () => {
+		// given
+		const config = savedCursorConfig;
+
+		// when
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={config}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		// then
+		expect(document.body.textContent).toContain("Cursor Agent");
+		expect(document.body.textContent).toContain("cursor-agent");
+	});
+
+	it("given Gemini is launch-supported, when settings render the agent list, then Gemini appears as a selectable agent", async () => {
+		// given
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		// when
+		const geminiAgentRow = Array.from(document.body.querySelectorAll("label, div, span")).find((element) =>
+			element.textContent?.includes("Gemini CLI"),
+		);
+
+		// then
+		expect(geminiAgentRow).toBeTruthy();
 	});
 
 	it("calls the layout reset callback when reset layout is clicked", async () => {

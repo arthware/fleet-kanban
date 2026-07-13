@@ -19,6 +19,59 @@ function createCodexOpLine(payload: Record<string, unknown>): string {
 }
 
 describe("parseCodexEventLine", () => {
+	describe("given a Codex session emits a request-user-input function call", () => {
+		it("when the event is parsed, then it asks the runtime to mark the card needs-input", () => {
+			// given
+			const state = createCodexWatcherState();
+
+			// when
+			const event = parseCodexEventLine(
+				createCodexLogLine({
+					type: "raw_response_item",
+					item: {
+						type: "function_call",
+						name: "request_user_input",
+						call_id: "call-input-123",
+					},
+				}),
+				state,
+			);
+
+			// then
+			expect(event).toEqual({
+				event: "to_review",
+				metadata: {
+					source: "codex",
+					hookEventName: "raw_response_item",
+					notificationType: "request_user_input",
+					toolName: "request_user_input",
+					activityText: "Waiting for input",
+				},
+			});
+		});
+
+		it("when the same function call is replayed, then it is not emitted twice", () => {
+			// given
+			const state = createCodexWatcherState();
+			const line = createCodexLogLine({
+				type: "raw_response_item",
+				item: {
+					type: "function_call",
+					name: "AskUserQuestion",
+					call_id: "call-ask-123",
+				},
+			});
+
+			// when
+			const first = parseCodexEventLine(line, state);
+			const second = parseCodexEventLine(line, state);
+
+			// then
+			expect(first?.event).toBe("to_review");
+			expect(second).toBeNull();
+		});
+	});
+
 	it("keeps full codex activity text for long agent and final messages", () => {
 		const state = createCodexWatcherState();
 		const longAgentMessage =

@@ -371,6 +371,20 @@ function findTaskRecord(
 	return null;
 }
 
+export function resolveCardIdFromRefOrIssue(state: RuntimeWorkspaceStateResponse, ref: string): string {
+	if (findTaskRecord(state, ref)) {
+		return ref;
+	}
+
+	const matches = state.board.columns.flatMap((column) =>
+		column.cards.filter((task) => task.externalIssue?.key === ref).map((task) => task.id),
+	);
+	if (matches.length > 1) {
+		throw new Error(`Multiple cards reference issue "${ref}": ${matches.join(", ")}. Pass the card id instead.`);
+	}
+	return matches[0] ?? ref;
+}
+
 function formatTaskRecord(
 	state: RuntimeWorkspaceStateResponse,
 	task: RuntimeBoardCard,
@@ -629,7 +643,8 @@ async function updateTaskCommand(input: {
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const updated = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
-		const taskRecord = findTaskRecord(runtimeState, input.taskId);
+		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+		const taskRecord = findTaskRecord(runtimeState, taskId);
 		if (!taskRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 		}
@@ -639,7 +654,7 @@ async function updateTaskCommand(input: {
 		// silently ignore.
 		if ((input.baseRef !== undefined || input.agentModel !== undefined) && taskRecord.columnId !== "backlog") {
 			throw new Error(
-				`Task "${input.taskId}" is in "${taskRecord.columnId}" — base-ref and agent-model can only be changed while a task is in backlog.`,
+				`Task "${taskId}" is in "${taskRecord.columnId}" — base-ref and agent-model can only be changed while a task is in backlog.`,
 			);
 		}
 		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
@@ -648,7 +663,7 @@ async function updateTaskCommand(input: {
 			reasoningEffort: input.clineReasoningEffort,
 		});
 
-		const updatedTask = updateTask(runtimeState.board, input.taskId, {
+		const updatedTask = updateTask(runtimeState.board, taskId, {
 			title: input.title ?? taskRecord.task.title,
 			prompt: input.prompt ?? taskRecord.task.prompt,
 			baseRef: input.baseRef ?? taskRecord.task.baseRef,
@@ -661,7 +676,7 @@ async function updateTaskCommand(input: {
 			clineSettings: nextTaskClineSettings,
 		});
 		if (!updatedTask.updated || !updatedTask.task) {
-			throw new Error(`Task "${input.taskId}" could not be updated.`);
+			throw new Error(`Task "${taskId}" could not be updated.`);
 		}
 
 		const nextState: RuntimeWorkspaceStateResponse = {
@@ -692,7 +707,9 @@ async function linkTasks(input: {
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const dependency = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
-		const linked = addTaskDependency(runtimeState.board, input.taskId, input.linkedTaskId);
+		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+		const linkedTaskId = resolveCardIdFromRefOrIssue(runtimeState, input.linkedTaskId);
+		const linked = addTaskDependency(runtimeState.board, taskId, linkedTaskId);
 		if (!linked.added || !linked.dependency) {
 			throw new Error(getLinkFailureMessage(linked.reason));
 		}
@@ -750,21 +767,20 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const runtimeState = await runtimeClient.workspace.getState.query();
-	const fromColumnId = getTaskColumnId(runtimeState.board, input.taskId);
+	const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+	const fromColumnId = getTaskColumnId(runtimeState.board, taskId);
 	if (!fromColumnId) {
 		throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 	}
 
 	if (fromColumnId !== "backlog" && fromColumnId !== "in_progress") {
-		throw new Error(
-			`Task "${input.taskId}" is in "${fromColumnId}" and can only be started from backlog or in_progress.`,
-		);
+		throw new Error(`Task "${taskId}" is in "${fromColumnId}" and can only be started from backlog or in_progress.`);
 	}
 
-	const currentRecord = findTaskRecord(runtimeState, input.taskId);
+	const currentRecord = findTaskRecord(runtimeState, taskId);
 	const task = currentRecord?.task;
 	if (!task) {
-		throw new Error(`Task "${input.taskId}" could not be resolved.`);
+		throw new Error(`Task "${taskId}" could not be resolved.`);
 	}
 
 	const existingSession = runtimeState.sessions[task.id] ?? null;
@@ -795,9 +811,9 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	}
 
 	const moved = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (latestState) => {
-		const movement = moveTaskToColumn(latestState.board, input.taskId, "in_progress");
+		const movement = moveTaskToColumn(latestState.board, taskId, "in_progress");
 		if (!movement.task) {
-			throw new Error(`Task "${input.taskId}" could not be resolved.`);
+			throw new Error(`Task "${taskId}" could not be resolved.`);
 		}
 		if (!movement.moved) {
 			return {
@@ -814,7 +830,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	if (!moved.moved) {
 		return {
 			ok: true,
-			message: `Task "${input.taskId}" is already in progress.`,
+			message: `Task "${taskId}" is already in progress.`,
 			task: {
 				id: task.id,
 				prompt: task.prompt,
@@ -942,6 +958,7 @@ interface CompleteTaskExecutionResult {
 
 interface TrashTaskMutationValue {
 	task: JsonRecord;
+	taskId: string;
 	previousColumnId: ListTaskColumn;
 	readyTaskIds: string[];
 	alreadyInTrash: boolean;
@@ -949,6 +966,7 @@ interface TrashTaskMutationValue {
 
 interface CompleteTaskMutationValue {
 	task: JsonRecord;
+	taskId: string;
 	previousColumnId: ListTaskColumn;
 	readyTaskIds: string[];
 	alreadyDone: boolean;
@@ -966,7 +984,8 @@ async function completeTaskById(input: {
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>;
 }): Promise<CompleteTaskExecutionResult> {
 	const mutation = await mutateWorkspaceState<CompleteTaskMutationValue>(input.workspaceRepoPath, (latestState) => {
-		const latestRecord = findTaskRecord(latestState, input.taskId);
+		const taskId = resolveCardIdFromRefOrIssue(latestState, input.taskId);
+		const latestRecord = findTaskRecord(latestState, taskId);
 		if (!latestRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${input.workspaceRepoPath}.`);
 		}
@@ -975,6 +994,7 @@ async function completeTaskById(input: {
 				board: latestState.board,
 				value: {
 					task: formatTaskRecord(latestState, latestRecord.task, latestRecord.columnId),
+					taskId,
 					previousColumnId: latestRecord.columnId,
 					readyTaskIds: [] as string[],
 					alreadyDone: true,
@@ -983,9 +1003,9 @@ async function completeTaskById(input: {
 			};
 		}
 
-		const completed = completeTaskAndGetReadyLinkedTaskIds(latestState.board, input.taskId);
+		const completed = completeTaskAndGetReadyLinkedTaskIds(latestState.board, taskId);
 		if (!completed.moved || !completed.task) {
-			throw new Error(`Task "${input.taskId}" could not be moved to done.`);
+			throw new Error(`Task "${taskId}" could not be moved to done.`);
 		}
 
 		const nextState: RuntimeWorkspaceStateResponse = {
@@ -996,6 +1016,7 @@ async function completeTaskById(input: {
 			board: completed.board,
 			value: {
 				task: formatTaskRecord(nextState, completed.task, "done"),
+				taskId,
 				previousColumnId: latestRecord.columnId,
 				readyTaskIds: completed.readyTaskIds,
 				alreadyDone: false,
@@ -1010,7 +1031,7 @@ async function completeTaskById(input: {
 	if (mutation.value.alreadyDone) {
 		return {
 			task: mutation.value.task,
-			taskId: input.taskId,
+			taskId: mutation.value.taskId,
 			previousColumnId: mutation.value.previousColumnId,
 			readyTaskIds: [],
 			autoStartedTasks: [],
@@ -1019,7 +1040,7 @@ async function completeTaskById(input: {
 	}
 
 	if (columnCanHaveLiveTaskSession(mutation.value.previousColumnId)) {
-		await stopTaskRuntimeSession(input.runtimeClient, input.taskId);
+		await stopTaskRuntimeSession(input.runtimeClient, mutation.value.taskId);
 	}
 
 	const autoStartedTasks: JsonRecord[] = [];
@@ -1034,7 +1055,7 @@ async function completeTaskById(input: {
 
 	return {
 		task: mutation.value.task,
-		taskId: input.taskId,
+		taskId: mutation.value.taskId,
 		previousColumnId: mutation.value.previousColumnId,
 		readyTaskIds: mutation.value.readyTaskIds,
 		autoStartedTasks,
@@ -1050,7 +1071,8 @@ async function trashTaskById(input: {
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>;
 }): Promise<TrashTaskExecutionResult> {
 	const mutation = await mutateWorkspaceState<TrashTaskMutationValue>(input.workspaceRepoPath, (latestState) => {
-		const latestRecord = findTaskRecord(latestState, input.taskId);
+		const taskId = resolveCardIdFromRefOrIssue(latestState, input.taskId);
+		const latestRecord = findTaskRecord(latestState, taskId);
 		if (!latestRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${input.workspaceRepoPath}.`);
 		}
@@ -1059,6 +1081,7 @@ async function trashTaskById(input: {
 				board: latestState.board,
 				value: {
 					task: formatTaskRecord(latestState, latestRecord.task, latestRecord.columnId),
+					taskId,
 					previousColumnId: latestRecord.columnId,
 					readyTaskIds: [] as string[],
 					alreadyInTrash: true,
@@ -1067,9 +1090,9 @@ async function trashTaskById(input: {
 			};
 		}
 
-		const trashed = trashTaskAndGetReadyLinkedTaskIds(latestState.board, input.taskId);
+		const trashed = trashTaskAndGetReadyLinkedTaskIds(latestState.board, taskId);
 		if (!trashed.moved || !trashed.task) {
-			throw new Error(`Task "${input.taskId}" could not be moved to trash.`);
+			throw new Error(`Task "${taskId}" could not be moved to trash.`);
 		}
 
 		const nextState: RuntimeWorkspaceStateResponse = {
@@ -1080,6 +1103,7 @@ async function trashTaskById(input: {
 			board: trashed.board,
 			value: {
 				task: formatTaskRecord(nextState, trashed.task, "trash"),
+				taskId,
 				previousColumnId: latestRecord.columnId,
 				readyTaskIds: trashed.readyTaskIds,
 				alreadyInTrash: false,
@@ -1094,7 +1118,7 @@ async function trashTaskById(input: {
 	if (mutation.value.alreadyInTrash) {
 		return {
 			task: mutation.value.task,
-			taskId: input.taskId,
+			taskId: mutation.value.taskId,
 			previousColumnId: mutation.value.previousColumnId,
 			readyTaskIds: [],
 			autoStartedTasks: [],
@@ -1104,14 +1128,14 @@ async function trashTaskById(input: {
 	}
 
 	if (columnCanHaveLiveTaskSession(mutation.value.previousColumnId)) {
-		await stopTaskRuntimeSession(input.runtimeClient, input.taskId);
+		await stopTaskRuntimeSession(input.runtimeClient, mutation.value.taskId);
 	}
 
-	const deletedWorkspace = await deleteTaskWorkspace(input.runtimeClient, input.taskId);
+	const deletedWorkspace = await deleteTaskWorkspace(input.runtimeClient, mutation.value.taskId);
 
 	return {
 		task: mutation.value.task,
-		taskId: input.taskId,
+		taskId: mutation.value.taskId,
 		previousColumnId: mutation.value.previousColumnId,
 		readyTaskIds: [],
 		autoStartedTasks: [],
@@ -1305,7 +1329,8 @@ async function deleteTaskCommand(input: {
 		const latestTargetRecords =
 			target.kind === "task"
 				? (() => {
-						const record = findTaskRecord(latestState, target.taskId);
+						const taskId = resolveCardIdFromRefOrIssue(latestState, target.taskId);
+						const record = findTaskRecord(latestState, taskId);
 						if (!record) {
 							throw new Error(`Task "${target.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 						}

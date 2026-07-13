@@ -12,6 +12,7 @@ import {
 	type RuntimeClineUpdateProviderRequest,
 	type RuntimeCommandRunRequest,
 	type RuntimeConfigSaveRequest,
+	type RuntimeDesignDocRequest,
 	type RuntimeDirectoryListRequest,
 	type RuntimeGitCheckoutRequest,
 	type RuntimeHookIngestRequest,
@@ -47,6 +48,7 @@ import {
 	runtimeClineUpdateProviderRequestSchema,
 	runtimeCommandRunRequestSchema,
 	runtimeConfigSaveRequestSchema,
+	runtimeDesignDocRequestSchema,
 	runtimeDirectoryListRequestSchema,
 	runtimeGitCheckoutRequestSchema,
 	runtimeHookIngestRequestSchema,
@@ -140,6 +142,19 @@ export function parseWorkspaceFileSearchRequest(query: URLSearchParams): Runtime
 		query: normalizedQuery,
 		limit: parsedLimit.data,
 	});
+}
+
+export function parseDesignDocRequest(value: unknown): RuntimeDesignDocRequest {
+	const parsed = parseWithSchema(runtimeDesignDocRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Invalid design doc payload.");
+	}
+	const externalIssueKey = parsed.externalIssueKey?.trim() || undefined;
+	return {
+		taskId,
+		...(externalIssueKey ? { externalIssueKey } : {}),
+	};
 }
 
 export function parseGitCheckoutRequest(value: unknown): RuntimeGitCheckoutRequest {

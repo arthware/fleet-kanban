@@ -159,6 +159,65 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(getCodexConfigOverrideValues(launch.args, "check_for_update_on_startup")).toEqual(["false"]);
 	});
 
+	it("given a Cursor home sidebar session, when it launches with a prompt, then the sidebar guidance is sent with the prompt", async () => {
+		// given
+		setupTempHome();
+		setKanbanProcessContext();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "__home_agent__:workspace-1:cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Create a task for the failing login test",
+		});
+
+		// then
+		const initialPrompt = launch.args.at(-1) ?? "";
+		expect(initialPrompt).toContain("Kanban sidebar agent");
+		expect(initialPrompt).toContain("Current home agent: `cursor`");
+		expect(initialPrompt).toContain("cursor-agent mcp login linear");
+		expect(initialPrompt).toContain("# User Request");
+		expect(initialPrompt).toContain("Create a task for the failing login test");
+	});
+
+	it("given cursor-agent is installed, when a card selects Cursor and starts, then cursor-agent launches with prompt hooks and autonomous args", async () => {
+		// given
+		const cwd = setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd,
+			prompt: "Implement Cursor launch support",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-cursor");
+		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
+		expect(launch.args).toContain("--force");
+		expect(launch.args.at(-1)).toBe("Implement Cursor launch support");
+
+		const hooksPath = join(cwd, ".cursor", "hooks.json");
+		const config = JSON.parse(readFileSync(hooksPath, "utf8")) as {
+			version?: number;
+			hooks?: Record<string, Array<{ command?: string }>>;
+		};
+		expect(config.version).toBe(1);
+		expect(config.hooks?.beforeSubmitPrompt?.[0]?.command).toContain("to_in_progress");
+		expect(config.hooks?.beforeShellExecution?.[0]?.command).toContain("to_in_progress");
+		expect(config.hooks?.afterFileEdit?.[0]?.command).toContain("activity");
+		expect(config.hooks?.stop?.[0]?.command).toContain("to_review");
+		expect(config.hooks?.stop?.[0]?.command).toContain("Waiting for review");
+	});
+
 	it("disables Codex startup update checks for Kanban-launched sessions", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -209,17 +268,28 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(settings.hooks?.PostToolUseFailure).toBeDefined();
 	});
 
-	it("writes Gemini settings with AfterTool mapped to to_in_progress", async () => {
+	it("given a card selects Gemini CLI, when preparing launch with a prompt and hooks, then Gemini runs non-interactively with hook state forwarding", async () => {
+		// given
 		setupTempHome();
-		await prepareAgentLaunch({
+		const prompt = "Implement the billing export";
+
+		// when
+		const launch = await prepareAgentLaunch({
 			taskId: "task-1",
 			agentId: "gemini",
 			binary: "gemini",
 			args: [],
 			cwd: "/tmp",
-			prompt: "",
+			prompt,
 			workspaceId: "workspace-1",
 		});
+
+		// then
+		expect(launch.args).toEqual(["-i", prompt]);
+		expect(launch.deferredStartupInput).toBeUndefined();
+		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-1");
+		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
+		expect(launch.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toContain("settings.json");
 
 		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "gemini", "settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
@@ -525,6 +595,25 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(postToolUseScript).toContain("plan_mode_respond");
 	});
 
+	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
+		// given
+		setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+
+		// then
+		expect(launch.args).toEqual(expect.arrayContaining(["--resume", "latest"]));
+	});
+
 	it("adds resume flags for each agent", async () => {
 		setupTempHome();
 
@@ -549,17 +638,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(claudeLaunch.args).toContain("--continue");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(geminiLaunch.args).toEqual(expect.arrayContaining(["--resume", "latest"]));
 
 		const opencodeLaunch = await prepareAgentLaunch({
 			taskId: "task-opencode",
@@ -593,6 +671,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(kiroLaunch.args).toContain("--resume");
+
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+		expect(cursorLaunch.args).toContain("--continue");
 
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline",
@@ -636,6 +725,25 @@ describe("prepareAgentLaunch hook strategies", () => {
 		}
 	});
 
+	it("given Gemini autonomous mode is enabled, when preparing launch, then Gemini receives the yolo flag", async () => {
+		// given
+		setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini-auto",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+		});
+
+		// then
+		expect(launch.args).toContain("--yolo");
+	});
+
 	it("applies autonomous mode flags in adapters for non-droid CLIs", async () => {
 		setupTempHome();
 
@@ -665,17 +773,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
 
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini-auto",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(geminiLaunch.args).toContain("--yolo");
-
 		const kiroLaunch = await prepareAgentLaunch({
 			taskId: "task-kiro-auto",
 			agentId: "kiro",
@@ -686,6 +783,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(kiroLaunch.args).toContain("--trust-all-tools");
+
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor-auto",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(cursorLaunch.args).toContain("--force");
 
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline-auto",
@@ -939,6 +1047,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(kiroLaunch.args).toContain("--trust-all-tools");
+
+		const cursorLaunch = await prepareAgentLaunch({
+			taskId: "task-cursor-no-auto",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: ["--force"],
+			autonomousModeEnabled: false,
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(cursorLaunch.args).toContain("--force");
 	});
 });
 

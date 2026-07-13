@@ -3,6 +3,7 @@ import { Files, GitCompareArrows, Maximize2, MessageSquare, Minimize2, X } from 
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
+import { DesignDocBadge } from "@/components/design-doc-badge";
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
 import {
 	type AgentTranscriptLoadResult,
@@ -274,6 +275,8 @@ function DiffToolbar({
 	isExpanded,
 	onToggleExpand,
 	card,
+	workspaceId,
+	workspacePath,
 	hideExpand,
 }: {
 	mode: RuntimeWorkspaceChangesMode;
@@ -281,6 +284,8 @@ function DiffToolbar({
 	isExpanded: boolean;
 	onToggleExpand: () => void;
 	card: BoardCard;
+	workspaceId: string | null;
+	workspacePath?: string | null;
 	hideExpand?: boolean;
 }): React.ReactElement {
 	return (
@@ -305,6 +310,7 @@ function DiffToolbar({
 			</div>
 			<ExternalIssueBadge issue={card.externalIssue} />
 			<PrBadge card={card} />
+			<DesignDocBadge card={card} workspaceId={workspaceId} workspacePath={workspacePath} />
 			{!hideExpand ? (
 				<Button
 					variant="ghost"
@@ -519,7 +525,7 @@ export function CardDetailView({
 	const isWorkspaceChangesPending = isRuntimeAvailable && workspaceChanges === null;
 	const hasNoWorkspaceFileChanges =
 		isRuntimeAvailable && workspaceChanges !== null && runtimeFiles !== null && runtimeFiles.length === 0;
-	const emptyDiffTitle = diffMode === "last_turn" ? "No changes since last turn" : "No working changes";
+	const emptyDiffTitle = diffMode === "last_turn" ? "No changes since last turn" : "No changes for this card";
 	const taskCardsPanelPercent = `${(taskCardsPanelRatio * 100).toFixed(1)}%`;
 	const detailContentPanelPercent = `${((1 - taskCardsPanelRatio) * 100).toFixed(1)}%`;
 	const agentPanelPercent = `${(agentPanelRatio * 100).toFixed(1)}%`;
@@ -764,6 +770,8 @@ export function CardDetailView({
 									isExpanded={false}
 									onToggleExpand={handleToggleDiffExpand}
 									card={selection.card}
+									workspaceId={currentProjectId}
+									workspacePath={workspacePath}
 									hideExpand
 								/>
 							) : null}
@@ -906,6 +914,8 @@ export function CardDetailView({
 										isExpanded={isDiffExpanded}
 										onToggleExpand={handleToggleDiffExpand}
 										card={selection.card}
+										workspaceId={currentProjectId}
+										workspacePath={workspacePath}
 									/>
 								) : null}
 								<div className="flex min-h-0 flex-1">

@@ -39,6 +39,7 @@ export function BoardColumn({
 	dependencySourceTaskId,
 	dependencyTargetTaskId,
 	isDependencyLinking,
+	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
 	defaultClineModelId,
@@ -72,6 +73,7 @@ export function BoardColumn({
 	dependencySourceTaskId?: string | null;
 	dependencyTargetTaskId?: string | null;
 	isDependencyLinking?: boolean;
+	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
 	defaultClineModelId?: string | null;
@@ -195,6 +197,7 @@ export function BoardColumn({
 											isDependencySource={dependencySourceTaskId === card.id}
 											isDependencyTarget={dependencyTargetTaskId === card.id}
 											isDependencyLinking={isDependencyLinking}
+											workspaceId={workspaceId}
 											workspacePath={workspacePath}
 											taskWorktreesRoot={taskWorktreesRoot}
 											defaultClineModelId={defaultClineModelId}

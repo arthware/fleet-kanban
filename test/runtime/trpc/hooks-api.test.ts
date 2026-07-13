@@ -112,6 +112,53 @@ describe("createHooksApi", () => {
 		expect(manager.transitionToReview).toHaveBeenCalledWith("task-1", "needs_input");
 	});
 
+	describe("given Codex is waiting on request_user_input", () => {
+		it("when the hook is ingested, then the task is marked needs-input and remains steerable", async () => {
+			// given
+			const manager = {
+				getSummary: vi.fn(() => createSummary({ agentId: "codex", state: "running", pid: 4242 })),
+				transitionToReview: vi.fn(() =>
+					createSummary({ agentId: "codex", state: "awaiting_review", reviewReason: "needs_input", pid: 4242 }),
+				),
+				transitionToRunning: vi.fn(),
+				applyHookActivity: vi.fn(),
+				applyTurnCheckpoint: vi.fn(),
+			} as unknown as TerminalSessionManager;
+
+			const api = createHooksApi({
+				getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+				ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+				broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+				broadcastTaskReadyForReview: vi.fn(),
+			});
+
+			// when
+			const response = await api.ingest({
+				taskId: "task-1",
+				workspaceId: "workspace-1",
+				event: "to_review",
+				metadata: {
+					source: "codex",
+					hookEventName: "raw_response_item",
+					notificationType: "request_user_input",
+					toolName: "request_user_input",
+					activityText: "Waiting for input",
+				},
+			});
+
+			// then
+			expect(response).toEqual({ ok: true });
+			expect(manager.transitionToReview).toHaveBeenCalledWith("task-1", "needs_input");
+			expect(manager.transitionToReview).toHaveReturnedWith(
+				expect.objectContaining({
+					state: "awaiting_review",
+					reviewReason: "needs_input",
+					pid: 4242,
+				}),
+			);
+		});
+	});
+
 	it("keeps an end-of-turn stop hook on the ordinary 'hook' review reason", async () => {
 		const manager = {
 			getSummary: vi.fn(() => createSummary({ state: "running" })),

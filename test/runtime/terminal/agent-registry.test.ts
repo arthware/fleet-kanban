@@ -47,7 +47,33 @@ describe("agent-registry", () => {
 		const detected = detectInstalledCommands();
 
 		expect(detected).toEqual(["claude"]);
-		expect(commandDiscoveryMocks.isBinaryAvailableOnPath).toHaveBeenCalledTimes(8);
+		expect(commandDiscoveryMocks.isBinaryAvailableOnPath).toHaveBeenCalledTimes(10);
+	});
+
+	it("given cursor-agent is on PATH, when Cursor is selected, then the canonical binary is used", () => {
+		// given
+		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation((binary: string) => binary === "cursor-agent");
+
+		// when
+		const resolved = resolveAgentCommand(createRuntimeConfigState({ selectedAgentId: "cursor" }));
+
+		// then
+		expect(resolved?.agentId).toBe("cursor");
+		expect(resolved?.binary).toBe("cursor-agent");
+		expect(resolved?.command).toBe("cursor-agent");
+	});
+
+	it("given only Cursor's documented agent alias is on PATH, when Cursor is selected, then the alias is used", () => {
+		// given
+		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation((binary: string) => binary === "agent");
+
+		// when
+		const resolved = resolveAgentCommand(createRuntimeConfigState({ selectedAgentId: "cursor" }));
+
+		// then
+		expect(resolved?.agentId).toBe("cursor");
+		expect(resolved?.binary).toBe("agent");
+		expect(resolved?.command).toBe("agent");
 	});
 
 	it("treats shell-only agents as unavailable", () => {
@@ -60,11 +86,13 @@ describe("agent-registry", () => {
 });
 
 describe("buildRuntimeConfigResponse", () => {
-	it("keeps curated agent default args independent of autonomous mode", () => {
+	it("given Gemini is launch-supported, when building the runtime config response, then Gemini is listed with its base CLI args", () => {
+		// given
 		const config = createRuntimeConfigState({
 			agentAutonomousModeEnabled: true,
 		});
 
+		// when
 		const response = buildRuntimeConfigResponse(config, {
 			providerId: null,
 			modelId: null,
@@ -77,22 +105,37 @@ describe("buildRuntimeConfigResponse", () => {
 			oauthExpiresAt: null,
 		});
 
+		// then
 		expect(response.agentAutonomousModeEnabled).toBe(true);
-		expect(response.agents.map((agent) => agent.id)).toEqual(["claude", "codex", "cline", "droid", "kiro"]);
+		expect(response.agents.map((agent) => agent.id)).toEqual([
+			"claude",
+			"codex",
+			"cursor",
+			"cline",
+			"droid",
+			"kiro",
+			"gemini",
+		]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);
+		expect(response.agents.find((agent) => agent.id === "cursor")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "cline")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "droid")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "kiro")?.defaultArgs).toEqual(["chat"]);
 		expect(response.agents.find((agent) => agent.id === "cline")?.installed).toBe(true);
+		expect(response.agents.find((agent) => agent.id === "gemini")?.defaultArgs).toEqual([]);
 	});
 
-	it("omits autonomous flags from curated agent commands when disabled", () => {
+	it("given autonomous mode is disabled, when building the runtime config response, then Gemini command omits autonomous flags", () => {
+		// given
 		const config = createRuntimeConfigState({
 			agentAutonomousModeEnabled: false,
 		});
-		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation((binary: string) => binary === "claude");
+		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation(
+			(binary: string) => binary === "claude" || binary === "agent",
+		);
 
+		// when
 		const response = buildRuntimeConfigResponse(config, {
 			providerId: null,
 			modelId: null,
@@ -105,18 +148,30 @@ describe("buildRuntimeConfigResponse", () => {
 			oauthExpiresAt: null,
 		});
 
+		// then
 		expect(response.agentAutonomousModeEnabled).toBe(false);
-		expect(response.agents.map((agent) => agent.id)).toEqual(["claude", "codex", "cline", "droid", "kiro"]);
+		expect(response.agents.map((agent) => agent.id)).toEqual([
+			"claude",
+			"codex",
+			"cursor",
+			"cline",
+			"droid",
+			"kiro",
+			"gemini",
+		]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);
+		expect(response.agents.find((agent) => agent.id === "cursor")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "cline")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "droid")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "kiro")?.defaultArgs).toEqual(["chat"]);
 		expect(response.agents.find((agent) => agent.id === "cline")?.installed).toBe(true);
 		expect(response.agents.find((agent) => agent.id === "claude")?.command).toBe("claude");
 		expect(response.agents.find((agent) => agent.id === "codex")?.command).toBe("codex");
+		expect(response.agents.find((agent) => agent.id === "cursor")?.command).toBe("agent");
 		expect(response.agents.find((agent) => agent.id === "droid")?.command).toBe("droid");
 		expect(response.agents.find((agent) => agent.id === "kiro")?.command).toBe("kiro-cli chat");
+		expect(response.agents.find((agent) => agent.id === "gemini")?.command).toBe("gemini");
 	});
 
 	it("sets debug mode from runtime environment variables", () => {

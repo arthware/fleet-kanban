@@ -12,6 +12,7 @@ const CODEX_ROLLOUT_FILE_FRESH_WINDOW_MS = 10 * 60 * 1000;
 const CODEX_ROLLOUT_MATCH_SCAN_BYTES = 256 * 1024;
 const CODEX_ROLLOUT_TAIL_SCAN_BYTES = 2 * 1024 * 1024;
 const CODEX_ROLLOUT_INITIAL_BACKLOG_BYTES = 256 * 1024;
+const CODEX_USER_INPUT_TOOL_NAMES = new Set(["AskUserQuestion", "ask_user_question", "request_user_input"]);
 
 interface CodexWatcherState {
 	lastTurnId: string;
@@ -93,6 +94,10 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
 	} catch {
 		return null;
 	}
+}
+
+function isCodexUserInputToolName(name: string | null): boolean {
+	return name !== null && CODEX_USER_INPUT_TOOL_NAMES.has(name);
 }
 
 function normalizePathForComparison(path: string): string {
@@ -472,14 +477,21 @@ function mapCodexRolloutActivityLine(line: string): { mapped: CodexMappedHookEve
 			const name = readStringField(payload, "name") ?? "tool";
 			const callId = readStringField(payload, "call_id") ?? "unknown";
 			const command = extractRolloutCommandFromArgsString(readStringField(payload, "arguments"));
+			const waitingForInput = isCodexUserInputToolName(name);
 			return {
 				fingerprint: `rollout:function_call:${callId}:${name}:${command ?? ""}`,
 				mapped: {
-					event: "activity",
+					event: waitingForInput ? "to_review" : "activity",
 					metadata: {
 						source: "codex",
 						hookEventName: payloadType,
-						activityText: command ? `Calling ${name}: ${command}` : `Calling ${name}`,
+						activityText: waitingForInput
+							? "Waiting for input"
+							: command
+								? `Calling ${name}: ${command}`
+								: `Calling ${name}`,
+						notificationType: waitingForInput ? "request_user_input" : undefined,
+						toolName: waitingForInput ? name : undefined,
 					},
 				},
 			};
@@ -695,6 +707,18 @@ export function parseCodexEventLine(line: string, state: CodexWatcherState): Cod
 				return null;
 			}
 			state.lastActivityFingerprint = fingerprint;
+			if (isCodexUserInputToolName(name)) {
+				return {
+					event: "to_review",
+					metadata: {
+						source: "codex",
+						hookEventName: type,
+						notificationType: "request_user_input",
+						toolName: name,
+						activityText: "Waiting for input",
+					},
+				};
+			}
 			return {
 				event: "activity",
 				metadata: {
