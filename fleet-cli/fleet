@@ -26,6 +26,9 @@ while [ -h "$SOURCE" ]; do
   [[ $SOURCE != /* ]] && SOURCE="$D/$SOURCE"
 done
 DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+# The CLI ships inside the board repo at <repo>/fleet-cli/, so $DIR/.. is that checkout.
+# Used to auto-resolve the board binary (co-located tier) and as fleet update's fork origin.
+FLEET_REPO="$(cd "$DIR/.." 2>/dev/null && pwd)"
 
 GLOBAL_DIR="$HOME/.config/fleet"         # shared: vendored kanban binary, key fallback
 # the project's .fleet dir, found by walking up from CWD (like .git); global if none
@@ -84,7 +87,12 @@ kanban_bin() {
   if [ -n "$KANBAN_SOURCE" ] && [ -x "$KANBAN_SOURCE/dist/cli.js" ]; then echo "$KANBAN_SOURCE/dist/cli.js"; return 0; fi
   # 2) shared fork build (fleet update) — honors CLINE_HOME, so consumer projects get board isolation
   if [ -x "$KANBAN_SRC_VENDOR/dist/cli.js" ]; then echo "$KANBAN_SRC_VENDOR/dist/cli.js"; return 0; fi
-  # 3) shared vendored npm build (stable cline/kanban; ignores CLINE_HOME)
+  # 3) co-located: the CLI ships INSIDE the repo (fleet-cli/), so the board binary is a
+  #    sibling build — $FLEET_REPO/dist/cli.js. Zero-config for a fresh `git clone && build`.
+  #    Ranks BELOW the shared build on purpose: on a box that runs both a consumer project and
+  #    this dev checkout, the consumer keeps its isolated shared build, not the dogfood WIP.
+  if [ -n "$FLEET_REPO" ] && [ -x "$FLEET_REPO/dist/cli.js" ]; then echo "$FLEET_REPO/dist/cli.js"; return 0; fi
+  # 4) shared vendored npm build (stable cline/kanban; ignores CLINE_HOME)
   if [ -x "$KANBAN_VENDOR/node_modules/.bin/kanban" ]; then echo "$KANBAN_VENDOR/node_modules/.bin/kanban"; return 0; fi
   command -v kanban 2>/dev/null && return 0
   return 1
@@ -351,9 +359,9 @@ fleet_update() {
     git -C "$dst" checkout "$ref" >/dev/null 2>&1 || true
     git -C "$dst" reset --hard "origin/$ref" || { dim "reset --hard origin/$ref failed"; return 1; }
   else
-    # Discover the fork URL without hardcoding it: explicit --repo, else the
-    # origin of the dogfood working-copy checkout that ships next to this CLI.
-    [ -n "$repo" ] || repo="$(git -C "$DIR/../fleet-kanban" remote get-url origin 2>/dev/null || true)"
+    # Discover the fork URL without hardcoding it: explicit --repo, else the origin of
+    # the checkout this CLI ships inside ($FLEET_REPO = <repo>, since the CLI is <repo>/fleet-cli/).
+    [ -n "$repo" ] || repo="$(git -C "$FLEET_REPO" remote get-url origin 2>/dev/null || true)"
     [ -n "$repo" ] || { dim "no source repo found — pass it: fleet update --repo <git-url>"; return 1; }
     say "cloning fleet-kanban ($ref) → $dst"
     mkdir -p "$(dirname "$dst")"

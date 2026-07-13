@@ -43,19 +43,21 @@ This repo bundles **`fleet`** — a CLI control tower for running the board and 
 **Prerequisites:** Node 18+, git, and at least one coding-agent CLI on your `PATH` (`claude` and/or `codex`).
 
 ```bash
-# 1. Clone this repo and put the fleet CLI on your PATH
+# 1. Clone this repo, build the board, and put the fleet CLI on your PATH
 git clone https://github.com/arthware/fleet-kanban
 cd fleet-kanban
-./fleet-cli/install.sh                 # symlinks fleet, wt, port-for into ~/.local/bin
+npm run install:all && npm run build    # builds dist/cli.js — the board binary
+./fleet-cli/install.sh                   # symlinks fleet, wt, port-for into ~/.local/bin
 
 # 2. In the directory that holds your repo checkout(s):
 cd ~/your-project
-fleet init --port 3600                  # scaffold .fleet/, auto-detect repos, write AGENTS/CLAUDE
-fleet kanban install --source ~/code/fleet-kanban   # build the board + point this project at it
+fleet init --port 3600                   # scaffold .fleet/, auto-detect repos, write AGENTS/CLAUDE
 
 # 3. Run the board and open it
-fleet service start                     # run under launchd (survives terminal close); or: fleet kanban start
-fleet kanban open                       # → http://127.0.0.1:3600
+fleet service start                      # runs the board straight from your checkout — no extra config
+fleet kanban open                        # → http://127.0.0.1:3600
+
+# Update later: git pull && npm run build   (in the checkout above — the CLI picks up the rebuilt binary)
 ```
 
 Then drive it from the CLI (or the web UI):
