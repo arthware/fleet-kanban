@@ -36,6 +36,38 @@ A replacement for your IDE better suited for running many agents in parallel and
 </table>
 </div>
 
+## Quick start with `fleet`
+
+This repo bundles **`fleet`** — a CLI control tower for running the board and many coding agents in parallel (one worktree + terminal per card). It lives in [`fleet-cli/`](fleet-cli/) and ships with every checkout.
+
+**Prerequisites:** Node 18+, git, and at least one coding-agent CLI on your `PATH` (`claude` and/or `codex`).
+
+```bash
+# 1. Clone this repo and put the fleet CLI on your PATH
+git clone https://github.com/arthware/fleet-kanban
+cd fleet-kanban
+./fleet-cli/install.sh                 # symlinks fleet, wt, port-for into ~/.local/bin
+
+# 2. In the directory that holds your repo checkout(s):
+cd ~/your-project
+fleet init --port 3600                  # scaffold .fleet/, auto-detect repos, write AGENTS/CLAUDE
+fleet kanban install --source ~/code/fleet-kanban   # build the board + point this project at it
+
+# 3. Run the board and open it
+fleet service start                     # run under launchd (survives terminal close); or: fleet kanban start
+fleet kanban open                       # → http://127.0.0.1:3600
+```
+
+Then drive it from the CLI (or the web UI):
+
+```bash
+fleet task ls                                   # every card, grouped by repo → column, with remaining agent budget
+fleet budget                                    # remaining session/week budget across claude / codex / cursor
+fleet task create --prompt "…" --repo <name> [--issue ENG-123]   # hand a task to an agent
+```
+
+Full command reference: [`fleet-cli/README.md`](fleet-cli/README.md).
+
 ### 1. Open kanban
 ```bash
 # Run directly (no install required)
