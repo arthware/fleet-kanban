@@ -45,6 +45,7 @@ export function KanbanBoard({
 	onSaveTaskTitle,
 	onCommitTask,
 	onOpenPrTask,
+	onImplementHereTask,
 	onCancelAutomaticTaskAction,
 	onMoveToTrashTask,
 	onMoveDoneTaskToTrash,
@@ -77,6 +78,7 @@ export function KanbanBoard({
 	onSaveTaskTitle?: (taskId: string, title: string) => void;
 	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
+	onImplementHereTask?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onMoveDoneTaskToTrash?: (taskId: string) => void;
@@ -416,6 +418,7 @@ export function KanbanBoard({
 						onSaveTitle={column.id !== "trash" ? onSaveTaskTitle : undefined}
 						onCommitTask={column.id === "review" ? onCommitTask : undefined}
 						onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
+						onImplementHereTask={column.id === "review" ? onImplementHereTask : undefined}
 						onCancelAutomaticTaskAction={onCancelAutomaticTaskAction}
 						onMoveToTrashTask={
 							column.id === "review"

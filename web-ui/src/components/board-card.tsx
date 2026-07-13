@@ -7,6 +7,7 @@ import {
 	AlertTriangle,
 	Bot,
 	GitBranch,
+	Hammer,
 	MessageCircleQuestion,
 	Pencil,
 	Play,
@@ -28,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useTaskDesignDoc } from "@/hooks/use-task-design-doc";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
@@ -271,6 +273,7 @@ export function BoardCard({
 	onSaveTitle,
 	onCommit,
 	onOpenPr,
+	onImplementHere,
 	onCancelAutomaticAction,
 	isCommitLoading = false,
 	isOpenPrLoading = false,
@@ -299,6 +302,7 @@ export function BoardCard({
 	onSaveTitle?: (taskId: string, title: string) => void;
 	onCommit?: (taskId: string) => void;
 	onOpenPr?: (taskId: string) => void;
+	onImplementHere?: (taskId: string) => void;
 	onCancelAutomaticAction?: (taskId: string) => void;
 	isCommitLoading?: boolean;
 	isOpenPrLoading?: boolean;
@@ -485,6 +489,12 @@ export function BoardCard({
 		: null;
 	const showReviewGitActions = columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0;
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
+	// A plan card whose committed design doc exists can flip from plan → build in
+	// this same live session. Reuse the exact signal the Design badge shows: the
+	// review-column "Implement here" action appears only when that doc resolves.
+	const designDoc = useTaskDesignDoc({ card, workspaceId: workspaceId ?? null, workspacePath });
+	const showImplementHere =
+		columnId === "review" && Boolean(onImplementHere) && Boolean(designDoc.data?.exists && designDoc.data.path);
 	const cancelAutomaticActionLabel =
 		!isTrashCard && card.autoReviewEnabled ? getTaskAutoReviewCancelButtonLabel(card.autoReviewMode) : null;
 	const trashRestoreLabel =
@@ -681,6 +691,7 @@ export function BoardCard({
 										card={card}
 										workspaceId={workspaceId ?? null}
 										workspacePath={workspacePath}
+										designDoc={designDoc}
 									/>
 								</div>
 							) : null}
@@ -1008,6 +1019,24 @@ export function BoardCard({
 										</>
 									) : null}
 								</p>
+							) : null}
+							{showImplementHere ? (
+								<div className="mt-1.5">
+									<Button
+										variant="primary"
+										size="sm"
+										fill
+										icon={<Hammer size={14} />}
+										aria-label="Implement plan in this session"
+										onMouseDown={stopEvent}
+										onClick={(event) => {
+											stopEvent(event);
+											onImplementHere?.(card.id);
+										}}
+									>
+										Implement here
+									</Button>
+								</div>
 							) : null}
 							{showReviewGitActions ? (
 								<div className="flex gap-1.5 mt-1.5">
