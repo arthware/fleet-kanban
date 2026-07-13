@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# wt — make a git worktree actually runnable: gitignored config + deps + a
+# dedicated port. Closes the two gaps that push people to clone repos N times.
+#
+#   wt up   [dir]          adopt/prepare a worktree (symlink env, pnpm install, assign port)
+#   wt new  <branch> [base]  create _work/<branch> off <base> (default origin/HEAD) then `up`
+#   wt run  [-- extra args]  start the app on this worktree's port
+#   wt ls                   list worktrees of this repo with ports + listening state
+#   wt rm   [dir]            stop app, remove worktree, free port
+#
+# Per-repo config (optional): <repo-root>/.fleet.env — override LINK_GLOBS / RUN_CMD.
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  D="$(cd -P "$(dirname "$SOURCE")" && pwd)"; SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$D/$SOURCE"
+done
+SELF_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PORT_FOR="$SELF_DIR/port-for"
+
+die() { echo "wt: $*" >&2; exit 1; }
+
+# canonical (main) worktree = first entry of `git worktree list`
+main_worktree() { git worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}'; }
+repo_root() { git rev-parse --show-toplevel 2>/dev/null; }
+# project root = dir containing .fleet (walk up); falls back to the repo dir
+project_root() {
+  local d="${1:-$PWD}"
+  while [ "$d" != "/" ]; do [ -d "$d/.fleet" ] && { echo "$d"; return 0; }; d="$(dirname "$d")"; done
+  return 1
+}
+
+load_cfg() {
+  # defaults tuned for a pnpm monorepo web app; override via <main>/.fleet.env
+  LINK_GLOBS=${LINK_GLOBS:-"apps/web/.env apps/web/.env.local apps/web/.env.development"}
+  RUN_CMD=${RUN_CMD:-'pnpm --filter @acme/web dev'}
+  local cfg="$1/.fleet.env"
+  if [ -f "$cfg" ]; then . "$cfg"; fi
+  return 0
+}
+
+do_up() {
+  local wt="${1:-$PWD}"
+  wt="$(cd "$wt" && pwd)"
+  local main; main="$(cd "$wt" && main_worktree)"
+  [ -n "$main" ] || die "not inside a git repo"
+  load_cfg "$main"
+
+  echo "→ preparing $wt"
+  # 1. symlink gitignored config from the canonical worktree
+  for rel in $LINK_GLOBS; do
+    local src="$main/$rel" dst="$wt/$rel"
+    [ -e "$src" ] || continue
+    if [ "$src" = "$dst" ]; then continue; fi
+    mkdir -p "$(dirname "$dst")"
+    if [ ! -e "$dst" ] || [ -L "$dst" ]; then
+      ln -sfn "$src" "$dst"
+      echo "  linked $rel"
+    fi
+  done
+  # 2. deps — pnpm hard-links from the shared store, so this is fast
+  if [ ! -d "$wt/node_modules" ] || [ -n "${WT_INSTALL:-}" ]; then
+    echo "  pnpm install…"
+    (cd "$wt" && pnpm install)
+  else
+    echo "  node_modules present (skip install; WT_INSTALL=1 to force)"
+  fi
+  # 3. port
+  local port; port="$("$PORT_FOR" --path "$wt")"
+  echo "✓ ready — port $port"
+  echo "  run:  cd $wt && PORT=$port $RUN_CMD"
+  echo "  or:   wt run   (from that dir)"
+}
+
+do_new() {
+  local branch="$1" base="${2:-}"
+  [ -n "$branch" ] || die "usage: wt new <branch> [base]"
+  local root; root="$(repo_root)" || die "not in a repo"
+  local main; main="$(main_worktree)"
+  local proj; proj="$(project_root "$main" || echo "$main")"
+  local dir="$proj/_work/$(basename "$main").${branch//\//-}"
+  [ -e "$dir" ] && die "$dir already exists"
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$main" worktree add "$dir" "$branch"
+  else
+    base="${base:-$(git -C "$main" rev-parse --abbrev-ref origin/HEAD 2>/dev/null || echo main)}"
+    git -C "$main" worktree add -b "$branch" "$dir" "$base"
+  fi
+  do_up "$dir"
+}
+
+do_run() {
+  local wt="$PWD" main; main="$(main_worktree)" || die "not in a repo"
+  load_cfg "$main"
+  local port; port="$("$PORT_FOR" --path "$wt")"
+  echo "→ $RUN_CMD on port $port  ($wt)"
+  shift || true
+  PORT="$port" bash -c "$RUN_CMD $*"
+}
+
+do_ls() {
+  git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while read -r wt; do
+    local port state="  "
+    port="$(python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.config/fleet/ports.json')));print(d.get(os.path.realpath('$wt'),''))" 2>/dev/null || true)"
+    if [ -n "$port" ]; then
+      if python3 -c "import socket,sys;s=socket.socket();s.settimeout(.15);sys.exit(0 if s.connect_ex(('127.0.0.1',$port))==0 else 1)" 2>/dev/null; then state="● "; fi
+    fi
+    printf "%s%-6s %s\n" "$state" "${port:--}" "$wt"
+  done
+}
+
+do_rm() {
+  local wt="${1:-$PWD}"; wt="$(cd "$wt" && pwd)"
+  "$PORT_FOR" --release "$wt" || true
+  git worktree remove "$wt" --force
+  echo "removed $wt"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  up)  do_up "$@";;
+  new) do_new "$@";;
+  run) do_run "$@";;
+  ls)  do_ls;;
+  rm)  do_rm "$@";;
+  *)   grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -12;;
+esac
