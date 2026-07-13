@@ -64,6 +64,7 @@
     "vitest": "^4.1.0"
   },
   "overrides": {
-    "protobufjs": "7.5.8"
+    "protobufjs": "7.6.5",
+    "@opentelemetry/core": "2.9.0"
   }
 }
