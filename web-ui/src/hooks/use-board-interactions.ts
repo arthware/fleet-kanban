@@ -70,6 +70,7 @@ interface UseBoardInteractionsInput {
 	readyForReviewNotificationsEnabled: boolean;
 	taskGitActionLoadingByTaskId: Record<string, TaskGitActionLoadingStateLike>;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
+	runImplementHereAction: (taskId: string) => Promise<boolean>;
 }
 
 export interface UseBoardInteractionsResult {
@@ -85,6 +86,7 @@ export interface UseBoardInteractionsResult {
 	handleMoveToTrash: () => void;
 	handleMoveDoneCardToTrash: (taskId: string) => void;
 	handleMoveReviewCardToTrash: (taskId: string) => void;
+	handleImplementHere: (taskId: string) => void;
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleCancelAutomaticTaskAction: (taskId: string) => void;
 	handleOpenClearTrash: () => void;
@@ -115,6 +117,7 @@ export function useBoardInteractions({
 	readyForReviewNotificationsEnabled,
 	taskGitActionLoadingByTaskId,
 	runAutoReviewGitAction,
+	runImplementHereAction,
 }: UseBoardInteractionsInput): UseBoardInteractionsResult {
 	const previousSessionsRef = useRef<Record<string, RuntimeTaskSessionSummary>>({});
 	const notificationPermissionPromptInFlightRef = useRef(false);
@@ -827,6 +830,26 @@ export function useBoardInteractions({
 		[requestMoveTaskToTrashWithAnimation, setTaskMoveToTrashLoading],
 	);
 
+	const handleImplementHere = useCallback(
+		(taskId: string) => {
+			// Implement-here injects into the *same* live session, so it only works
+			// while that session is still attached. A detached session (resumable /
+			// gone) has no running agent to receive the prompt — decline and tell the
+			// operator to restart the card rather than silently injecting into nothing.
+			if (sessions[taskId]?.agentSessionLifecycle !== "attached") {
+				showAppToast({
+					intent: "warning",
+					icon: "warning-sign",
+					message: "This card's agent session is no longer live. Restart the card, then Implement here.",
+					timeout: 7000,
+				});
+				return;
+			}
+			void runImplementHereAction(taskId);
+		},
+		[runImplementHereAction, sessions],
+	);
+
 	const handleMoveDoneCardToTrash = useCallback(
 		(taskId: string) => {
 			if (moveToTrashLoadingByIdRef.current[taskId]) {
@@ -963,6 +986,7 @@ export function useBoardInteractions({
 		handleMoveToTrash,
 		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
+		handleImplementHere,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,
