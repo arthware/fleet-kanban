@@ -54,15 +54,15 @@ if [ "$ASSUME_YES" != 1 ]; then
 	esac
 fi
 
+# Delegates to the CLI-native command: `fleet service restart [--build]` rebuilds the
+# board source (co-located / kanban_source checkout) and reloads the launchd daemon.
 if [ "$BUILD" = 1 ]; then
-	echo "==> building fleet-kanban (npm run build) …"
-	npm run build
+	echo "==> rebuilding + reloading (fleet service restart --build) …"
+	fleet service restart --build
 else
-	echo "==> skipping build (--no-build); reloading current dist/ …"
+	echo "==> reloading current dist/ (fleet service restart) …"
+	fleet service restart
 fi
-
-echo "==> reloading launchd daemon (fleet kanban daemon install) …"
-fleet kanban daemon install
 
 echo "==> waiting for the board to answer on $URL …"
 for _ in $(seq 1 30); do

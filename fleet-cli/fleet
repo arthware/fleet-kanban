@@ -15,7 +15,7 @@
 #   fleet rm   [dir]        remove a worktree + free its port (-> wt rm)
 #   fleet port [args]       stable per-worktree port (-> port-for)
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
-#   fleet service [start|stop|status]       run the board under launchd (survives terminal/session death)
+#   fleet service [start|stop|restart [--build]|status]   run the board under launchd (--build = rebuild source, then reload)
 #   fleet kanban daemon [install|uninstall|status]          DEPRECATED synonym for `fleet service`
 #   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands
 set -euo pipefail
@@ -330,13 +330,33 @@ fleet_kanban() {
 # service = the persistent (launchd) board lifecycle, clearly named. Thin front over the
 # daemon plumbing above. `fleet service start|stop|status`. Supersedes `fleet kanban daemon …`.
 fleet_service() {
-  case "${1:-status}" in
+  local sub="${1:-status}"; [ $# -gt 0 ] && shift
+  case "$sub" in
     start|up|on)     kanban_daemon install;;
     stop|down|off)   kanban_daemon uninstall;;
-    restart|reload)  kanban_daemon install;;      # install = unload+load = reload
+    restart|reload)  _service_restart "$@";;
     status|"")       kanban_daemon status;;
-    *) echo "usage: fleet service [start|stop|status]" >&2; return 1;;
+    *) echo "usage: fleet service [start|stop|restart [--build]|status]" >&2; return 1;;
   esac
+}
+
+# Reload the board daemon. With --build, first rebuild the source checkout the board
+# runs from (co-located / kanban_source) so local code changes go live — the CLI-native
+# replacement for scripts/refresh.sh. Consumers on the SHARED build refresh it with
+# `fleet update` instead, then `fleet service restart` (no --build) to reload.
+_service_restart() {
+  if [ "${1:-}" = "--build" ]; then
+    local bin src
+    bin="$(kanban_bin)" || { dim "no board binary resolved — run 'fleet init' in the project first"; return 1; }
+    src="${bin%/dist/cli.js}"
+    if [ "$src" = "$bin" ] || [ ! -f "$src/package.json" ]; then
+      dim "the board runs a prebuilt binary ($bin) — nothing to rebuild here."
+      dim "  (shared-build consumers: refresh with 'fleet update', then 'fleet service restart')"; return 1
+    fi
+    say "rebuilding board source: $src"
+    ( cd "$src" && npm run build ) || { dim "build failed"; return 1; }
+  fi
+  kanban_daemon install
 }
 
 # --- shared fork build: one checkout every consumer project runs from --------
