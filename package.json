@@ -77,7 +77,7 @@
     "@types/node": "^22.10.5",
     "@types/proper-lockfile": "^4.1.4",
     "@types/ws": "^8.18.1",
-    "esbuild": "^0.27.4",
+    "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "shx": "^0.4.0",
     "tsx": "^4.20.3",
@@ -110,6 +110,7 @@
     "zod": "^4.3.6"
   },
   "overrides": {
-    "protobufjs": "7.5.8"
+    "protobufjs": "7.6.5",
+    "@opentelemetry/core": "2.9.0"
   }
 }
