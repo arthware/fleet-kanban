@@ -820,11 +820,11 @@ export function useBoardInteractions({
 				return;
 			}
 			setTaskMoveToTrashLoading(taskId, true);
-			void completeReviewTask(taskId).finally(() => {
+			void requestMoveTaskToTrashWithAnimation(taskId, "review").finally(() => {
 				setTaskMoveToTrashLoading(taskId, false);
 			});
 		},
-		[completeReviewTask, setTaskMoveToTrashLoading],
+		[requestMoveTaskToTrashWithAnimation, setTaskMoveToTrashLoading],
 	);
 
 	const handleMoveDoneCardToTrash = useCallback(

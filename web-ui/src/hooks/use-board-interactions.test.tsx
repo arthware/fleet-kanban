@@ -699,8 +699,10 @@ describe("useBoardInteractions", () => {
 		expect(setSelectedTaskId).not.toHaveBeenCalled();
 	});
 
-	it("moves a review card to done without invoking the trash cleanup workflow", async () => {
+	it("given a review card, when it is abandoned, then it is moved to trash without completing to done", async () => {
+		// given a review card and a stubbed trash-animation mutation
 		let latestSnapshot: HookSnapshot | null = null;
+		const requestMoveTaskToTrashWithAnimation = vi.fn(async () => {});
 
 		useProgrammaticCardMovesMock.mockReturnValue({
 			handleProgrammaticCardMoveReady: () => {},
@@ -710,7 +712,7 @@ describe("useBoardInteractions", () => {
 			resolvePendingProgrammaticTrashMove: () => {},
 			waitForProgrammaticCardMoveAvailability: async () => {},
 			resetProgrammaticCardMoves: () => {},
-			requestMoveTaskToTrashWithAnimation: async () => {},
+			requestMoveTaskToTrashWithAnimation,
 			programmaticCardMoveCycle: 0,
 		});
 		const requestMoveTaskToTrash = vi.fn(async () => {});
@@ -758,16 +760,15 @@ describe("useBoardInteractions", () => {
 			throw new Error("Expected a hook snapshot.");
 		}
 
+		// when the review card is abandoned
 		await act(async () => {
 			latestSnapshot!.handleMoveReviewCardToTrash("task-review");
 			await Promise.resolve();
 		});
 
-		expect(currentBoard.columns.find((column) => column.id === "review")?.cards).toEqual([]);
-		expect(currentBoard.columns.find((column) => column.id === "done")?.cards.map((card) => card.id)).toEqual([
-			"task-review",
-		]);
-		expect(currentBoard.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+		// then it goes to trash via the animated mutation and never lands in done
+		expect(requestMoveTaskToTrashWithAnimation).toHaveBeenCalledWith("task-review", "review");
+		expect(currentBoard.columns.find((column) => column.id === "done")?.cards).toEqual([]);
 		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
 	});
 
