@@ -241,15 +241,71 @@ describe("BoardCard", () => {
 		expect(nextCancelButton).toBeUndefined();
 	});
 
-	it("shows a loading state on the review done button while moving to done", async () => {
+	it("given a review card, when its card-face button renders, then it shows the Abandon trash icon and an 'Abandon task' label", async () => {
+		// given a review card
+		// when its card-face button renders
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" />);
+		});
+
+		// then it offers "Abandon task" with the trash icon, not a "Move task to done" checkmark
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]');
+		expect(abandonButton).toBeInstanceOf(HTMLButtonElement);
+		expect(abandonButton?.querySelector("svg.lucide-trash-2")).toBeInstanceOf(SVGSVGElement);
+		expect(container.querySelector('button[aria-label="Move task to done"]')).toBeNull();
+		expect(abandonButton?.querySelector("svg.lucide-circle-check")).toBeNull();
+	});
+
+	it("given a review card, when its Abandon task button is clicked, then it invokes the trash handler with the card id", async () => {
+		// given a review card with a trash handler
+		const onMoveToTrash = vi.fn();
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ id: "review-1" })}
+					index={0}
+					columnId="review"
+					onMoveToTrash={onMoveToTrash}
+				/>,
+			);
+		});
+
+		// when its Abandon task button is clicked
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]') as HTMLButtonElement | null;
+		await act(async () => {
+			abandonButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			abandonButton?.click();
+		});
+
+		// then the trash handler runs for that card
+		expect(onMoveToTrash).toHaveBeenCalledWith("review-1");
+	});
+
+	it("given a review card being abandoned, when its card-face button renders, then it shows a disabled spinner", async () => {
+		// given a review card that is being moved to trash
+		// when its card-face button renders
 		await act(async () => {
 			root.render(<BoardCard card={createCard()} index={0} columnId="review" isMoveToTrashLoading />);
 		});
 
-		const trashButton = container.querySelector('button[aria-label="Move task to done"]');
-		expect(trashButton).toBeInstanceOf(HTMLButtonElement);
-		expect((trashButton as HTMLButtonElement | null)?.disabled).toBe(true);
-		expect(trashButton?.querySelector("svg.animate-spin")).toBeTruthy();
+		// then the Abandon button is disabled and spinning
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]');
+		expect(abandonButton).toBeInstanceOf(HTMLButtonElement);
+		expect((abandonButton as HTMLButtonElement | null)?.disabled).toBe(true);
+		expect(abandonButton?.querySelector("svg.animate-spin")).toBeTruthy();
+	});
+
+	it("given a done card, when its card-face button renders, then it is unchanged (trash icon and 'Trash task' label)", async () => {
+		// given a done card
+		// when its card-face button renders
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ id: "done-1" })} index={0} columnId="done" />);
+		});
+
+		// then the done card keeps its own "Trash task" button
+		const doneButton = container.querySelector('button[aria-label="Trash task"]');
+		expect(doneButton).toBeInstanceOf(HTMLButtonElement);
+		expect(doneButton?.querySelector("svg.lucide-trash-2")).toBeInstanceOf(SVGSVGElement);
 	});
 
 	it("renders done cards as proud interactive cards without archived restore styling", async () => {

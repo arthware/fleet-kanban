@@ -6,7 +6,6 @@ import {
 	AlertCircle,
 	AlertTriangle,
 	Bot,
-	CheckCircle2,
 	GitBranch,
 	MessageCircleQuestion,
 	Pencil,
@@ -760,11 +759,11 @@ export function BoardCard({
 									/>
 								) : columnId === "review" ? (
 									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <CheckCircle2 size={13} />}
+										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
 										variant="ghost"
 										size="sm"
 										disabled={isMoveToTrashLoading}
-										aria-label="Move task to done"
+										aria-label="Abandon task"
 										onMouseDown={stopEvent}
 										onClick={(event) => {
 											stopEvent(event);
