@@ -42,6 +42,16 @@ This repo bundles **`fleet`** — a CLI control tower for running the board and 
 
 **Prerequisites:** Node 18+, git, and at least one coding-agent CLI on your `PATH` (`claude` and/or `codex`).
 
+**Fastest — just the CLI, no checkout to manage.** The bootstrap installer fetches + builds the board under `~/.config/fleet/src` (the same checkout `fleet update` keeps fresh) and links `fleet` onto your PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/arthware/fleet-kanban/main/install.sh | bash
+# private repo? skip curl and use your git credentials:
+#   FLEET_REPO_URL=git@github.com:arthware/fleet-kanban.git bash install.sh
+```
+
+Then jump to **step 2** below. Or, to work from a full clone instead:
+
 ```bash
 # 1. Clone this repo, build the board, and put the fleet CLI on your PATH
 git clone https://github.com/arthware/fleet-kanban
