@@ -15,7 +15,8 @@
 #   fleet rm   [dir]        remove a worktree + free its port (-> wt rm)
 #   fleet port [args]       stable per-worktree port (-> port-for)
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
-#   fleet kanban daemon [install|uninstall|status]          run under launchd (survives terminal/session death)
+#   fleet service [start|stop|status]       run the board under launchd (survives terminal/session death)
+#   fleet kanban daemon [install|uninstall|status]          DEPRECATED synonym for `fleet service`
 #   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands
 set -euo pipefail
 # resolve through symlinks so DIR is the real tools/fleet dir, not ~/.local/bin
@@ -221,7 +222,7 @@ kanban_status() {
 # Fixes "kanban died with the parent process": under launchd the server is not a
 # child of the launching shell, so closing the terminal / ending a session can't
 # signal it. KeepAlive (unconditional) keeps it up: launchd revives it on ANY exit,
-# including a raw kill, so only `fleet kanban daemon uninstall` truly stops it.
+# including a raw kill, so only `fleet service stop` truly stops it.
 _kanban_label() { echo "com.fleet.kanban.$(basename "$(dirname "$CFG_DIR")")"; }
 _kanban_plist() { echo "$HOME/Library/LaunchAgents/$(_kanban_label).plist"; }
 
@@ -269,7 +270,7 @@ PY
       [ -f "$plist" ] && rm -f "$plist" && say "daemon '$label' removed" || dim "no daemon installed"
       kanban_stop >/dev/null 2>&1 || true;;
     status)
-      if launchctl list 2>/dev/null | grep -q "$label"; then say "daemon '$label' loaded"; else dim "no daemon (run: fleet kanban daemon install)"; fi
+      if launchctl list 2>/dev/null | grep -q "$label"; then say "daemon '$label' loaded"; else dim "no daemon (run: fleet service start)"; fi
       kanban_status;;
     *) echo "usage: fleet kanban daemon [install|uninstall|status]" >&2; return 1;;
   esac
@@ -287,7 +288,7 @@ kanban_guarded_stop() {
   local force=""; case "${1:-}" in --force|-f|--yes|-y) force=1;; esac
   if _kanban_daemon_loaded && [ -z "$force" ]; then
     say "refusing: this board runs under the launchd daemon (protected)."
-    dim "  it auto-revives if killed. to really stop it:  fleet kanban daemon uninstall"
+    dim "  it auto-revives if killed. to really stop it:  fleet service stop"
     dim "  to override anyway:                            fleet kanban stop --force"
     return 1
   fi
@@ -308,11 +309,25 @@ fleet_kanban() {
     start)          shift; kanban_start "$@";;
     stop)           shift; kanban_guarded_stop "$@";;
     restart)        shift; kanban_guarded_restart "$@";;
-    daemon)         shift; kanban_daemon "$@";;
+    daemon)         shift
+                    dim "note: 'fleet kanban daemon' is deprecated — use 'fleet service {start|stop|status}'"
+                    kanban_daemon "$@";;
     sync)           kanban_running || { dim "not running — start it: fleet kanban start"; return 1; }; say "syncing projects → $KANBAN_URL"; kanban_sync_projects;;
     open)           kanban_running || kanban_start; command -v open >/dev/null && open "$KANBAN_URL";;
     status|"")      kanban_status;;
     *) echo "usage: fleet kanban [install|start|stop|restart|daemon|sync|open|status]" >&2; return 1;;
+  esac
+}
+
+# service = the persistent (launchd) board lifecycle, clearly named. Thin front over the
+# daemon plumbing above. `fleet service start|stop|status`. Supersedes `fleet kanban daemon …`.
+fleet_service() {
+  case "${1:-status}" in
+    start|up|on)     kanban_daemon install;;
+    stop|down|off)   kanban_daemon uninstall;;
+    restart|reload)  kanban_daemon install;;      # install = unload+load = reload
+    status|"")       kanban_daemon status;;
+    *) echo "usage: fleet service [start|stop|status]" >&2; return 1;;
   esac
 }
 
@@ -1092,6 +1107,7 @@ case "$cmd" in
   initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
   port) exec "$DIR/port-for" "$@";;
   kanban) fleet_kanban "$@";;
+  service|svc) fleet_service "$@";;
   task) fleet_task "$@";;
   xtools|xtool|x) fleet_xtools "$@";;
   init) fleet_init "$@";;
