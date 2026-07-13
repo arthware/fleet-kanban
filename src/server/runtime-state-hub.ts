@@ -313,12 +313,24 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	};
 
 	const broadcastRuntimeWorkspaceStateUpdated = async (workspaceId: string, workspacePath: string): Promise<void> => {
+		let workspaceState: RuntimeStateStreamWorkspaceStateMessage["workspaceState"];
+		try {
+			workspaceState = await deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspaceId, workspacePath);
+			await workspaceMetadataMonitor.updateWorkspaceState({
+				workspaceId,
+				workspacePath,
+				board: workspaceState.board,
+			});
+		} catch {
+			// Ignore transient state read failures; next update will resync.
+			return;
+		}
+
 		const clients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		if (!clients || clients.size === 0) {
 			return;
 		}
 		try {
-			const workspaceState = await deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspaceId, workspacePath);
 			const payload: RuntimeStateStreamWorkspaceStateMessage = {
 				type: "workspace_state_updated",
 				workspaceId,
@@ -327,13 +339,8 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			for (const client of clients) {
 				sendRuntimeStateMessage(client, payload);
 			}
-			await workspaceMetadataMonitor.updateWorkspaceState({
-				workspaceId,
-				workspacePath,
-				board: workspaceState.board,
-			});
 		} catch {
-			// Ignore transient state read failures; next update will resync.
+			// Ignore websocket fanout failures; next update will resync.
 		}
 	};
 
