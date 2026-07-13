@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { Command, Option } from "commander";
 import ora, { type Ora } from "ora";
 import packageJson from "../package.json" with { type: "json" };
+import "./cli-warning-filter";
 import { disposeCliTelemetryService } from "./cline-sdk/cline-telemetry-service.js";
 import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
