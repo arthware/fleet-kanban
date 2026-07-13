@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""
+port-for — deterministic, stable, collision-free port per worktree.
+
+Maps a worktree path to a port from a registry (~/.config/fleet/ports.json) so
+the SAME command yields a unique port everywhere:
+
+    PORT=$(port-for) pnpm --filter @acme/web dev
+
+Works identically in a manual worktree and as a kanban "Script Shortcut".
+
+    port-for                 # port for $PWD (assign on first use)
+    port-for --path DIR      # port for DIR
+    port-for --list          # show the whole registry
+    port-for --release [DIR] # free the port for DIR (default $PWD)
+    port-for --base 3100 --range 900
+"""
+from __future__ import annotations
+import argparse, json, os, socket, sys
+from pathlib import Path
+
+GLOBAL_REG = Path.home() / ".config" / "fleet" / "ports.json"
+
+def fleet_dir(start) -> Path | None:
+    env = os.environ.get("FLEET_DIR")
+    if env:
+        return Path(env)
+    p = Path(start).resolve()
+    for d in [p, *p.parents]:
+        if (d / ".fleet").is_dir():
+            return d / ".fleet"
+    return None
+
+def reg_for(path) -> Path:
+    """The ports.json for the project owning `path` (its .fleet), else global."""
+    fd = fleet_dir(path)
+    return (fd / "ports.json") if fd else GLOBAL_REG
+
+def load(reg: Path) -> dict:
+    try:
+        return json.loads(reg.read_text())
+    except Exception:
+        return {}
+
+def save(reg: Path, d: dict):
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(json.dumps(d, indent=2, sort_keys=True))
+
+def listening(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.15)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+def assign(path: str, base: int, rng: int) -> int:
+    key = os.path.realpath(path)
+    regfile = reg_for(path)
+    reg = load(regfile)
+    if key in reg:
+        return reg[key]
+    taken = set(reg.values())
+    for p in range(base, base + rng):
+        if p in taken or listening(p):
+            continue
+        reg[key] = p
+        save(regfile, reg)
+        return p
+    print("port-for: no free port in range", file=sys.stderr)
+    sys.exit(1)
+
+def main():
+    ap = argparse.ArgumentParser(description="stable per-worktree port")
+    ap.add_argument("--path", default=os.getcwd())
+    ap.add_argument("--base", type=int, default=3100)
+    ap.add_argument("--range", type=int, default=900)
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--release", nargs="?", const=os.getcwd())
+    args = ap.parse_args()
+
+    if args.list:
+        regfile = reg_for(args.path)
+        reg = load(regfile)
+        for k, v in sorted(reg.items(), key=lambda kv: kv[1]):
+            mark = "●" if listening(v) else " "
+            print(f"{mark} {v}  {k}")
+        return
+    if args.release is not None:
+        key = os.path.realpath(args.release)
+        regfile = reg_for(args.release)
+        reg = load(regfile)
+        if reg.pop(key, None) is not None:
+            save(regfile, reg)
+        return
+    print(assign(args.path, args.base, args.range))
+
+if __name__ == "__main__":
+    main()

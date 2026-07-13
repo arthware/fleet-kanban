@@ -149,6 +149,10 @@ function findExternalIssueLink(
 	return container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
 }
 
+function findSessionActivityDot(container: HTMLElement): HTMLElement | null {
+	return container.querySelector<HTMLElement>(".inline-block.shrink-0.rounded-full");
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -237,15 +241,71 @@ describe("BoardCard", () => {
 		expect(nextCancelButton).toBeUndefined();
 	});
 
-	it("shows a loading state on the review done button while moving to done", async () => {
+	it("given a review card, when its card-face button renders, then it shows the Abandon trash icon and an 'Abandon task' label", async () => {
+		// given a review card
+		// when its card-face button renders
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" />);
+		});
+
+		// then it offers "Abandon task" with the trash icon, not a "Move task to done" checkmark
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]');
+		expect(abandonButton).toBeInstanceOf(HTMLButtonElement);
+		expect(abandonButton?.querySelector("svg.lucide-trash-2")).toBeInstanceOf(SVGSVGElement);
+		expect(container.querySelector('button[aria-label="Move task to done"]')).toBeNull();
+		expect(abandonButton?.querySelector("svg.lucide-circle-check")).toBeNull();
+	});
+
+	it("given a review card, when its Abandon task button is clicked, then it invokes the trash handler with the card id", async () => {
+		// given a review card with a trash handler
+		const onMoveToTrash = vi.fn();
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ id: "review-1" })}
+					index={0}
+					columnId="review"
+					onMoveToTrash={onMoveToTrash}
+				/>,
+			);
+		});
+
+		// when its Abandon task button is clicked
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]') as HTMLButtonElement | null;
+		await act(async () => {
+			abandonButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			abandonButton?.click();
+		});
+
+		// then the trash handler runs for that card
+		expect(onMoveToTrash).toHaveBeenCalledWith("review-1");
+	});
+
+	it("given a review card being abandoned, when its card-face button renders, then it shows a disabled spinner", async () => {
+		// given a review card that is being moved to trash
+		// when its card-face button renders
 		await act(async () => {
 			root.render(<BoardCard card={createCard()} index={0} columnId="review" isMoveToTrashLoading />);
 		});
 
-		const trashButton = container.querySelector('button[aria-label="Move task to done"]');
-		expect(trashButton).toBeInstanceOf(HTMLButtonElement);
-		expect((trashButton as HTMLButtonElement | null)?.disabled).toBe(true);
-		expect(trashButton?.querySelector("svg.animate-spin")).toBeTruthy();
+		// then the Abandon button is disabled and spinning
+		const abandonButton = container.querySelector('button[aria-label="Abandon task"]');
+		expect(abandonButton).toBeInstanceOf(HTMLButtonElement);
+		expect((abandonButton as HTMLButtonElement | null)?.disabled).toBe(true);
+		expect(abandonButton?.querySelector("svg.animate-spin")).toBeTruthy();
+	});
+
+	it("given a done card, when its card-face button renders, then it is unchanged (trash icon and 'Trash task' label)", async () => {
+		// given a done card
+		// when its card-face button renders
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ id: "done-1" })} index={0} columnId="done" />);
+		});
+
+		// then the done card keeps its own "Trash task" button
+		const doneButton = container.querySelector('button[aria-label="Trash task"]');
+		expect(doneButton).toBeInstanceOf(HTMLButtonElement);
+		expect(doneButton?.querySelector("svg.lucide-trash-2")).toBeInstanceOf(SVGSVGElement);
 	});
 
 	it("renders done cards as proud interactive cards without archived restore styling", async () => {
@@ -923,6 +983,72 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain(preview);
 	});
 
+	it("given a failed review with reviewReason error, when the card renders, then it shows a red error dot with the failure message", async () => {
+		// given
+		const summary = createSummary("awaiting_review", {
+			reviewReason: "error",
+			warningMessage: "Provider request failed",
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-red)");
+		expect(container.textContent).toContain("Provider request failed");
+	});
+
+	it("given a failed session carrying a success-style final message, when the card renders, then it shows a red error dot with the failure message", async () => {
+		// given
+		const summary = createSummary("failed", {
+			latestHookActivity: {
+				activityText: null,
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Provider connection lost",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-red)");
+		expect(container.textContent).toContain("Provider connection lost");
+	});
+
+	it("given a clean review with a final message, when the card renders, then it keeps the green success dot", async () => {
+		// given
+		const summary = createSummary("awaiting_review", {
+			reviewReason: "exit",
+			latestHookActivity: {
+				activityText: null,
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Ready for review",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-green)");
+		expect(container.textContent).toContain("Ready for review");
+	});
+
 	it("hides the worktree path from active card review status while keeping branch and change summary", async () => {
 		mockWorkspaceSnapshot = {
 			taskId: "task-1",
@@ -1333,6 +1459,71 @@ describe("BoardCard", () => {
 
 		expect(document.body.textContent).toContain("API Review");
 		expect(document.body.textContent).toContain("Design details are ready.");
+	});
+
+	it("given a review card with a design doc, when Implement here is clicked, then it invokes the implement-here handler with the card id", async () => {
+		// given a review card whose committed design doc resolves
+		trpcMocks.getDesignDoc.mockResolvedValue({
+			exists: true,
+			path: "/tmp/repo/docs/design/task-1-approved-plan.md",
+			content: "# Approved plan",
+		});
+		const onImplementHere = vi.fn();
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+					onImplementHere={onImplementHere}
+				/>,
+			);
+		});
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		// when its Implement here button is clicked
+		const implementButton = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Implement plan in this session"]',
+		);
+		expect(implementButton).toBeInstanceOf(HTMLButtonElement);
+		expect(implementButton?.textContent).toContain("Implement here");
+		await act(async () => {
+			implementButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			implementButton?.click();
+		});
+
+		// then the implement-here handler runs for that card
+		expect(onImplementHere).toHaveBeenCalledWith("task-1");
+	});
+
+	it("given a review card with no design doc, when the card renders, then no Implement-here action is shown", async () => {
+		// given a review card with no matching design doc (default mock: exists false)
+		const onImplementHere = vi.fn();
+
+		// when the card renders
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+					onImplementHere={onImplementHere}
+				/>,
+			);
+		});
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		// then no Implement-here action is offered
+		expect(container.querySelector('button[aria-label="Implement plan in this session"]')).toBeNull();
+		expect(container.textContent).not.toContain("Implement here");
 	});
 
 	it("shows the latest assistant preview on active task cards", async () => {

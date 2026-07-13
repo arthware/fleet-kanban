@@ -433,6 +433,7 @@ export default function App(): ReactElement {
 		handleAgentCommitTask,
 		handleAgentOpenPrTask,
 		runAutoReviewGitAction,
+		runImplementHereAction,
 		resetGitActionState,
 	} = useGitActions({
 		currentProjectId,
@@ -622,6 +623,7 @@ export default function App(): ReactElement {
 		handleMoveToTrash,
 		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
+		handleImplementHere,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,
@@ -650,6 +652,7 @@ export default function App(): ReactElement {
 		readyForReviewNotificationsEnabled,
 		taskGitActionLoadingByTaskId,
 		runAutoReviewGitAction,
+		runImplementHereAction,
 	});
 
 	const {
@@ -1017,6 +1020,7 @@ export default function App(): ReactElement {
 												onSaveTaskTitle={handleSaveTaskTitle}
 												onCommitTask={handleCommitTask}
 												onOpenPrTask={handleOpenPrTask}
+												onImplementHereTask={handleImplementHere}
 												onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
 												commitTaskLoadingById={commitTaskLoadingById}
 												openPrTaskLoadingById={openPrTaskLoadingById}

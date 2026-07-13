@@ -26,6 +26,7 @@ import {
 	trashTaskAndGetReadyLinkedTaskIds,
 	updateTask,
 } from "../core/task-board-mutations";
+import { resolveTaskTitle } from "../core/task-title";
 import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
@@ -385,7 +386,7 @@ export function resolveCardIdFromRefOrIssue(state: RuntimeWorkspaceStateResponse
 	return matches[0] ?? ref;
 }
 
-function formatTaskRecord(
+export function formatTaskRecord(
 	state: RuntimeWorkspaceStateResponse,
 	task: RuntimeBoardCard,
 	columnId: RuntimeBoardColumnId,
@@ -393,6 +394,7 @@ function formatTaskRecord(
 	const session = state.sessions[task.id] ?? null;
 	return {
 		id: task.id,
+		title: resolveTaskTitle(task.title, task.prompt),
 		prompt: task.prompt,
 		column: columnId,
 		baseRef: task.baseRef,
@@ -417,6 +419,24 @@ function formatTaskRecord(
 					exitCode: session.exitCode,
 				}
 			: null,
+	};
+}
+
+export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepoPath: string): JsonRecord {
+	return {
+		id: created.id,
+		column: "backlog",
+		workspacePath: workspaceRepoPath,
+		title: resolveTaskTitle(created.title, created.prompt),
+		prompt: created.prompt,
+		baseRef: created.baseRef,
+		startInPlanMode: created.startInPlanMode,
+		autoReviewEnabled: created.autoReviewEnabled === true,
+		autoReviewMode: created.autoReviewMode ?? "commit",
+		...(created.agentId ? { agentId: created.agentId } : {}),
+		...(created.agentModel ? { agentModel: created.agentModel } : {}),
+		...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
+		...formatTaskClineSettings(created.clineSettings),
 	};
 }
 
@@ -577,21 +597,7 @@ async function createTask(input: {
 
 	return {
 		ok: true,
-		task: {
-			id: created.id,
-			column: "backlog",
-			workspacePath: workspaceRepoPath,
-			title: created.title,
-			prompt: created.prompt,
-			baseRef: created.baseRef,
-			startInPlanMode: created.startInPlanMode,
-			autoReviewEnabled: created.autoReviewEnabled === true,
-			autoReviewMode: created.autoReviewMode ?? "commit",
-			...(created.agentId ? { agentId: created.agentId } : {}),
-			...(created.agentModel ? { agentModel: created.agentModel } : {}),
-			...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
-			...formatTaskClineSettings(created.clineSettings),
-		},
+		task: formatCreatedTaskRecord(created, workspaceRepoPath),
 	};
 }
 
@@ -1448,9 +1454,25 @@ function parsePositiveIntOption(value: string | undefined, flagName: string): nu
 	return parsed;
 }
 
-async function runTaskCommand(handler: () => Promise<JsonRecord>): Promise<void> {
+interface TaskCommandOutputOptions {
+	quietTaskIdOnly?: boolean;
+}
+
+export function renderTaskCommandSuccess(payload: JsonRecord, options?: TaskCommandOutputOptions): string {
+	if (options?.quietTaskIdOnly === true) {
+		const taskId = (payload.task as { id?: unknown } | undefined)?.id;
+		if (typeof taskId !== "string" || taskId.trim().length === 0) {
+			throw new Error("Task command did not return a task id.");
+		}
+		return `${taskId}\n`;
+	}
+	return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+async function runTaskCommand(handler: () => Promise<JsonRecord>, options?: TaskCommandOutputOptions): Promise<void> {
 	try {
-		printJson(await handler());
+		const payload = await handler();
+		process.stdout.write(renderTaskCommandSuccess(payload, options));
 	} catch (error) {
 		printJson({
 			ok: false,
@@ -1498,6 +1520,8 @@ export function registerTaskCommand(program: Command): void {
 			"--agent-model <id>",
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
+		.option("--quiet", "Print only the created task id.")
+		.option("--id-only", "Alias for --quiet.")
 		.option(
 			"--external-issue <ref>",
 			"External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.",
@@ -1526,6 +1550,8 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				quiet?: boolean;
+				idOnly?: boolean;
 				externalIssue?: string;
 				issue?: string;
 				clineProvider?: string;
@@ -1552,6 +1578,9 @@ export function registerTaskCommand(program: Command): void {
 								reasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),
 							}),
 						}),
+					{
+						quietTaskIdOnly: options.quiet === true || options.idOnly === true,
+					},
 				);
 			},
 		);

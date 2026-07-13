@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveCardIdFromRefOrIssue, resolveExternalIssueForTaskCommand } from "../../../src/commands/task";
+import {
+	formatCreatedTaskRecord,
+	formatTaskRecord,
+	renderTaskCommandSuccess,
+	resolveCardIdFromRefOrIssue,
+	resolveExternalIssueForTaskCommand,
+} from "../../../src/commands/task";
 import type {
 	RuntimeBoardCard,
 	RuntimeExternalIssueProvider,
@@ -10,6 +16,7 @@ import type {
 function createCard(
 	id: string,
 	externalIssue?: { provider: RuntimeExternalIssueProvider; key: string; raw?: string },
+	overrides?: Partial<RuntimeBoardCard>,
 ): RuntimeBoardCard {
 	return {
 		id,
@@ -20,6 +27,7 @@ function createCard(
 		baseRef: "main",
 		createdAt: 1,
 		updatedAt: 1,
+		...overrides,
 		...(externalIssue
 			? {
 					externalIssue: {
@@ -56,6 +64,69 @@ function createState(cards: RuntimeBoardCard[]): RuntimeWorkspaceStateResponse {
 		revision: 1,
 	};
 }
+
+describe("task command machine output", () => {
+	it("given a backlog card created with a title, when task list record is formatted, then each task record includes that title", () => {
+		// given
+		const card = createCard("task-with-title", undefined, {
+			title: "Explicit machine title",
+			prompt: "Prompt text that should not be needed to identify the task",
+		});
+		const state = createState([card]);
+
+		// when
+		const record = formatTaskRecord(state, card, "backlog");
+
+		// then
+		expect(record.title).toBe("Explicit machine title");
+	});
+
+	it("given a card created without --title, when task list record is formatted, then its record includes the prompt-derived title from resolveTaskTitle", () => {
+		// given
+		const card = createCard("task-without-title", undefined, {
+			title: "   ",
+			prompt: "Fix the machine-readable task output.\n\nKeep the prompt body available separately.",
+		});
+		const state = createState([card]);
+
+		// when
+		const record = formatTaskRecord(state, card, "backlog");
+
+		// then
+		expect(record.title).toBe("Fix the machine-readable task output.");
+	});
+
+	it("given a card created without --title, when task create response is formatted, then it surfaces the resolved title", () => {
+		// given
+		const card = createCard("created-without-title", undefined, {
+			title: "   ",
+			prompt: "Create a clean task response.\n\nThe prompt remains separate.",
+		});
+
+		// when
+		const record = formatCreatedTaskRecord(card, "/tmp/repo");
+
+		// then
+		expect(record.title).toBe("Create a clean task response.");
+	});
+
+	it("given task create --quiet, when a card is created, then stdout is exactly the new task id and nothing else", () => {
+		// given
+		const payload = {
+			ok: true,
+			task: {
+				id: "abc123",
+				prompt: "This prompt must not be printed in quiet mode.",
+			},
+		};
+
+		// when
+		const output = renderTaskCommandSuccess(payload, { quietTaskIdOnly: true });
+
+		// then
+		expect(output).toBe("abc123\n");
+	});
+});
 
 describe("resolveExternalIssueForTaskCommand", () => {
 	it("adds a Linear URL when KANBAN_LINEAR_WORKSPACE is configured", async () => {

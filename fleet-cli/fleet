@@ -1,0 +1,1101 @@
+#!/usr/bin/env bash
+# fleet — control tower for parallel agent work.
+#
+#   fleet [status] [args]   epic-grouped overview (worktrees + kanban + Linear)   [default]
+#   fleet agent plan <ENG-ID> [--repo N]        Linear issue -> design-doc card (validate + design), lands in Review
+#   fleet agent implement <ENG-ID> [--repo N]   design doc -> code + /ship card (build + land end-to-end)
+#   fleet linear [--assigned|--created]   your Linear issues (assigned/created), + which are started locally
+#   fleet initiatives [--issues] [--all]   active initiatives → projects, sorted by #in-progress, with who's working
+#   fleet init [flags]      guided setup: project config, repos, Linear key, kanban
+#   fleet update [--repo URL] [--ref BRANCH]   refresh the shared fleet-kanban fork build every project runs from
+#   fleet new  <branch>     create a runnable worktree (-> wt new)
+#   fleet up   [dir]        prepare/adopt a worktree (-> wt up)
+#   fleet run  [-- args]    start the app on this worktree's port (-> wt run)
+#   fleet ls                worktrees + ports + live state (-> wt ls)
+#   fleet rm   [dir]        remove a worktree + free its port (-> wt rm)
+#   fleet port [args]       stable per-worktree port (-> port-for)
+#   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
+#   fleet kanban daemon [install|uninstall|status]          run under launchd (survives terminal/session death)
+#   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands
+set -euo pipefail
+# resolve through symlinks so DIR is the real tools/fleet dir, not ~/.local/bin
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  D="$(cd -P "$(dirname "$SOURCE")" && pwd)"; SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$D/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+GLOBAL_DIR="$HOME/.config/fleet"         # shared: vendored kanban binary, key fallback
+# the project's .fleet dir, found by walking up from CWD (like .git); global if none
+_fleet_dir() {
+  [ -n "${FLEET_DIR:-}" ] && { echo "$FLEET_DIR"; return 0; }
+  local d="$PWD"
+  while [ "$d" != "/" ]; do [ -d "$d/.fleet" ] && { echo "$d/.fleet"; return 0; }; d="$(dirname "$d")"; done
+  return 1
+}
+# IN_PROJECT=1 only when a real project .fleet was found by walking up from CWD.
+# Falling back to GLOBAL_DIR is for shared assets (vendor/src), NOT an implicit
+# project — project-scoped commands refuse to run outside a project (see dispatch).
+if CFG_DIR="$(_fleet_dir)"; then IN_PROJECT=1; else CFG_DIR="$GLOBAL_DIR"; IN_PROJECT=0; fi
+KEYFILE="$CFG_DIR/linear.key"
+KANBAN_VENDOR="$GLOBAL_DIR/vendor"       # binary is shared across projects (npm stable)
+KANBAN_SRC_VENDOR="$GLOBAL_DIR/src"      # shared fork build (fleet update) — one checkout all
+                                         # consumer projects run from; honors CLINE_HOME (npm one doesn't)
+# per-project source build (dogfood): our fork checkout, run straight from dist/cli.js.
+# Recorded in the project's .fleet/config.json so it applies to THIS project only,
+# leaving other projects on the shared stable vendor.
+KANBAN_SOURCE="${KANBAN_SOURCE:-$( [ -f "$CFG_DIR/config.json" ] && python3 -c "import json;print(json.load(open('$CFG_DIR/config.json')).get('kanban_source',''))" 2>/dev/null || echo '' )}"
+KANBAN_LOG="$CFG_DIR/kanban.log"
+KANBAN_PORT="${KANBAN_PORT:-$( [ -f "$CFG_DIR/config.json" ] && python3 -c "import json;print(json.load(open('$CFG_DIR/config.json')).get('kanban_port',3484))" 2>/dev/null || echo 3484 )}"
+KANBAN_URL="${KANBAN_URL:-http://127.0.0.1:$KANBAN_PORT}"
+# Isolated, project-local cline home (board/worktrees/settings live under the
+# project, not $HOME) — only inside a real project. The forked fleet-kanban honors
+# CLINE_HOME; the stable vendor build ignores it (harmless), so other projects on
+# the stable build keep using ~/.cline. Empty => fork falls back to ~/.cline.
+if [ "$CFG_DIR" != "$GLOBAL_DIR" ]; then CLINE_HOME_DIR="$CFG_DIR/cline"; else CLINE_HOME_DIR=""; fi
+
+# Silence Node process warnings (e.g. the DEP0205 module.register() deprecation the
+# kanban CLI prints on stderr). We capture bin output with 2>&1 and json.loads it —
+# a warning line prefixing the JSON breaks the parse (tail fell back to a raw dump).
+export NODE_NO_WARNINGS=1
+
+say() { printf '\033[1m%s\033[0m\n' "$*"; }
+dim() { printf '\033[2m%s\033[0m\n' "$*"; }
+
+fleet_set_linear_key() {
+  local key="${1:-}"
+  [ -n "$key" ] || { echo "usage: fleet linear api-key <apiKey>" >&2; return 1; }
+  mkdir -p "$CFG_DIR"
+  ( umask 177; printf '%s' "$key" > "$KEYFILE" ); chmod 600 "$KEYFILE"
+  say "stored Linear key at $KEYFILE (chmod 600)"
+  if curl -fsS --max-time 8 -H "Authorization: $key" -H "Content-Type: application/json" \
+      -d '{"query":"{ viewer { name } }"}' https://api.linear.app/graphql 2>/dev/null | grep -q '"name"'; then
+    say "✓ key works"
+  else
+    dim "⚠ could not validate — check the key (should start with lin_api_)"
+  fi
+}
+
+# --- kanban binary that fleet owns (no reliance on npx cache paths) ----------
+kanban_bin() {
+  # 1) this project's source build (fork dogfood working copy) — dist/cli.js is chmod +x w/ node shebang
+  if [ -n "$KANBAN_SOURCE" ] && [ -x "$KANBAN_SOURCE/dist/cli.js" ]; then echo "$KANBAN_SOURCE/dist/cli.js"; return 0; fi
+  # 2) shared fork build (fleet update) — honors CLINE_HOME, so consumer projects get board isolation
+  if [ -x "$KANBAN_SRC_VENDOR/dist/cli.js" ]; then echo "$KANBAN_SRC_VENDOR/dist/cli.js"; return 0; fi
+  # 3) shared vendored npm build (stable cline/kanban; ignores CLINE_HOME)
+  if [ -x "$KANBAN_VENDOR/node_modules/.bin/kanban" ]; then echo "$KANBAN_VENDOR/node_modules/.bin/kanban"; return 0; fi
+  command -v kanban 2>/dev/null && return 0
+  return 1
+}
+
+kanban_running() { curl -fsS --max-time 3 "$KANBAN_URL/api/trpc/projects.list" >/dev/null 2>&1; }
+
+kanban_install() {
+  # --source <checkout>: build our fork and run this project from it (dogfood)
+  if [ "${1:-}" = "--source" ]; then
+    local src="${2:-}"; [ -n "$src" ] || { echo "usage: fleet kanban install --source <checkout>" >&2; return 1; }
+    src="${src/#\~/$HOME}"; src="$(cd "$src" 2>/dev/null && pwd)" || { dim "no such dir: $2"; return 1; }
+    [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
+    say "building fleet-kanban from source: $src"
+    ( cd "$src" && npm run install:all && npm run build ) || { dim "source build failed"; return 1; }
+    [ -x "$src/dist/cli.js" ] || { dim "build produced no dist/cli.js"; return 1; }
+    SRC="$src" python3 - "$CFG_DIR/config.json" <<'PY'
+import json, os, sys
+f = sys.argv[1]; d = json.load(open(f)); d["kanban_source"] = os.environ["SRC"]
+json.dump(d, open(f, "w"), indent=2); print("→ recorded kanban_source (this project only):", os.environ["SRC"])
+PY
+    say "✓ $("$src/dist/cli.js" --version 2>/dev/null || echo built) — start with: fleet kanban start"
+    return 0
+  fi
+  local ver="${1:-latest}"
+  mkdir -p "$KANBAN_VENDOR"
+  [ -f "$KANBAN_VENDOR/package.json" ] || ( cd "$KANBAN_VENDOR" && npm init -y >/dev/null 2>&1 )
+  say "installing kanban@$ver into $KANBAN_VENDOR …"
+  ( cd "$KANBAN_VENDOR" && npm install "kanban@$ver" --no-fund --no-audit ) || { dim "npm install failed"; return 1; }
+  say "✓ $("$KANBAN_VENDOR/node_modules/.bin/kanban" --version 2>/dev/null || echo installed)"
+}
+
+_kanban_url_banner() {
+  say "→ Open: $KANBAN_URL"
+  dim "  (use 127.0.0.1, NOT localhost — some focus/blocker extensions block the localhost hostname)"
+}
+
+# Register the project's configured repos as kanban projects so the board is never
+# empty on a fresh start. Idempotent — skips repos already on the board. Requires a
+# running server (registration is a tRPC call); a no-op if none is configured.
+kanban_sync_projects() {
+  [ -f "$CFG_DIR/config.json" ] || return 0
+  kanban_running || return 0
+  local root; root="$(dirname "$CFG_DIR")"
+  ROOT="$root" URL="$KANBAN_URL" HOME_DIR="$HOME" python3 - "$CFG_DIR/config.json" <<'PY'
+import json, os, sys, urllib.request
+cfg = json.load(open(sys.argv[1]))
+root, url, home = os.environ["ROOT"], os.environ["URL"], os.environ["HOME_DIR"]
+# resolve each configured repo (basename or absolute) to an absolute path under the project
+wanted, seen = [], set()
+# Register the project root itself when it's a git repo. It contains the work
+# repos, so the board detects it as the ARCHITECT workspace — its agent starts at
+# the root and can reach every sub-repo (see `fleet init` git-init below).
+if os.path.isdir(os.path.join(root, ".git")):
+    rp = os.path.realpath(root)
+    seen.add(rp); wanted.append(rp)
+for r in cfg.get("repos", []) or []:
+    p = os.path.realpath(r if os.path.isabs(r) else os.path.join(root, r))
+    if os.path.isdir(p) and p not in seen:
+        seen.add(p); wanted.append(p)
+if not wanted:
+    sys.exit(0)
+try:
+    with urllib.request.urlopen(f"{url}/api/trpc/projects.list", timeout=8) as resp:
+        have = {os.path.realpath(p["path"]) for p in json.load(resp)["result"]["data"]["projects"]}
+except Exception as e:
+    print(f"  (could not read projects.list: {e})"); sys.exit(0)
+added = 0
+for p in wanted:
+    if p in have:
+        continue
+    req = urllib.request.Request(f"{url}/api/trpc/projects.add",
+                                 data=json.dumps({"path": p}).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            out = json.load(resp)["result"]["data"]
+        if out.get("ok"):
+            print(f"  + project: {p.replace(home, '~')}"); added += 1
+        else:
+            print(f"  ! {os.path.basename(p)}: {out.get('error') or 'add failed'}")
+    except Exception as e:
+        print(f"  ! {os.path.basename(p)}: {e}")
+if added == 0:
+    print(f"  {len(wanted)} project(s) already registered")
+PY
+}
+
+kanban_start() {
+  local dir="${1:-$PWD}"
+  kanban_running && { say "already running"; kanban_sync_projects; _kanban_url_banner; return 0; }
+  local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || dir="$HOME"
+  [ -n "$CLINE_HOME_DIR" ] && { mkdir -p "$CLINE_HOME_DIR"; dim "  state: $CLINE_HOME_DIR (isolated)"; }
+  say "starting kanban (port $KANBAN_PORT) from $dir …"
+  # --skip-shutdown-cleanup: on stop, do NOT move cards to Done or delete worktrees
+  # (kanban's cleanup path is what wedged the port + jumped cards to Done; column is
+  # meant to derive from git — see epic §4.4).
+  ( cd "$dir" && CLINE_HOME="$CLINE_HOME_DIR" nohup "$bin" --port "$KANBAN_PORT" --no-open --skip-shutdown-cleanup >"$KANBAN_LOG" 2>&1 & )
+  for i in $(seq 1 30); do kanban_running && { say "✓ up"; kanban_sync_projects; _kanban_url_banner; return 0; }; sleep 1; done
+  dim "did not come up in 30s — see $KANBAN_LOG"; return 1
+}
+
+# robust stop / unstick: kill the server's child agent sessions FIRST (they wedge
+# kanban's own cleanup and leak the port), then TERM the server, then -9 if it clings.
+kanban_stop() {
+  local srv; srv="$(lsof -tiTCP:"$KANBAN_PORT" -sTCP:LISTEN -P 2>/dev/null)"
+  [ -n "$srv" ] || { dim "not running"; return 0; }
+  local kids; kids="$(pgrep -P "$srv" 2>/dev/null)"
+  # also sweep any sidebar/agent claude procs kanban spawned (they block shutdown)
+  local strays; strays="$(pgrep -f "$HOME/.cline/kanban/hooks|/.cline/worktrees/" 2>/dev/null)"
+  [ -n "$kids$strays" ] && kill -TERM $kids $strays 2>/dev/null
+  kill -TERM $srv 2>/dev/null
+  local i; for i in 1 2 3 4 5; do kanban_running || break; sleep 1; done
+  if kanban_running; then
+    say "server wedged on shutdown — forcing"
+    kill -9 $srv $kids $strays 2>/dev/null
+    pgrep -f "$HOME/.cline/kanban/hooks" 2>/dev/null | xargs kill -9 2>/dev/null
+    sleep 1
+  fi
+  kanban_running && { dim "still bound on :$KANBAN_PORT — check: lsof -iTCP:$KANBAN_PORT"; return 1; } || say "stopped"
+}
+
+kanban_status() {
+  if kanban_running; then
+    say "kanban running at $KANBAN_URL"
+    curl -s "$KANBAN_URL/api/trpc/projects.list" | python3 -c "import sys,json;ps=json.load(sys.stdin)['result']['data']['projects'];print(f'  {len(ps)} projects:');[print('   ',p['id'],'->',p['path'].replace('$HOME','~')) for p in ps]" 2>/dev/null
+  else
+    dim "kanban not running (port $KANBAN_PORT)"; echo "  start it:  fleet kanban start"
+    kanban_bin >/dev/null || echo "  (not installed yet:  fleet kanban install)"
+  fi
+}
+
+# --- launchd daemon: parent is the OS, not your terminal ---------------------
+# Fixes "kanban died with the parent process": under launchd the server is not a
+# child of the launching shell, so closing the terminal / ending a session can't
+# signal it. KeepAlive (unconditional) keeps it up: launchd revives it on ANY exit,
+# including a raw kill, so only `fleet kanban daemon uninstall` truly stops it.
+_kanban_label() { echo "com.fleet.kanban.$(basename "$(dirname "$CFG_DIR")")"; }
+_kanban_plist() { echo "$HOME/Library/LaunchAgents/$(_kanban_label).plist"; }
+
+kanban_daemon() {
+  local sub="${1:-install}"; local label plist; label="$(_kanban_label)"; plist="$(_kanban_plist)"
+  case "$sub" in
+    install|load|on)
+      local bin node dir; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+      node="$(command -v node)" || { dim "node not found on PATH"; return 1; }
+      # Board cwd must be the repo whose workspace holds the cards (kanban_source when
+      # configured) — NOT the fleet project dir, else the server spins up an empty
+      # workspace named after the project root. Fall back to $PWD for source-less setups.
+      dir="${KANBAN_SOURCE:-$PWD}"; git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || dir="$HOME"
+      kanban_stop >/dev/null 2>&1 || true      # clear any terminal-bound instance first
+      [ -n "$CLINE_HOME_DIR" ] && mkdir -p "$CLINE_HOME_DIR"
+      mkdir -p "$(dirname "$plist")"
+      LABEL="$label" NODE="$node" BIN="$bin" PORT="$KANBAN_PORT" WDIR="$dir" LOG="$KANBAN_LOG" \
+        CHOME="$CLINE_HOME_DIR" \
+        PATHVAL="$(dirname "$node"):$HOME/.asdf/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin" \
+        python3 - "$plist" <<'PY'
+import os, plistlib, sys
+env = {"PATH": os.environ["PATHVAL"]}
+chome = os.environ.get("CHOME", "").strip()
+if chome: env["CLINE_HOME"] = chome     # isolate board/worktrees/settings to the project
+p = {
+  "Label": os.environ["LABEL"],
+  "ProgramArguments": [os.environ["NODE"], os.environ["BIN"], "--port", os.environ["PORT"], "--no-open", "--skip-shutdown-cleanup"],
+  "WorkingDirectory": os.environ["WDIR"],
+  "RunAtLoad": True,
+  "KeepAlive": True,
+  "StandardOutPath": os.environ["LOG"],
+  "StandardErrorPath": os.environ["LOG"],
+  "EnvironmentVariables": env,
+}
+with open(sys.argv[1], "wb") as f: plistlib.dump(p, f)
+print("→ wrote", sys.argv[1])
+PY
+      launchctl unload "$plist" 2>/dev/null || true
+      launchctl load -w "$plist" 2>/dev/null || { dim "launchctl load failed"; return 1; }
+      say "daemon '$label' loaded (port $KANBAN_PORT, dir $dir)"
+      local i; for i in $(seq 1 30); do kanban_running && { say "✓ up"; kanban_sync_projects; _kanban_url_banner; return 0; }; sleep 1; done
+      dim "loaded but not up in 30s — see $KANBAN_LOG"; return 1;;
+    uninstall|unload|off)
+      launchctl unload "$plist" 2>/dev/null || true
+      [ -f "$plist" ] && rm -f "$plist" && say "daemon '$label' removed" || dim "no daemon installed"
+      kanban_stop >/dev/null 2>&1 || true;;
+    status)
+      if launchctl list 2>/dev/null | grep -q "$label"; then say "daemon '$label' loaded"; else dim "no daemon (run: fleet kanban daemon install)"; fi
+      kanban_status;;
+    *) echo "usage: fleet kanban daemon [install|uninstall|status]" >&2; return 1;;
+  esac
+}
+
+# --- killswitch: protect the live (launchd-daemon) board -----------------------
+# The daemon board is the live one that hosts every card + agent session. An agent's
+# own verify/test step must never be able to stop it. `fleet kanban stop` refuses to
+# touch a daemon board unless --force; and a daemon board's `restart` reloads the
+# daemon (supervised) instead of stop+start (which would un-daemonize it). Raw kills
+# are separately covered by the daemon's KeepAlive auto-revive.
+_kanban_daemon_loaded() { launchctl list 2>/dev/null | grep -q "$(_kanban_label)"; }
+
+kanban_guarded_stop() {
+  local force=""; case "${1:-}" in --force|-f|--yes|-y) force=1;; esac
+  if _kanban_daemon_loaded && [ -z "$force" ]; then
+    say "refusing: this board runs under the launchd daemon (protected)."
+    dim "  it auto-revives if killed. to really stop it:  fleet kanban daemon uninstall"
+    dim "  to override anyway:                            fleet kanban stop --force"
+    return 1
+  fi
+  if [ -n "$force" ] && _kanban_daemon_loaded; then kanban_daemon uninstall; else kanban_stop; fi
+}
+
+kanban_guarded_restart() {
+  if _kanban_daemon_loaded; then
+    say "reloading the launchd daemon (protected board) with the current build…"
+    kanban_daemon install; return $?
+  fi
+  kanban_stop; kanban_start "$@"
+}
+
+fleet_kanban() {
+  case "${1:-status}" in
+    install)        shift; kanban_install "$@";;
+    start)          shift; kanban_start "$@";;
+    stop)           shift; kanban_guarded_stop "$@";;
+    restart)        shift; kanban_guarded_restart "$@";;
+    daemon)         shift; kanban_daemon "$@";;
+    sync)           kanban_running || { dim "not running — start it: fleet kanban start"; return 1; }; say "syncing projects → $KANBAN_URL"; kanban_sync_projects;;
+    open)           kanban_running || kanban_start; command -v open >/dev/null && open "$KANBAN_URL";;
+    status|"")      kanban_status;;
+    *) echo "usage: fleet kanban [install|start|stop|restart|daemon|sync|open|status]" >&2; return 1;;
+  esac
+}
+
+# --- shared fork build: one checkout every consumer project runs from --------
+# Keeps a single clone of the fleet-kanban fork at $GLOBAL_DIR/src, tracking main,
+# and rebuilds it. Consumer projects (non-dogfood) fall through to it in kanban_bin
+# (tier 2) and pick up the new build on their next `fleet kanban start`. Dogfood
+# (tools/) overrides this with its own working-copy kanban_source and is untouched.
+fleet_update() {
+  local repo="" ref="main"
+  while [ $# -gt 0 ]; do case "$1" in
+    --repo) repo="$2"; shift 2;;
+    --ref|--branch) ref="$2"; shift 2;;
+    -h|--help) echo "usage: fleet update [--repo <git-url>] [--ref <branch>]  (refresh the shared fleet-kanban build)"; return 0;;
+    *) echo "fleet update: unknown flag $1" >&2; return 1;;
+  esac; done
+  local dst="$KANBAN_SRC_VENDOR"
+  if [ -d "$dst/.git" ]; then
+    say "updating shared fleet-kanban build → $dst ($ref)"
+    git -C "$dst" fetch origin "$ref" || { dim "fetch failed"; return 1; }
+    git -C "$dst" checkout "$ref" >/dev/null 2>&1 || true
+    git -C "$dst" reset --hard "origin/$ref" || { dim "reset --hard origin/$ref failed"; return 1; }
+  else
+    # Discover the fork URL without hardcoding it: explicit --repo, else the
+    # origin of the dogfood working-copy checkout that ships next to this CLI.
+    [ -n "$repo" ] || repo="$(git -C "$DIR/../fleet-kanban" remote get-url origin 2>/dev/null || true)"
+    [ -n "$repo" ] || { dim "no source repo found — pass it: fleet update --repo <git-url>"; return 1; }
+    say "cloning fleet-kanban ($ref) → $dst"
+    mkdir -p "$(dirname "$dst")"
+    git clone --branch "$ref" "$repo" "$dst" || { dim "clone failed"; return 1; }
+  fi
+  say "building (npm run install:all && npm run build) …"
+  ( cd "$dst" && npm run install:all && npm run build ) || { dim "build failed"; return 1; }
+  [ -x "$dst/dist/cli.js" ] || { dim "build produced no dist/cli.js"; return 1; }
+  say "✓ shared fleet-kanban ready at $dst"
+  dim "  consumer projects use it on their next 'fleet kanban start' (dogfood keeps its own source override)"
+}
+
+# Make the project root a thin git repo so the board registers it as the architect
+# workspace (a workspace whose path contains the others is detected as the architect).
+# No-op if it's already a repo — never touch an existing one. Nested work repos and
+# board state are gitignored; only the guide docs are tracked, with one initial commit
+# so the workspace has a valid HEAD.
+_init_root_repo() {
+  local dir="$1"; shift
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && return 0
+  say "  git-init'ing project root → architect workspace ($dir)"
+  git -C "$dir" init -q
+  if [ ! -e "$dir/.gitignore" ]; then
+    { printf '# fleet workspace root — nested work repos and board state are not tracked here\n'
+      printf '.fleet/\n.DS_Store\n'
+      local r; for r in "$@"; do [ -n "$r" ] && printf '%s/\n' "$r"; done
+    } > "$dir/.gitignore"
+  fi
+  git -C "$dir" add -A >/dev/null 2>&1 || true
+  git -C "$dir" -c user.name=fleet -c user.email=fleet@localhost \
+      commit -q -m "chore: initialize fleet workspace" >/dev/null 2>&1 || true
+}
+
+# Scaffold a starter AGENTS.md + CLAUDE.md into a fresh project (never clobbers an
+# existing file). Generic template — the project's own name/port/repos are filled in.
+_scaffold_agent_docs() {
+  local dir="$1" pname="$2" pport="$3" repomd="$4"
+  if [ ! -e "$dir/AGENTS.md" ]; then
+    cat >"$dir/AGENTS.md" <<EOF
+# $pname — fleet-managed board
+
+Coding work on this project runs as agent sessions on a **fleet-kanban** board. Author and observe
+that work with the \`fleet\` CLI, run **from inside this directory** (fleet is project-scoped).
+
+## The live board — do not disrupt it
+- The board runs on **port $pport** (\`fleet kanban status\` to check, \`fleet kanban open\` to view).
+- **Never stop, kill, or restart the live board while a card is running.** You may yourself be a card
+  on it — stopping it cuts your own session. Observe with \`fleet task ls\` / \`fleet task cat <id>\`,
+  never \`fleet kanban stop|restart\`.
+
+## Observe / drive the board
+- \`fleet task ls\`         — all cards, grouped by repo → column
+- \`fleet task cat <id>\`   — full detail for one card (session, worktree, branch, commit)
+- \`fleet kanban status\`   — is the board up, which repos are registered
+
+## Repos on this board
+$repomd
+## Rules
+- **Never commit or push unless asked.**
+- Prefer the \`fleet\` CLI for observing state; inspect raw files only when the CLI looks wrong.
+EOF
+    dim "  scaffolded $dir/AGENTS.md"
+  fi
+  if [ ! -e "$dir/CLAUDE.md" ]; then
+    printf '@AGENTS.md\n' > "$dir/CLAUDE.md"
+    dim "  scaffolded $dir/CLAUDE.md"
+  fi
+}
+
+fleet_init() {
+  local root="$PWD" name="" team="ENG" key="" port="3484" yes="" force=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --name) name="$2"; shift 2;;
+    --dir|--root) root="$2"; shift 2;;
+    --linear-team) team="$2"; shift 2;;
+    --linear-key) key="$2"; shift 2;;
+    --port) port="$2"; shift 2;;
+    --force) force=1; shift;;
+    --yes|-y) yes=1; shift;;
+    *) echo "init: unknown flag $1" >&2; return 1;;
+  esac; done
+  root="${root/#\~/$HOME}"; root="$(cd "$root" && pwd)"
+  [ -z "$name" ] && name="$(basename "$root")"
+  local fdir="$root/.fleet"
+
+  # Never clobber an existing project config — re-running init should be safe.
+  # Print the current config and bail; use --force (or edit the file) to change it.
+  if [ -f "$fdir/config.json" ] && [ -z "$force" ]; then
+    say "fleet project already initialized → $fdir/config.json"
+    cat "$fdir/config.json"
+    dim "(unchanged — edit the file directly, or re-run with --force to overwrite)"
+    return 0
+  fi
+
+  mkdir -p "$fdir"
+  printf '*\n' > "$fdir/.gitignore"       # never commit .fleet (holds the Linear key)
+
+  say "Initializing fleet project '$name' → $fdir"
+  # auto-detect repos = immediate subdirs that are git repos
+  local repos=() d
+  for d in "$root"/*/; do
+    [ -d "$d" ] || continue
+    if git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      repos+=("$(basename "$d")"); dim "  repo: $(basename "$d")"
+    fi
+  done
+  [ ${#repos[@]} -eq 0 ] && dim "  (no git repos directly under $root yet — clone some, then re-run)"
+
+  NAME="$name" TEAM="$team" PORT="$port" REPOS="${repos[*]:-}" python3 - "$fdir/config.json" <<'PY'
+import json, os, sys
+json.dump({"name": os.environ["NAME"], "linear_team": os.environ["TEAM"],
+          "kanban_port": int(os.environ["PORT"]),
+          "repos": os.environ.get("REPOS", "").split()}, open(sys.argv[1], "w"), indent=2)
+print("→ wrote", sys.argv[1])
+PY
+
+  if [ -n "$key" ]; then
+    ( umask 177; printf '%s' "$key" > "$fdir/linear.key" ); chmod 600 "$fdir/linear.key"
+    say "stored Linear key in $fdir/linear.key (chmod 600)"
+  fi
+
+  # Scaffold starter agent docs (AGENTS.md + CLAUDE.md) so sessions on this board
+  # get project context and the "don't kill the live board" guardrail for free.
+  local repomd="" r
+  for r in "${repos[@]:-}"; do [ -n "$r" ] && repomd="${repomd}- ${r}"$'\n'; done
+  [ -n "$repomd" ] || repomd="- (none yet — clone repos under this dir, then re-run 'fleet init')"$'\n'
+  _scaffold_agent_docs "$root" "$name" "$port" "$repomd"
+
+  # Make the root a thin git repo so it registers as the ARCHITECT workspace — the
+  # board's agent then starts at the project root and can reach every sub-repo,
+  # instead of being scoped to one repo. Only when the root isn't already a repo.
+  _init_root_repo "$root" "${repos[@]:-}"
+
+  # Prefer the shared fork build (isolated, honors CLINE_HOME). Only nudge — the
+  # build is a one-time global step, and auto-fetching the npm binary here would
+  # silently hand back a board that ignores this project's CLINE_HOME.
+  local need_build=""
+  kanban_bin >/dev/null || need_build=1
+
+  # If a board is already up, register the detected repos now; otherwise they'll be
+  # registered automatically on the next `fleet kanban start`.
+  kanban_running && { echo; say "registering repos on the running board…"; kanban_sync_projects; }
+
+  echo; say "Done. From inside $root:"
+  echo "  fleet                 # overview for this project (${#repos[@]} repos)"
+  if [ -n "$need_build" ]; then
+    echo "  fleet update          # one-time: clone + build the shared fleet-kanban fork (isolated board)"
+    dim  "                        (or 'fleet kanban install' for the stable npm build — does NOT isolate CLINE_HOME)"
+  fi
+  echo "  fleet kanban start    # boot the board on port $port"
+  echo "  fleet new <branch>    # runnable worktree on its own port"
+}
+
+# --- ad-hoc kanban cards on THIS project's board (isolated env + source build) ---
+# Resolve a configured repo to an absolute path. $1 = optional repo name; with no
+# name, succeeds only when the project has exactly one repo (else ambiguous -> 1).
+_fleet_repo_path() {
+  local want="$1" root; root="$(dirname "$CFG_DIR")"
+  if [ -n "$want" ]; then echo "$root/$want"; return 0; fi
+  local repos; repos="$(python3 -c "import json;print('\n'.join(json.load(open('$CFG_DIR/config.json')).get('repos',[])))" 2>/dev/null)"
+  [ "$(printf '%s\n' "$repos" | grep -c .)" = "1" ] || return 1
+  echo "$root/$(printf '%s\n' "$repos" | head -1)"
+}
+
+fleet_task() {
+  [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
+  local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+  kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+  local sub="${1:-}"; [ $# -gt 0 ] && shift
+  case "$sub" in
+    create|new|add)
+      local title="" prompt="" repo="" baseref="" agent="claude" model="" plan="" autorev="" start="" xissue=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --prompt|-p) prompt="$2"; shift 2;;
+        --prompt-file) prompt="$(cat "$2")"; shift 2;;
+        --title|-t) title="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        --base-ref) baseref="$2"; shift 2;;
+        --agent) agent="$2"; shift 2;;
+        --model) model="$2"; shift 2;;
+        --external-issue|--issue) xissue="$2"; shift 2;;
+        --plan) plan=1; shift;;
+        --auto-review) autorev="$2"; shift 2;;
+        --start) start=1; shift;;
+        *) echo "task create: unknown flag $1" >&2; return 1;;
+      esac; done
+      [ -n "$prompt" ] || { echo "task create: --prompt (or --prompt-file) is required" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task create: multiple repos configured — pass --repo <name>" >&2; return 1; }
+      [ -d "$pp" ] || { echo "task create: no such repo dir: $pp" >&2; return 1; }
+      [ -n "$title" ] || title="$(printf '%s' "$prompt" | head -1 | cut -c1-72 || true)"
+      # kanban defaults base-ref (current branch → default → first known) when omitted
+      local args=(task create --project-path "$pp" --title "$title" --prompt "$prompt" --agent-id "$agent")
+      [ -n "$model" ] && args+=(--agent-model "$model")
+      [ -n "$xissue" ] && args+=(--external-issue "$xissue")
+      [ -n "$baseref" ] && args+=(--base-ref "$baseref")
+      [ -n "$plan" ] && args+=(--start-in-plan-mode true)
+      [ -n "$autorev" ] && args+=(--auto-review-enabled true --auto-review-mode "$autorev")
+      local out tid
+      out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
+      # Payload via env (not stdin): `python3 -` already consumes stdin for the heredoc program.
+      tid="$(FLEET_TASK_OUT="$out" python3 - <<'PY'
+import os, re, json
+def dig(o):
+    if isinstance(o, dict):
+        if isinstance(o.get("id"), str): return o["id"]
+        for v in o.values():
+            r = dig(v)
+            if r: return r
+    elif isinstance(o, list):
+        for v in o:
+            r = dig(v)
+            if r: return r
+    return None
+try:
+    m = re.search(r"\{.*\}", os.environ.get("FLEET_TASK_OUT", ""), re.S)  # kanban prints pretty multi-line JSON
+    print((dig(json.loads(m.group(0))) or "") if m else "")
+except Exception:
+    print("")
+PY
+)"
+      [ -n "$tid" ] || { echo "task create failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; }
+      say "✓ card created (task $tid) · repo $(basename "$pp")"
+      if [ -n "$start" ]; then
+        local so
+        so="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task start --task-id "$tid" --project-path "$pp" 2>&1 || true)"
+        if printf '%s' "$so" | grep -q '"ok":false'; then
+          dim "started with warning: $(printf '%s' "$so" | head -3)"
+        else
+          say "✓ started — worktree + $agent agent"
+        fi
+      fi
+      dim "  watch: $KANBAN_URL"
+      ;;
+    start)
+      local tid="" repo=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --task-id) tid="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        *) echo "task start: unknown flag $1" >&2; return 1;;
+      esac; done
+      [ -n "$tid" ] || { echo "task start: --task-id <id> required" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task start: multiple repos — pass --repo <name>" >&2; return 1; }
+      CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task start --task-id "$tid" --project-path "$pp"
+      ;;
+    list|ls)
+      # Text overview, grouped repo -> state. No JSON: agents (and humans) read this directly.
+      local repo="" col=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --repo) repo="$2"; shift 2;;
+        --column) col="$2"; shift 2;;
+        *) echo "task list: unknown flag $1" >&2; return 1;;
+      esac; done
+      local projs
+      projs="$(curl -fsS --max-time 5 "$KANBAN_URL/api/trpc/projects.list" 2>/dev/null)" || { dim "board not reachable at $KANBAN_URL"; return 1; }
+      FLEET_PROJECTS="$projs" FLEET_REPO="$repo" FLEET_COL="$col" FLEET_BIN="$bin" \
+      FLEET_CH="$CLINE_HOME_DIR" FLEET_PORT="$KANBAN_PORT" FLEET_HOME="$HOME" FLEET_SELF="$DIR" python3 - <<'PY'
+import os, json, subprocess, sys
+B="\033[1m";D="\033[2m";R="\033[0m";C="\033[36m";Y="\033[33m";RED="\033[31m"
+# Remaining agent budget up top, so the architect/agent reading this list can steer
+# dispatch on it. Best-effort + cached (short TTL): a slow or failed budget read must
+# never delay or break the task list itself.
+try:
+    sys.path.insert(0, os.environ["FLEET_SELF"])
+    import budget as _b
+    print(_b.format_banner(_b.get_report(use_cache=True, ttl=60), color=True));print()
+except Exception:
+    pass
+projects=json.loads(os.environ["FLEET_PROJECTS"])["result"]["data"]["projects"]
+rf=os.environ.get("FLEET_REPO","");cf=os.environ.get("FLEET_COL","");home=os.environ["FLEET_HOME"];bin_=os.environ["FLEET_BIN"]
+env={**os.environ,"CLINE_HOME":os.environ["FLEET_CH"],"KANBAN_RUNTIME_PORT":os.environ["FLEET_PORT"]}
+ORDER=["backlog","in_progress","review","done"]
+for p in projects:
+    name=p["id"];path=p["path"]
+    if rf and rf not in (name,os.path.basename(path)): continue
+    # The kanban CLI truncates large stdout when it exits before the pipe flushes
+    # (a ~64KB-boundary bug on big boards), so a single read can yield partial/invalid
+    # JSON. Retry a few times, and NEVER silently swallow a failed read as an empty
+    # board — an unreadable project is reported distinctly, not as "(no tasks)".
+    tasks=None
+    for _attempt in range(4):
+        try:
+            out=subprocess.run([bin_,"task","list","--project-path",path],env=env,capture_output=True,text=True,timeout=10).stdout
+            tasks=json.loads(out).get("tasks",[]);break
+        except Exception:
+            tasks=None
+    if tasks is None:
+        print(f"{B}{C}{name}{R} {D}{path.replace(home,'~')}{R}")
+        print(f"  {RED}(could not read tasks — CLI output error){R}\n");continue
+    bycol={}
+    for t in tasks:
+        c=t.get("column") or "backlog"
+        if cf and c!=cf: continue
+        bycol.setdefault(c,[]).append(t)
+    print(f"{B}{C}{name}{R} {D}{path.replace(home,'~')}{R}")
+    if not bycol:
+        print(f"  {D}(no tasks){R}\n");continue
+    for c in ORDER:
+        if c not in bycol: continue
+        print(f"  {B}{c}{R} {D}({len(bycol[c])}){R}")
+        for t in bycol[c]:
+            s=t.get("session") or {}
+            # done/trash cards keep only a historical session record; never render its
+            # stale state (e.g. "running") as if the card were still live — the column
+            # already says it's finished.
+            st="-" if c in ("done","trash") else ((s.get("state") if s else None) or "-")
+            rr=(s.get("reviewReason") if s else None) if c not in ("done","trash") else None
+            ag=(s.get("agentId") if s else None) or t.get("agentId") or "-"
+            title=((t.get("title") or "").strip() or (t.get("prompt") or "").strip().split("\n")[0].removeprefix("/implement ").removeprefix("/plan ")).replace("\n"," ")[:52]
+            # A card blocked on the agent asking a question ("needs_input") reads as
+            # awaiting_review like a finished card; call it out so the architect can
+            # answer it instead of reviewing it.
+            stcol=f"{B}{C}{'needs-input':<16}{R}" if rr=="needs_input" else f"{st:<16}"
+            md=(t.get("agentModel") or "").replace("claude-","")  # dark until task list JSON exposes agentModel
+            mdtxt=f"  {D}[{md}]{R}" if md else ""
+            # Surface the correlated external issue (Linear ENG-123 / GitHub #12) as a
+            # trailing tag when set — it's a synonym handle for the card id, kept at the
+            # end so it never disrupts the id/agent/state column alignment.
+            xi=(t.get("externalIssue") or {}).get("key") or ""
+            xitxt=f"  {C}⧉ {xi}{R}" if xi else ""
+            print(f"    {Y}{t.get('id','?')}{R}  {ag:<7} {stcol} {title}{mdtxt}{xitxt}")
+    print()
+PY
+      ;;
+    cat|detail|--detail|show)
+      local tid="${1:-}"; [ -n "$tid" ] || { echo "usage: fleet task cat <id>" >&2; return 1; }
+      local projs
+      projs="$(curl -fsS --max-time 5 "$KANBAN_URL/api/trpc/projects.list" 2>/dev/null)" || { dim "board not reachable at $KANBAN_URL"; return 1; }
+      FLEET_PROJECTS="$projs" FLEET_TID="$tid" FLEET_BIN="$bin" FLEET_CH="$CLINE_HOME_DIR" \
+      FLEET_PORT="$KANBAN_PORT" FLEET_HOME="$HOME" python3 - <<'PY'
+import os, json, subprocess, glob
+B="\033[1m";D="\033[2m";R="\033[0m";Y="\033[33m";RED="\033[31m";C="\033[36m"
+projects=json.loads(os.environ["FLEET_PROJECTS"])["result"]["data"]["projects"]
+tid=os.environ["FLEET_TID"];home=os.environ["FLEET_HOME"];bin_=os.environ["FLEET_BIN"];ch=os.environ["FLEET_CH"]
+env={**os.environ,"CLINE_HOME":ch,"KANBAN_RUNTIME_PORT":os.environ["FLEET_PORT"]}
+found=None
+for p in projects:
+    # Retry the read: the CLI can truncate large stdout on exit, yielding invalid
+    # JSON — a single failed parse must not be mistaken for "card not on this project"
+    # (that surfaced as a spurious "not found on the board").
+    tasks=None
+    for _attempt in range(4):
+        try:
+            out=subprocess.run([bin_,"task","list","--project-path",p["path"]],env=env,capture_output=True,text=True,timeout=10).stdout
+            tasks=json.loads(out).get("tasks",[]);break
+        except Exception:
+            tasks=None
+    if tasks is None: continue
+    for t in tasks:
+        if t.get("id")==tid: found=(t,p);break
+    if found: break
+if not found:
+    print(f"{RED}task {tid} not found on the board{R}");raise SystemExit(1)
+t,p=found;s=t.get("session") or {}
+_col=t.get('column','?')
+# done/trash cards keep only a historical session record — don't report its stale
+# state (e.g. "running") as if the card were still live.
+_state='-' if _col in ('done','trash') else (s.get('state') if s else 'no session')
+_xi=(t.get('externalIssue') or {}).get('key') or ''
+_xitag=f" {D}·{R} {C}⧉ {_xi}{R}" if _xi else ''
+print(f"{B}{Y}{tid}{R} {D}·{R} {_col} {D}·{R} {(s.get('agentId') or t.get('agentId') or '-')} {D}·{R} {_state} {D}·{R} {p['id']}{_xitag}")
+print(f"{B}{((t.get('title') or '').strip() or (t.get('prompt') or '').strip().split(chr(10))[0].removeprefix('/implement ').removeprefix('/plan '))[:80]}{R}")
+pr=(t.get('prompt') or '').strip()
+if pr: print(f"{D}{pr[:360]}{'…' if len(pr)>360 else ''}{R}")
+meta=" ".join(f"{k}={s[k]}" for k in ('pid','exitCode','reviewReason') if s.get(k) is not None)
+if meta: print(f"{D}session: {meta}{R}")
+wts=glob.glob(os.path.join(ch,"worktrees",tid,"*"))
+if wts:
+    wt=wts[0];print(f"{D}worktree:{R} {wt.replace(home,'~')}")
+    def git(*a):
+        try: return subprocess.run(["git","-C",wt,*a],capture_output=True,text=True,timeout=5).stdout.strip()
+        except Exception: return ""
+    br=git("branch","--show-current") or git("rev-parse","--short","HEAD")
+    print(f"{D}branch:{R} {br}")
+    st=git("diff","--stat","HEAD~1..HEAD");
+    if st: print(f"{D}last commit:{R}\n  "+"\n  ".join(st.splitlines()[-6:]))
+    un=git("status","--short")
+    if un: print(f"{D}uncommitted:{R}\n  "+"\n  ".join(un.splitlines()[:8]))
+else:
+    print(f"{D}(worktree cleaned — task complete or not yet started){R}")
+print(f"{D}tail: fleet task tail {tid} [--lines N] [--since <mins>]  — read its live conversation{R}")
+PY
+      ;;
+    say|steer)
+      local tid="" repo="" text="" submit=1
+      while [ $# -gt 0 ]; do case "$1" in
+        --submit) submit=1; shift;;
+        --no-submit) submit=0; shift;;
+        --repo) repo="$2"; shift 2;;
+        --) shift;;
+        -*) echo "task say: unknown flag $1" >&2; return 1;;
+        *) if [ -z "$tid" ]; then tid="$1"; elif [ -z "$text" ]; then text="$1"; else text="$text $1"; fi; shift;;
+      esac; done
+      [ -n "$tid" ] || { echo "usage: fleet task say <id> \"<text>\" [--submit|--no-submit]" >&2; return 1; }
+      [ -n "$text" ] || { echo "task say: message text required — fleet task say $tid \"<text>\"" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task say: multiple repos — pass --repo <name>" >&2; return 1; }
+      local args=(task send-input --task-id "$tid" --project-path "$pp" --text "$text")
+      [ "$submit" = 0 ] && args+=(--no-submit)
+      local out
+      out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
+      if printf '%s' "$out" | grep -q '"ok": true'; then
+        [ "$submit" = 0 ] && say "✓ staged steering for task $tid (not submitted)" || say "✓ steered task $tid"
+      else
+        dim "couldn't reach task $tid's session — it may have ended."
+        dim "resume it first, then retry:  fleet task start --task-id $tid${repo:+ --repo $repo}"
+        return 1
+      fi
+      ;;
+    tail)
+      # Read-only look at what a running card is actually doing — the last N lines
+      # (or last M minutes) of its agent conversation. Derived from the kanban CLI's
+      # own transcript reader; nothing is re-streamed or persisted here.
+      local tid="" repo="" lines="" since=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --repo) repo="$2"; shift 2;;
+        --lines|-n) lines="$2"; shift 2;;
+        --since) since="$2"; shift 2;;
+        --) shift;;
+        -*) echo "task tail: unknown flag $1" >&2; return 1;;
+        *) if [ -z "$tid" ]; then tid="$1"; else echo "task tail: unexpected arg $1" >&2; return 1; fi; shift;;
+      esac; done
+      [ -n "$tid" ] || { echo "usage: fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task tail: multiple repos — pass --repo <name>" >&2; return 1; }
+      local args=(task tail --task-id "$tid" --project-path "$pp")
+      [ -n "$lines" ] && args+=(--lines "$lines")
+      [ -n "$since" ] && args+=(--since "$since")
+      local out
+      out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
+      FLEET_OUT="$out" FLEET_TID="$tid" python3 - <<'PY'
+import os, json
+B="\033[1m";D="\033[2m";R="\033[0m";Y="\033[33m";RED="\033[31m"
+tid=os.environ["FLEET_TID"]
+try: data=json.loads(os.environ["FLEET_OUT"])
+except Exception:
+    print(os.environ["FLEET_OUT"]);raise SystemExit(1)
+if not data.get("ok"):
+    print(f"{RED}{data.get('error','could not tail task '+tid)}{R}");raise SystemExit(1)
+tail=data.get("tail") or []
+if not tail:
+    print(f"{D}{data.get('hint','(no conversation yet)')}{R}");raise SystemExit(0)
+print(f"{B}{Y}{tid}{R} {D}· tail ({data.get('count',0)} lines){R}")
+for line in tail:
+    print(line.get("text",""))
+PY
+      ;;
+    update)
+      # Edit a card's fields in place (backlog cards). The per-card agent model is
+      # NOT updatable (kanban limitation) -> recreate to change it.
+      local tid="" repo=""; local -a uargs=()
+      while [ $# -gt 0 ]; do case "$1" in
+        --task-id) tid="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        --title|-t) uargs+=(--title "$2"); shift 2;;
+        --prompt|-p) uargs+=(--prompt "$2"); shift 2;;
+        --prompt-file) uargs+=(--prompt "$(cat "$2")"); shift 2;;
+        --base-ref) uargs+=(--base-ref "$2"); shift 2;;
+        --agent) uargs+=(--agent-id "$2"); shift 2;;
+        --plan) uargs+=(--start-in-plan-mode true); shift;;
+        --no-plan) uargs+=(--start-in-plan-mode false); shift;;
+        --auto-review) case "$2" in
+            off|false|none) uargs+=(--auto-review-enabled false);;
+            commit|pr) uargs+=(--auto-review-enabled true --auto-review-mode "$2");;
+            *) echo "task update: --auto-review commit|pr|off" >&2; return 1;; esac; shift 2;;
+        --cline-model) uargs+=(--cline-model "$2"); shift 2;;
+        --model) echo "task update: the per-card agent model can't be changed in place (kanban limitation)." >&2
+                 echo "  recreate instead:  fleet task create … --model $2   then delete the old card." >&2; return 1;;
+        *) echo "task update: unknown flag $1" >&2; return 1;;
+      esac; done
+      [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review commit|pr|off] [--agent claude|codex|cline] [--plan|--no-plan] [--cline-model <id>] [--repo <name>]" >&2; return 1; }
+      [ "${#uargs[@]}" -gt 0 ] || { echo "task update: nothing to change — pass at least one field" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task update: multiple repos — pass --repo <name>" >&2; return 1; }
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task update --task-id "$tid" --project-path "$pp" "${uargs[@]}" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ updated task $tid"; else echo "task update failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    link)
+      # --task-id waits on --linked-task-id (prerequisite). At least one must be in backlog.
+      local repo="" a="" b=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --task-id) a="$2"; shift 2;;
+        --linked-task-id) b="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        *) echo "task link: unknown flag $1" >&2; return 1;;
+      esac; done
+      { [ -n "$a" ] && [ -n "$b" ]; } || { echo "usage: fleet task link --task-id <id> --linked-task-id <id> [--repo <name>]" >&2; echo "  --task-id waits on --linked-task-id; when the prerequisite is moved to done the waiter auto-starts" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task link: multiple repos — pass --repo <name>" >&2; return 1; }
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task link --task-id "$a" --linked-task-id "$b" --project-path "$pp" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"|"depend'; then say "✓ linked $a → waits on → $b"; else echo "task link failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    unlink)
+      local repo="" dep=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --dependency-id) dep="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        *) echo "task unlink: unknown flag $1" >&2; return 1;;
+      esac; done
+      [ -n "$dep" ] || { echo "usage: fleet task unlink --dependency-id <id> [--repo <name>]   (find the id with: fleet task cat <id>)" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task unlink: multiple repos — pass --repo <name>" >&2; return 1; }
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task unlink --dependency-id "$dep" --project-path "$pp" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ unlinked dependency $dep"; else echo "task unlink failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    done|move-done)
+      # Move a card (or a whole column) to done; cleans its worktree and auto-starts linked cards.
+      local repo="" tid="" col=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --task-id) tid="$2"; shift 2;;
+        --column) col="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        *) echo "task done: unknown flag $1" >&2; return 1;;
+      esac; done
+      if { [ -n "$tid" ] && [ -n "$col" ]; } || { [ -z "$tid" ] && [ -z "$col" ]; }; then
+        echo "usage: fleet task done (--task-id <id> | --column backlog|in_progress|review|done) [--repo <name>]" >&2; return 1; fi
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task done: multiple repos — pass --repo <name>" >&2; return 1; }
+      local -a sel; if [ -n "$tid" ]; then sel=(--task-id "$tid"); else sel=(--column "$col"); fi
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task done "${sel[@]}" --project-path "$pp" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ moved ${tid:-column $col} to done"; else echo "task done failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    delete|rm)
+      # Permanently delete a card (or column): removes card, links, and worktree.
+      local repo="" tid="" col=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --task-id) tid="$2"; shift 2;;
+        --column) col="$2"; shift 2;;
+        --repo) repo="$2"; shift 2;;
+        *) echo "task delete: unknown flag $1" >&2; return 1;;
+      esac; done
+      if { [ -n "$tid" ] && [ -n "$col" ]; } || { [ -z "$tid" ] && [ -z "$col" ]; }; then
+        echo "usage: fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanently removes cards + worktrees" >&2; return 1; fi
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task delete: multiple repos — pass --repo <name>" >&2; return 1; }
+      local -a sel; if [ -n "$tid" ]; then sel=(--task-id "$tid"); else sel=(--column "$col"); fi
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    *) echo "usage: fleet task create --prompt <text> [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review commit|pr] [--start]" >&2
+       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review commit|pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
+       echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
+       echo "       fleet task say <id> \"<text>\" [--submit|--no-submit] [--repo <name>]   steer a running agent" >&2
+       echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2
+       echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
+       echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2
+       echo "       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent" >&2
+       echo "       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)" >&2
+       echo "       fleet task cat <id>          one task: state + worktree + diff" >&2
+       echo "       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation" >&2
+       return 1;;
+  esac
+}
+
+# Curated, instruction-style tool list for the architect agent. Descriptions say
+# WHEN to use each command; this text is injected into the architect's system
+# prompt (fleet help --agent), so it IS the tool-wiring. Keep it tight — it costs
+# tokens on every architect turn — and list only what the overseer should use.
+_fleet_help_agent() {
+  cat <<'EOF'
+You oversee sub-repositories via the `fleet` CLI. Run these with Bash.
+
+fleet task ls
+    Production-line overview: every sub-repo's tasks grouped by repo and by state
+    (backlog / in_progress / review / done), each with its agent and session state.
+    Run this FIRST and whenever you need to know what work is in flight.
+
+fleet task cat <id>
+    Inspect one task in depth — column, agent, session (pid / exit / review reason),
+    worktree, branch, and its latest commit diff. Use before you review or steer a task.
+
+fleet task tail <id> [--lines N] [--since <mins>]
+    Read the last of a running card's agent conversation — what it's doing right
+    now. Use to decide whether a card needs steering (fleet task say) before you act.
+
+fleet task create --prompt <text> --title <t> --repo <name> [--issue <ref>] [--model <id>] [--plan] [--start]
+    Dispatch a new unit of work to a sub-repo. Write a scoped prompt (it drives the
+    agent's /implement, or /plan with --plan); add --start to launch it now.
+    Use --model to run a cheaper agent on mechanical cards (e.g. claude-haiku-4-5)
+    and reserve the pricier default for hard design work.
+    Use to break a goal into cards and delegate them to coding agents.
+
+fleet task start --task-id <id> --repo <name>
+    (Re)launch a task's agent — resume a stopped card or start a created one.
+
+fleet task say <id> "<text>" [--no-submit]
+    Answer a question or redirect a running agent. Use when a card is blocked
+    (needs-input) or drifting. Submits by default; --no-submit stages the text
+    without sending. Only works on a live session — resume an ended card first.
+
+fleet linear [--assigned | --created]
+    Read your Linear issues (and which are already started locally). Use to see the
+    backlog you can pull work from before creating cards.
+
+fleet initiatives [--issues]
+    Active initiatives → projects, ranked by work in progress, with who's on each.
+    Use for the strategic view of what matters now.
+
+fleet budget [--json]
+    Remaining agent budget per provider — Claude (5-hour + weekly windows via Claude
+    Code's OAuth token), Codex (5-hour + weekly, read free from its session rollout),
+    and Cursor (monthly included pool + on-demand overage). Each window shows remaining
+    %. Check before dispatching heavy work, and back off when the tightest window
+    (worst_remaining_percent in --json) runs low.
+
+fleet agent plan <ENG-ID>
+    Turn a Linear issue into a design/plan card (validate + design); it lands in Review.
+    Use to kick off a well-scoped feature from a Linear ticket.
+
+fleet agent implement <ENG-ID>
+    Turn an approved design doc into code + a ship card (build + land end-to-end).
+    Use once a plan is reviewed.
+
+fleet xtools [<name> [args]]
+    Your own ad-hoc commands. `fleet xtools` lists them; `fleet xtools new <name> [--py]`
+    scaffolds an executable stub in the project's .fleet/xtools/ (committed with the repo);
+    edit it, then `fleet xtools <name>` runs it with FLEET_DIR/FLEET_CLINE_HOME/
+    FLEET_KANBAN_URL/FLEET_KANBAN_PORT exported. Build your own automation when a task
+    repeats — a broken tool can't break the core CLI.
+EOF
+}
+
+# --- xtools: agent-authored ad-hoc automation --------------------------------
+# The architect extends the CLI without touching core code: each tool is a
+# standalone executable in <project>/.fleet/xtools/ (committed with the project)
+# or ~/.config/fleet/xtools/ (shared). `fleet xtools <name> [args]` execs it with
+# the board context wired up — FLEET_DIR / FLEET_CLINE_HOME / FLEET_KANBAN_URL /
+# FLEET_KANBAN_PORT are exported, and `fleet` itself is on PATH to call back into.
+# Isolated by design: a broken tool breaks only itself, never the core CLI.
+_xtools_dirs() {  # project dir first (shadows global), then global fallback
+  printf '%s\n' "$CFG_DIR/xtools"
+  [ "$CFG_DIR" != "$GLOBAL_DIR" ] && printf '%s\n' "$GLOBAL_DIR/xtools"
+  return 0
+}
+_xtools_valid_name() {  # letters/digits/_/-, no leading dash, no path chars
+  case "$1" in ''|-*|*[!a-zA-Z0-9_-]*) return 1;; *) return 0;; esac
+}
+_xtools_find() {  # print path of first matching tool across dirs, or fail
+  local d f
+  while IFS= read -r d; do f="$d/$1"; [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }; done < <(_xtools_dirs)
+  return 1
+}
+xtools_list() {
+  local d f name desc seen=" " found=0
+  say "xtools — agent-authored commands (run: fleet xtools <name> [args])"
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -f "$f" ] || continue
+      name="$(basename "$f")"
+      case "$seen" in *" $name "*) continue;; esac
+      seen="$seen$name "
+      desc="$(sed -n 's/^# *desc: *//p' "$f" | head -1)"
+      printf '  %-20s %s\n' "$name" "${desc:-}"
+      found=1
+    done
+  done < <(_xtools_dirs)
+  [ "$found" = 1 ] || dim "  (none yet — create one: fleet xtools new <name>)"
+}
+xtools_run() {
+  local name="${1:-}"; shift || true
+  _xtools_valid_name "$name" || { dim "invalid tool name: '${name}' (letters/digits/_/-)"; return 1; }
+  local f; f="$(_xtools_find "$name")" || { dim "no xtool '$name' — list: fleet xtools"; return 1; }
+  [ -x "$f" ] || { dim "not executable: $f — chmod +x it"; return 1; }
+  FLEET_DIR="$CFG_DIR" FLEET_CLINE_HOME="$CLINE_HOME_DIR" \
+  FLEET_KANBAN_URL="$KANBAN_URL" FLEET_KANBAN_PORT="$KANBAN_PORT" \
+    exec "$f" "$@"
+}
+xtools_new() {
+  local name="${1:-}" lang="bash"; shift || true
+  case "${1:-}" in --py|--python) lang="python";; esac
+  _xtools_valid_name "$name" || { dim "usage: fleet xtools new <name> [--py]  (name: letters/digits/_/-)"; return 1; }
+  local dir="$CFG_DIR/xtools" f; mkdir -p "$dir"; f="$dir/$name"
+  [ -e "$f" ] && { dim "already exists: $f"; return 1; }
+  if [ "$lang" = python ]; then
+    cat >"$f" <<'PY'
+#!/usr/bin/env python3
+# desc: <one line — shown in `fleet xtools` listing>
+import os, sys
+
+URL = os.environ.get("FLEET_KANBAN_URL", "")
+# FLEET_DIR / FLEET_CLINE_HOME / FLEET_KANBAN_PORT are also in os.environ.
+# `fleet` is on PATH — shell out to it if useful.
+
+def main(argv):
+    print("xtool stub — edit me", argv)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+PY
+  else
+    cat >"$f" <<'SH'
+#!/usr/bin/env bash
+# desc: <one line — shown in `fleet xtools` listing>
+set -euo pipefail
+# FLEET_DIR / FLEET_CLINE_HOME / FLEET_KANBAN_URL / FLEET_KANBAN_PORT are exported.
+# `fleet` is on PATH — call back into it if useful.
+echo "xtool stub — edit me: $*"
+SH
+  fi
+  chmod +x "$f"
+  say "created $f"
+  dim "  edit it, then run: fleet xtools $name"
+}
+xtools_edit() {
+  local f; f="$(_xtools_find "${1:-}")" || { dim "no xtool '${1:-}' — create: fleet xtools new ${1:-<name>}"; return 1; }
+  "${EDITOR:-vi}" "$f"
+}
+xtools_rm() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_xtools_find "$name")" || { dim "no xtool '$name'"; return 1; }
+  rm -f "$f" && say "removed $f"
+}
+fleet_xtools() {
+  case "${1:-}" in
+    ''|ls|list|-h|--help|help) xtools_list;;
+    new|create) shift; xtools_new "$@";;
+    path|which) shift; _xtools_find "${1:-}" || { dim "no xtool '${1:-}'"; return 1; };;
+    edit) shift; xtools_edit "$@";;
+    rm|remove|delete) shift; xtools_rm "$@";;
+    *) xtools_run "$@";;
+  esac
+}
+
+cmd="${1:-status}"; shift || true
+
+# fleet is project-scoped: nearly every command reads/writes a project's .fleet
+# (board port, CLINE_HOME, repos). Refuse to run outside one so we never silently
+# fall back to the global dir and act on the wrong board. Only project-agnostic
+# commands are exempt: create a project, refresh the shared build, or show help.
+case "$cmd" in
+  init|update|budget|help|-h|--help) ;;
+  *) [ "${IN_PROJECT:-0}" = 1 ] || {
+       echo "fleet: not inside a fleet project — no .fleet found from $PWD upward." >&2
+       echo "       cd into a project (or a subdirectory of one), or run 'fleet init' to create one." >&2
+       exit 1
+     };;
+esac
+
+case "$cmd" in
+  help|-h|--help)
+    if [ "${1:-}" = "--agent" ]; then _fleet_help_agent
+    else grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//' | head -18; fi;;
+  status) exec python3 "$DIR/fleet.py" "$@";;
+  -*) exec python3 "$DIR/fleet.py" "$cmd" "$@";;   # leading flag -> status view
+  new|up|run|ls|rm) exec "$DIR/wt" "$cmd" "$@";;
+  linear|mine|tasks)
+    case "${1:-}" in
+      api-key|--api-key|set-key|key) shift; fleet_set_linear_key "$@";;
+      *) exec python3 "$DIR/fleet.py" --mine "$@";;
+    esac;;
+  agent)
+    case "${1:-}" in
+      plan|start) shift; exec python3 "$DIR/fleet.py" --agent-plan "$@";;
+      implement) shift; exec python3 "$DIR/fleet.py" --agent-implement "$@";;
+      *) echo "usage: fleet agent plan|implement <ENG-ID> [--repo NAME] [--agent claude|codex] [--no-start]" >&2; exit 1;;
+    esac;;
+  initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
+  port) exec "$DIR/port-for" "$@";;
+  kanban) fleet_kanban "$@";;
+  task) fleet_task "$@";;
+  xtools|xtool|x) fleet_xtools "$@";;
+  init) fleet_init "$@";;
+  update) fleet_update "$@";;
+  budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
+  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task xtools)" >&2; exit 1;;
+esac
