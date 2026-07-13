@@ -21,7 +21,7 @@ function isSessionBlockedForAutoReview(summary: RuntimeTaskSessionSummary | unde
 	if (!summary) {
 		return false;
 	}
-	return summary.reviewReason === "needs_input" || summary.reviewReason === "error";
+	return summary.reviewReason === "needs_input" || summary.reviewReason === "error" || summary.state === "failed";
 }
 
 interface TaskGitActionLoadingStateLike {
@@ -209,6 +209,9 @@ export function useReviewAutoActions({
 							if (!isTaskAutoReviewEnabled(latestSelection.card)) {
 								return;
 							}
+							if (isSessionBlockedForAutoReview(sessionsByTaskIdRef.current[reviewTask.id])) {
+								return;
+							}
 							const latestMode = resolveTaskAutoReviewMode(latestSelection.card.autoReviewMode);
 							if (latestMode !== autoReviewMode) {
 								return;
@@ -240,6 +243,9 @@ export function useReviewAutoActions({
 						return;
 					}
 					if (!isTaskAutoReviewEnabled(latestSelection.card)) {
+						return;
+					}
+					if (isSessionBlockedForAutoReview(sessionsByTaskIdRef.current[reviewTask.id])) {
 						return;
 					}
 					const latestMode = resolveTaskAutoReviewMode(latestSelection.card.autoReviewMode);

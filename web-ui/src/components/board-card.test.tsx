@@ -149,6 +149,10 @@ function findExternalIssueLink(
 	return container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
 }
 
+function findSessionActivityDot(container: HTMLElement): HTMLElement | null {
+	return container.querySelector<HTMLElement>(".inline-block.shrink-0.rounded-full");
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -921,6 +925,72 @@ describe("BoardCard", () => {
 
 		// The full text is in the DOM (CSS handles visual truncation)
 		expect(container.textContent).toContain(preview);
+	});
+
+	it("given a failed review with reviewReason error, when the card renders, then it shows a red error dot with the failure message", async () => {
+		// given
+		const summary = createSummary("awaiting_review", {
+			reviewReason: "error",
+			warningMessage: "Provider request failed",
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-red)");
+		expect(container.textContent).toContain("Provider request failed");
+	});
+
+	it("given a failed session carrying a success-style final message, when the card renders, then it shows a red error dot with the failure message", async () => {
+		// given
+		const summary = createSummary("failed", {
+			latestHookActivity: {
+				activityText: null,
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Provider connection lost",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-red)");
+		expect(container.textContent).toContain("Provider connection lost");
+	});
+
+	it("given a clean review with a final message, when the card renders, then it keeps the green success dot", async () => {
+		// given
+		const summary = createSummary("awaiting_review", {
+			reviewReason: "exit",
+			latestHookActivity: {
+				activityText: null,
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Ready for review",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		// when
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" sessionSummary={summary} />);
+		});
+
+		// then
+		expect(findSessionActivityDot(container)?.style.backgroundColor).toBe("var(--color-status-green)");
+		expect(container.textContent).toContain("Ready for review");
 	});
 
 	it("hides the worktree path from active card review status while keeping branch and change summary", async () => {

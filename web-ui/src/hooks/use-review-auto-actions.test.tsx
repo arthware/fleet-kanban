@@ -35,17 +35,22 @@ function createBoard(autoReviewEnabled: boolean): BoardData {
 	};
 }
 
-const workspaceSnapshots: Record<string, ReviewTaskWorkspaceSnapshot> = {
-	"task-1": {
-		taskId: "task-1",
-		path: "/tmp/task-1",
-		branch: "task-1",
-		isDetached: false,
-		headCommit: "abc123",
-		changedFiles: 3,
-		additions: 10,
-		deletions: 2,
-	},
+const changedWorkspaceSnapshot: ReviewTaskWorkspaceSnapshot = {
+	taskId: "task-1",
+	path: "/tmp/task-1",
+	branch: "task-1",
+	isDetached: false,
+	headCommit: "abc123",
+	changedFiles: 3,
+	additions: 10,
+	deletions: 2,
+};
+
+const cleanWorkspaceSnapshot: ReviewTaskWorkspaceSnapshot = {
+	...changedWorkspaceSnapshot,
+	changedFiles: 0,
+	additions: 0,
+	deletions: 0,
 };
 
 function createSessionSummary(overrides?: Partial<RuntimeTaskSessionSummary>): RuntimeTaskSessionSummary {
@@ -72,15 +77,21 @@ function createSessionSummary(overrides?: Partial<RuntimeTaskSessionSummary>): R
 function HookHarness({
 	board,
 	sessionsByTaskId,
+	workspaceSnapshot = changedWorkspaceSnapshot,
 	runAutoReviewGitAction,
 	requestMoveTaskToTrash,
 }: {
 	board: BoardData;
 	sessionsByTaskId: Record<string, RuntimeTaskSessionSummary>;
+	workspaceSnapshot?: ReviewTaskWorkspaceSnapshot | null;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
-	requestMoveTaskToTrash: (taskId: string, fromColumnId: BoardColumnId) => Promise<void>;
+	requestMoveTaskToTrash: (
+		taskId: string,
+		fromColumnId: BoardColumnId,
+		options?: { skipWorkingChangeWarning?: boolean },
+	) => Promise<void>;
 }): null {
-	setTaskWorkspaceSnapshot(workspaceSnapshots["task-1"] ?? null);
+	setTaskWorkspaceSnapshot(workspaceSnapshot ?? null);
 	useReviewAutoActions({
 		board,
 		sessionsByTaskId,
@@ -183,10 +194,11 @@ describe("useReviewAutoActions", () => {
 	});
 
 	// An errored session is likewise not durably saved — never march it to Done.
-	it("does NOT auto-advance a card whose session errored", async () => {
+	it("given an error session with changed files, when auto-review is enabled, then no git action fires and the card is NOT auto-moved to done", async () => {
 		const runAutoReviewGitAction = vi.fn(async () => true);
 		const requestMoveTaskToTrash = vi.fn(async () => {});
 
+		// given
 		await act(async () => {
 			root.render(
 				<HookHarness
@@ -198,10 +210,119 @@ describe("useReviewAutoActions", () => {
 			);
 		});
 
+		// when
 		await act(async () => {
 			vi.advanceTimersByTime(5000);
 		});
 
+		// then
+		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("given a failed session with changed files, when auto-review is enabled, then no git action fires and the card is NOT auto-moved to done", async () => {
+		const runAutoReviewGitAction = vi.fn(async () => true);
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+
+		// given
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={createBoard(true)}
+					sessionsByTaskId={{ "task-1": createSessionSummary({ state: "failed" }) }}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+
+		// when
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+
+		// then
+		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("given a clean exit review with changed files, when auto-review is enabled, then it still auto-commits and auto-dones", async () => {
+		const runAutoReviewGitAction = vi.fn(async () => true);
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		const board = createBoard(true);
+		const cleanExitSessions = { "task-1": createSessionSummary({ reviewReason: "exit" }) };
+
+		// given
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={board}
+					sessionsByTaskId={cleanExitSessions}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+
+		// when
+		await act(async () => {
+			vi.advanceTimersByTime(500);
+			await Promise.resolve();
+		});
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={board}
+					sessionsByTaskId={cleanExitSessions}
+					workspaceSnapshot={cleanWorkspaceSnapshot}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(500);
+			await Promise.resolve();
+		});
+
+		// then
+		expect(runAutoReviewGitAction).toHaveBeenCalledWith("task-1", "commit");
+		expect(requestMoveTaskToTrash).toHaveBeenCalledWith("task-1", "review", { skipWorkingChangeWarning: true });
+	});
+
+	it("given an action was scheduled, when the session flips to error before the timer fires, then nothing fires", async () => {
+		const runAutoReviewGitAction = vi.fn(async () => true);
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+		const board = createBoard(true);
+
+		// given
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={board}
+					sessionsByTaskId={{ "task-1": createSessionSummary({ reviewReason: "exit" }) }}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+
+		// when
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={board}
+					sessionsByTaskId={{ "task-1": createSessionSummary({ reviewReason: "error" }) }}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+
+		// then
 		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
 		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
 	});
