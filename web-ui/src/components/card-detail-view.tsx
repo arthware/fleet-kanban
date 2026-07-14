@@ -784,6 +784,8 @@ export function CardDetailView({
 									<DiffViewerPanel
 										workspaceFiles={isRuntimeAvailable ? runtimeFiles : null}
 										selectedPath={selectedPath}
+										workspaceId={currentProjectId}
+										taskId={selection.card.id}
 										onSelectedPathChange={setSelectedPath}
 										viewMode="unified"
 										onAddToTerminal={
@@ -932,6 +934,8 @@ export function CardDetailView({
 												<DiffViewerPanel
 													workspaceFiles={isRuntimeAvailable ? runtimeFiles : null}
 													selectedPath={selectedPath}
+													workspaceId={currentProjectId}
+													taskId={selection.card.id}
 													onSelectedPathChange={setSelectedPath}
 													viewMode={isDiffExpanded ? "split" : "unified"}
 													onAddToTerminal={

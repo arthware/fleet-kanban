@@ -25,6 +25,7 @@ import {
 	type RuntimeTaskChatReloadRequest,
 	type RuntimeTaskChatSendRequest,
 	type RuntimeTaskDurabilityRequest,
+	type RuntimeTaskFileRequest,
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
@@ -61,6 +62,7 @@ import {
 	runtimeTaskChatReloadRequestSchema,
 	runtimeTaskChatSendRequestSchema,
 	runtimeTaskDurabilityRequestSchema,
+	runtimeTaskFileRequestSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
@@ -155,6 +157,16 @@ export function parseDesignDocRequest(value: unknown): RuntimeDesignDocRequest {
 		taskId,
 		...(externalIssueKey ? { externalIssueKey } : {}),
 	};
+}
+
+export function parseTaskFileRequest(value: unknown): RuntimeTaskFileRequest {
+	const parsed = parseWithSchema(runtimeTaskFileRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	const path = parsed.path.trim();
+	if (!taskId || !path) {
+		throw new Error("Invalid task file payload.");
+	}
+	return { taskId, path };
 }
 
 export function parseGitCheckoutRequest(value: unknown): RuntimeGitCheckoutRequest {
