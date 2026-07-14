@@ -553,32 +553,45 @@ fleet_task() {
   local sub="${1:-}"; [ $# -gt 0 ] && shift
   case "$sub" in
     create|new|add)
-      local title="" prompt="" repo="" baseref="" agent="claude" model="" plan="" autorev="" start="" xissue=""
+      # Thin delegation to `kanban task create`: fleet owns only --repo→--project-path
+      # resolution and --start. Prompt/title/agent and the Markdown-card path (--file/--markdown
+      # with YAML frontmatter) belong to kanban, so we translate fleet's ergonomic aliases and
+      # forward everything else through — new kanban flags then work here without edits.
+      local title="" prompt="" repo="" agent="" start="" cardsrc=""
+      local -a extra=()
       while [ $# -gt 0 ]; do case "$1" in
         --prompt|-p) prompt="$2"; shift 2;;
         --prompt-file) prompt="$(cat "$2")"; shift 2;;
+        --file) cardsrc=1; extra+=(--file "$2"); shift 2;;
+        --markdown) cardsrc=1; extra+=(--markdown "$2"); shift 2;;
         --title|-t) title="$2"; shift 2;;
         --repo) repo="$2"; shift 2;;
-        --base-ref) baseref="$2"; shift 2;;
         --agent) agent="$2"; shift 2;;
-        --model) model="$2"; shift 2;;
-        --external-issue|--issue) xissue="$2"; shift 2;;
-        --plan) plan=1; shift;;
-        --auto-review) autorev="$2"; shift 2;;
+        --model) extra+=(--agent-model "$2"); shift 2;;
+        --external-issue|--issue) extra+=(--external-issue "$2"); shift 2;;
+        --base-ref) extra+=(--base-ref "$2"); shift 2;;
+        --plan) extra+=(--start-in-plan-mode true); shift;;
+        --auto-review) extra+=(--auto-review-enabled true --auto-review-mode "$2"); shift 2;;
         --start) start=1; shift;;
-        *) echo "task create: unknown flag $1" >&2; return 1;;
+        *) extra+=("$1"); shift;;   # forward unrecognized flags straight to kanban
       esac; done
-      [ -n "$prompt" ] || { echo "task create: --prompt (or --prompt-file) is required" >&2; return 1; }
       local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task create: multiple repos configured — pass --repo <name>" >&2; return 1; }
       [ -d "$pp" ] || { echo "task create: no such repo dir: $pp" >&2; return 1; }
-      [ -n "$title" ] || title="$(printf '%s' "$prompt" | head -1 | cut -c1-72 || true)"
       # kanban defaults base-ref (current branch → default → first known) when omitted
-      local args=(task create --project-path "$pp" --title "$title" --prompt "$prompt" --agent-id "$agent")
-      [ -n "$model" ] && args+=(--agent-model "$model")
-      [ -n "$xissue" ] && args+=(--external-issue "$xissue")
-      [ -n "$baseref" ] && args+=(--base-ref "$baseref")
-      [ -n "$plan" ] && args+=(--start-in-plan-mode true)
-      [ -n "$autorev" ] && args+=(--auto-review-enabled true --auto-review-mode "$autorev")
+      local args=(task create --project-path "$pp")
+      if [ -n "$cardsrc" ]; then
+        # The card document owns prompt/title/agent (frontmatter); only forward explicit overrides
+        # so a card's `agent:`/derived title isn't clobbered by fleet's defaults.
+        [ -n "$prompt" ] && args+=(--prompt "$prompt")
+        [ -n "$title" ]  && args+=(--title "$title")
+        [ -n "$agent" ]  && args+=(--agent-id "$agent")
+      else
+        [ -n "$prompt" ] || { echo "task create: need --prompt, --prompt-file, --file, or --markdown" >&2; return 1; }
+        [ -n "$title" ] || title="$(printf '%s' "$prompt" | head -1 | cut -c1-72 || true)"
+        [ -n "$agent" ] || agent="claude"
+        args+=(--prompt "$prompt" --title "$title" --agent-id "$agent")
+      fi
+      [ ${#extra[@]} -gt 0 ] && args+=("${extra[@]}")
       local out tid
       out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
       # Payload via env (not stdin): `python3 -` already consumes stdin for the heredoc program.
@@ -913,7 +926,8 @@ PY
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
-    *) echo "usage: fleet task create --prompt <text> [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review commit|pr] [--start]" >&2
+    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review commit|pr] [--start]" >&2
+       echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
        echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review commit|pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
        echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
        echo "       fleet task say <id> \"<text>\" [--submit|--no-submit] [--repo <name>]   steer a running agent" >&2
@@ -949,9 +963,11 @@ fleet task tail <id> [--lines N] [--since <mins>]
     Read the last of a running card's agent conversation — what it's doing right
     now. Use to decide whether a card needs steering (fleet task say) before you act.
 
-fleet task create --prompt <text> --title <t> --repo <name> [--issue <ref>] [--model <id>] [--plan] [--start]
+fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] --repo <name> [--issue <ref>] [--model <id>] [--plan] [--start]
     Dispatch a new unit of work to a sub-repo. Write a scoped prompt (it drives the
     agent's /implement, or /plan with --plan); add --start to launch it now.
+    --file/--markdown author the card as a Markdown doc with YAML frontmatter
+    (agent, auto-review, issue, code-references, links) — see fleet-kanban/docs/card-authoring.md.
     Use --model to run a cheaper agent on mechanical cards (e.g. claude-haiku-4-5)
     and reserve the pricier default for hard design work.
     Use to break a goal into cards and delegate them to coding agents.

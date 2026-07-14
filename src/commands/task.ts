@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { createTRPCProxyClient, httpBatchLink } from "@trpc/client";
 import type { Command } from "commander";
 
@@ -31,6 +32,12 @@ import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
 import { resolveRepoNameWithOwner } from "../workspace/repo-name";
+import {
+	type ParsedTaskCard,
+	parseTaskCardDocument,
+	resolveCardSourceRequest,
+	resolveTaskCardCreate,
+} from "./task-card-frontmatter";
 import { renderTranscriptTailLines, selectTranscriptTail } from "./task-transcript-tail";
 
 const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "done", "trash"] as const;
@@ -540,6 +547,66 @@ async function deleteTaskWorkspace(
 			error: toErrorMessage(error),
 		};
 	}
+}
+
+async function readCardStdinText(): Promise<string> {
+	if (process.stdin.isTTY) {
+		throw new Error("--file - expects card Markdown on stdin, but stdin is a TTY.");
+	}
+	const chunks: string[] = [];
+	process.stdin.setEncoding("utf8");
+	for await (const chunk of process.stdin) {
+		chunks.push(chunk);
+	}
+	return chunks.join("");
+}
+
+/** Reads and parses a card document from `--file`/`--markdown` (or stdin), if either was given. */
+async function loadTaskCardFromFlags(options: {
+	file?: string;
+	markdown?: string;
+}): Promise<ParsedTaskCard | undefined> {
+	const request = resolveCardSourceRequest({ file: options.file, markdown: options.markdown });
+	if (request.kind === "none") {
+		return undefined;
+	}
+	const source =
+		request.kind === "inline"
+			? request.text
+			: request.kind === "stdin"
+				? await readCardStdinText()
+				: await readFile(request.path, "utf8");
+	return parseTaskCardDocument(source);
+}
+
+/**
+ * Links the freshly created card to each dependency named in the card's
+ * `links:` frontmatter, so the new card waits on them. Runs after creation and
+ * surfaces the resulting dependencies in the command output.
+ */
+async function applyTaskCardLinks(
+	created: JsonRecord,
+	links: string[],
+	projectPath: string | undefined,
+): Promise<JsonRecord> {
+	if (links.length === 0) {
+		return created;
+	}
+	const createdId = (created.task as { id?: unknown } | undefined)?.id;
+	if (typeof createdId !== "string" || createdId.trim().length === 0) {
+		throw new Error("Cannot apply card links: the created task id is missing.");
+	}
+	const dependencies: JsonRecord[] = [];
+	for (const linkedTaskId of links) {
+		const linked = await linkTasks({
+			cwd: process.cwd(),
+			taskId: createdId,
+			linkedTaskId,
+			projectPath,
+		});
+		dependencies.push(linked);
+	}
+	return { ...created, links: dependencies };
 }
 
 async function createTask(input: {
@@ -1509,7 +1576,12 @@ export function registerTaskCommand(program: Command): void {
 		.command("create")
 		.description("Create a task in backlog.")
 		.option("--title <text>", "Task title.")
-		.requiredOption("--prompt <text>", "Task prompt text.")
+		.option("--prompt <text>", "Task prompt text. Optional when --file/--markdown supplies the body.")
+		.option(
+			"--file <path>",
+			"Read the card from a Markdown file with optional YAML frontmatter (- reads stdin). See docs/card-authoring.md.",
+		)
+		.option("--markdown <text>", "Card Markdown (frontmatter + body) supplied inline instead of via --file.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
 		.option("--base-ref <branch>", "Task base branch/ref.")
 		.option("--start-in-plan-mode [value]", "Set plan mode (true|false). Flag-only implies true.")
@@ -1542,7 +1614,9 @@ export function registerTaskCommand(program: Command): void {
 		.action(
 			async (options: {
 				title?: string;
-				prompt: string;
+				prompt?: string;
+				file?: string;
+				markdown?: string;
 				projectPath?: string;
 				baseRef?: string;
 				startInPlanMode?: unknown;
@@ -1559,25 +1633,41 @@ export function registerTaskCommand(program: Command): void {
 				clineReasoningEffort?: string;
 			}) => {
 				await runTaskCommand(
-					async () =>
-						await createTask({
-							cwd: process.cwd(),
+					async () => {
+						const card = await loadTaskCardFromFlags(options);
+						// Explicit CLI flags override frontmatter, so one card file can be
+						// reused with a single field tweaked from the command line.
+						const resolved = resolveTaskCardCreate(card, {
 							title: options.title,
 							prompt: options.prompt,
-							projectPath: options.projectPath,
 							baseRef: options.baseRef,
 							startInPlanMode: parseOptionalBooleanOption(options.startInPlanMode, "--start-in-plan-mode"),
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
-							agentId: parseAgentId(options.agentId) ?? undefined,
-							agentModel: parseOptionalStringOrDefault(options.agentModel) ?? undefined,
+							agentId: parseAgentId(options.agentId),
+							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							externalIssueRef: options.externalIssue ?? options.issue,
+						});
+						const created = await createTask({
+							cwd: process.cwd(),
+							title: resolved.title,
+							prompt: resolved.prompt,
+							projectPath: options.projectPath,
+							baseRef: resolved.baseRef,
+							startInPlanMode: resolved.startInPlanMode,
+							autoReviewEnabled: resolved.autoReviewEnabled,
+							autoReviewMode: resolved.autoReviewMode,
+							agentId: resolved.agentId,
+							agentModel: resolved.agentModel,
+							externalIssueRef: resolved.externalIssueRef,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
 								modelId: parseOptionalStringOrDefault(options.clineModel) ?? undefined,
 								reasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),
 							}),
-						}),
+						});
+						return await applyTaskCardLinks(created, resolved.links, options.projectPath);
+					},
 					{
 						quietTaskIdOnly: options.quiet === true || options.idOnly === true,
 					},
