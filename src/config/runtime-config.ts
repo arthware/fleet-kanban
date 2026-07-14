@@ -5,7 +5,12 @@ import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getRuntimeAgentCatalogEntry, isRuntimeAgentLaunchSupported } from "../core/agent-catalog";
-import type { RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract";
+import type {
+	RuntimeAgentId,
+	RuntimeProjectShortcut,
+	RuntimeWorktreeConfig,
+	RuntimeWorktreePostCreateFailureMode,
+} from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 import { detectInstalledCommands } from "../terminal/agent-registry";
 import { clineHomeDir } from "./cline-home";
@@ -22,6 +27,7 @@ interface RuntimeGlobalConfigFileShape {
 
 interface RuntimeProjectConfigFileShape {
 	shortcuts?: RuntimeProjectShortcut[];
+	worktree?: RuntimeWorktreeConfig;
 }
 
 export interface RuntimeConfigState {
@@ -32,6 +38,7 @@ export interface RuntimeConfigState {
 	agentAutonomousModeEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
 	shortcuts: RuntimeProjectShortcut[];
+	worktree: RuntimeWorktreeConfig;
 	commitPromptTemplate: string;
 	openPrPromptTemplate: string;
 	commitPromptTemplateDefault: string;
@@ -44,6 +51,7 @@ export interface RuntimeConfigUpdateInput {
 	agentAutonomousModeEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
 	shortcuts?: RuntimeProjectShortcut[];
+	worktree?: RuntimeWorktreeConfig;
 	commitPromptTemplate?: string;
 	openPrPromptTemplate?: string;
 }
@@ -57,6 +65,8 @@ const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "cursor", "codex", "droid", "kiro", "gemini"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
+const DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS = 300_000;
+const DEFAULT_WORKTREE_POST_CREATE_FAILURE_MODE: RuntimeWorktreePostCreateFailureMode = "warn";
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
@@ -169,6 +179,59 @@ function normalizeShortcuts(shortcuts: RuntimeProjectShortcut[] | null | undefin
 		}
 	}
 	return normalized;
+}
+
+function normalizeWorktreePostCreateCommand(value: unknown): string | string[] | undefined {
+	if (typeof value === "string") {
+		const command = value.trim();
+		return command.length > 0 ? command : undefined;
+	}
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const command = value.filter((part): part is string => typeof part === "string").map((part) => part.trim());
+	return command.length > 0 && command.every((part) => part.length > 0) ? command : undefined;
+}
+
+function normalizeWorktreePostCreateTimeoutMs(value: unknown): number | undefined {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+		return undefined;
+	}
+	return Math.floor(value);
+}
+
+function normalizeWorktreePostCreateFailureMode(value: unknown): RuntimeWorktreePostCreateFailureMode | undefined {
+	return value === "block" || value === "warn" ? value : undefined;
+}
+
+function normalizeWorktreeConfig(value: unknown): RuntimeWorktreeConfig {
+	if (!value || typeof value !== "object") {
+		return {};
+	}
+	const candidate = value as {
+		postCreateCommand?: unknown;
+		postCreateTimeoutMs?: unknown;
+		postCreateFailureMode?: unknown;
+	};
+	const postCreateCommand = normalizeWorktreePostCreateCommand(candidate.postCreateCommand);
+	if (postCreateCommand === undefined) {
+		return {};
+	}
+	const postCreateTimeoutMs = normalizeWorktreePostCreateTimeoutMs(candidate.postCreateTimeoutMs);
+	const postCreateFailureMode = normalizeWorktreePostCreateFailureMode(candidate.postCreateFailureMode);
+	return {
+		postCreateCommand,
+		...(postCreateTimeoutMs !== undefined && postCreateTimeoutMs !== DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS
+			? { postCreateTimeoutMs }
+			: {}),
+		...(postCreateFailureMode !== undefined && postCreateFailureMode !== DEFAULT_WORKTREE_POST_CREATE_FAILURE_MODE
+			? { postCreateFailureMode }
+			: {}),
+	};
+}
+
+function areRuntimeWorktreeConfigsEqual(left: RuntimeWorktreeConfig, right: RuntimeWorktreeConfig): boolean {
+	return JSON.stringify(normalizeWorktreeConfig(left)) === JSON.stringify(normalizeWorktreeConfig(right));
 }
 
 function normalizePromptTemplate(value: unknown, fallback: string): string {
@@ -285,6 +348,7 @@ function toRuntimeConfigState({
 			DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED,
 		),
 		shortcuts: normalizeShortcuts(projectConfig?.shortcuts),
+		worktree: normalizeWorktreeConfig(projectConfig?.worktree),
 		commitPromptTemplate: normalizePromptTemplate(globalConfig?.commitPromptTemplate, DEFAULT_COMMIT_PROMPT_TEMPLATE),
 		openPrPromptTemplate: normalizePromptTemplate(
 			globalConfig?.openPrPromptTemplate,
@@ -383,16 +447,18 @@ async function writeRuntimeGlobalConfigFile(
 
 async function writeRuntimeProjectConfigFile(
 	configPath: string | null,
-	config: { shortcuts: RuntimeProjectShortcut[] },
+	config: { shortcuts: RuntimeProjectShortcut[]; worktree: RuntimeWorktreeConfig },
 ): Promise<void> {
 	const normalizedShortcuts = normalizeShortcuts(config.shortcuts);
+	const normalizedWorktree = normalizeWorktreeConfig(config.worktree);
+	const hasWorktreeHook = normalizedWorktree.postCreateCommand !== undefined;
 	if (!configPath) {
-		if (normalizedShortcuts.length > 0) {
-			throw new Error("Cannot save project shortcuts without a selected project.");
+		if (normalizedShortcuts.length > 0 || hasWorktreeHook) {
+			throw new Error("Cannot save project settings without a selected project.");
 		}
 		return;
 	}
-	if (normalizedShortcuts.length === 0) {
+	if (normalizedShortcuts.length === 0 && !hasWorktreeHook) {
 		await rm(configPath, { force: true });
 		try {
 			await rm(dirname(configPath));
@@ -404,7 +470,8 @@ async function writeRuntimeProjectConfigFile(
 	await lockedFileSystem.writeJsonFileAtomic(
 		configPath,
 		{
-			shortcuts: normalizedShortcuts,
+			...(normalizedShortcuts.length > 0 ? { shortcuts: normalizedShortcuts } : {}),
+			...(hasWorktreeHook ? { worktree: normalizedWorktree } : {}),
 		} satisfies RuntimeProjectConfigFileShape,
 		{
 			lock: null,
@@ -457,6 +524,7 @@ function createRuntimeConfigStateFromValues(input: {
 	shortcuts: RuntimeProjectShortcut[];
 	commitPromptTemplate: string;
 	openPrPromptTemplate: string;
+	worktree: RuntimeWorktreeConfig;
 }): RuntimeConfigState {
 	return {
 		globalConfigPath: input.globalConfigPath,
@@ -472,6 +540,7 @@ function createRuntimeConfigStateFromValues(input: {
 			DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED,
 		),
 		shortcuts: normalizeShortcuts(input.shortcuts),
+		worktree: normalizeWorktreeConfig(input.worktree),
 		commitPromptTemplate: normalizePromptTemplate(input.commitPromptTemplate, DEFAULT_COMMIT_PROMPT_TEMPLATE),
 		openPrPromptTemplate: normalizePromptTemplate(input.openPrPromptTemplate, DEFAULT_OPEN_PR_PROMPT_TEMPLATE),
 		commitPromptTemplateDefault: DEFAULT_COMMIT_PROMPT_TEMPLATE,
@@ -488,6 +557,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		agentAutonomousModeEnabled: current.agentAutonomousModeEnabled,
 		readyForReviewNotificationsEnabled: current.readyForReviewNotificationsEnabled,
 		shortcuts: [],
+		worktree: {},
 		commitPromptTemplate: current.commitPromptTemplate,
 		openPrPromptTemplate: current.openPrPromptTemplate,
 	});
@@ -523,6 +593,7 @@ export async function saveRuntimeConfig(
 		agentAutonomousModeEnabled: boolean;
 		readyForReviewNotificationsEnabled: boolean;
 		shortcuts: RuntimeProjectShortcut[];
+		worktree?: RuntimeWorktreeConfig;
 		commitPromptTemplate: string;
 		openPrPromptTemplate: string;
 	},
@@ -537,7 +608,10 @@ export async function saveRuntimeConfig(
 			commitPromptTemplate: config.commitPromptTemplate,
 			openPrPromptTemplate: config.openPrPromptTemplate,
 		});
-		await writeRuntimeProjectConfigFile(projectConfigPath, { shortcuts: config.shortcuts });
+		await writeRuntimeProjectConfigFile(projectConfigPath, {
+			shortcuts: config.shortcuts,
+			worktree: config.worktree ?? {},
+		});
 		return createRuntimeConfigStateFromValues({
 			globalConfigPath,
 			projectConfigPath,
@@ -546,6 +620,7 @@ export async function saveRuntimeConfig(
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
 			shortcuts: config.shortcuts,
+			worktree: config.worktree ?? {},
 			commitPromptTemplate: config.commitPromptTemplate,
 			openPrPromptTemplate: config.openPrPromptTemplate,
 		});
@@ -556,8 +631,12 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 	const { globalConfigPath, projectConfigPath } = resolveRuntimeConfigPaths(cwd);
 	return await lockedFileSystem.withLocks(getRuntimeConfigLockRequests(cwd), async () => {
 		const current = await loadRuntimeConfigLocked(cwd);
-		if (projectConfigPath === null && normalizeShortcuts(updates.shortcuts).length > 0) {
-			throw new Error("Cannot save project shortcuts without a selected project.");
+		if (
+			projectConfigPath === null &&
+			(normalizeShortcuts(updates.shortcuts).length > 0 ||
+				normalizeWorktreeConfig(updates.worktree).postCreateCommand !== undefined)
+		) {
+			throw new Error("Cannot save project settings without a selected project.");
 		}
 		const nextConfig = {
 			selectedAgentId: updates.selectedAgentId ?? current.selectedAgentId,
@@ -567,6 +646,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			readyForReviewNotificationsEnabled:
 				updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 			shortcuts: projectConfigPath ? (updates.shortcuts ?? current.shortcuts) : current.shortcuts,
+			worktree: projectConfigPath ? (updates.worktree ?? current.worktree) : current.worktree,
 			commitPromptTemplate: updates.commitPromptTemplate ?? current.commitPromptTemplate,
 			openPrPromptTemplate: updates.openPrPromptTemplate ?? current.openPrPromptTemplate,
 		};
@@ -578,7 +658,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
 			nextConfig.commitPromptTemplate !== current.commitPromptTemplate ||
 			nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
-			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts);
+			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts) ||
+			!areRuntimeWorktreeConfigsEqual(nextConfig.worktree, current.worktree);
 
 		if (!hasChanges) {
 			return current;
@@ -594,6 +675,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, {
 			shortcuts: nextConfig.shortcuts,
+			worktree: nextConfig.worktree,
 		});
 		return createRuntimeConfigStateFromValues({
 			globalConfigPath,
@@ -603,6 +685,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 			shortcuts: nextConfig.shortcuts,
+			worktree: nextConfig.worktree,
 			commitPromptTemplate: nextConfig.commitPromptTemplate,
 			openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 		});
@@ -632,6 +715,7 @@ export async function updateGlobalRuntimeConfig(
 				readyForReviewNotificationsEnabled:
 					updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 				shortcuts: current.shortcuts,
+				worktree: current.worktree,
 				commitPromptTemplate: updates.commitPromptTemplate ?? current.commitPromptTemplate,
 				openPrPromptTemplate: updates.openPrPromptTemplate ?? current.openPrPromptTemplate,
 			};
@@ -665,6 +749,7 @@ export async function updateGlobalRuntimeConfig(
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 				shortcuts: nextConfig.shortcuts,
+				worktree: nextConfig.worktree,
 				commitPromptTemplate: nextConfig.commitPromptTemplate,
 				openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 			});

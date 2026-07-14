@@ -22,9 +22,17 @@ const workspaceStateMocks = vi.hoisted(() => ({
 	loadWorkspaceContext: vi.fn(),
 }));
 
+const runtimeConfigMocks = vi.hoisted(() => ({
+	loadRuntimeConfig: vi.fn(),
+}));
+
 const taskWorktreePathMocks = vi.hoisted(() => ({
 	getWorkspaceFolderLabelForWorktreePath: vi.fn(),
 	normalizeTaskIdForWorktreePath: vi.fn(),
+}));
+
+const worktreePostCreateHookMocks = vi.hoisted(() => ({
+	runWorktreePostCreateHook: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -46,10 +54,18 @@ vi.mock("../../src/state/workspace-state.js", () => ({
 	loadWorkspaceContext: workspaceStateMocks.loadWorkspaceContext,
 }));
 
+vi.mock("../../src/config/runtime-config.js", () => ({
+	loadRuntimeConfig: runtimeConfigMocks.loadRuntimeConfig,
+}));
+
 vi.mock("../../src/workspace/task-worktree-path.js", () => ({
 	getWorkspaceFolderLabelForWorktreePath: taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath,
 	KANBAN_TASK_WORKTREES_DIR_NAME: "worktrees",
 	normalizeTaskIdForWorktreePath: taskWorktreePathMocks.normalizeTaskIdForWorktreePath,
+}));
+
+vi.mock("../../src/workspace/worktree-post-create-hook.js", () => ({
+	runWorktreePostCreateHook: worktreePostCreateHookMocks.runWorktreePostCreateHook,
 }));
 
 import { ensureTaskWorktreeIfDoesntExist, removeTaskWorktreeSetupLock } from "../../src/workspace/task-worktree";
@@ -109,8 +125,10 @@ describe.sequential("task-worktree serialization", () => {
 		workspaceStateMocks.getRuntimeHomePath.mockReset();
 		workspaceStateMocks.getTaskWorktreesHomePath.mockReset();
 		workspaceStateMocks.loadWorkspaceContext.mockReset();
+		runtimeConfigMocks.loadRuntimeConfig.mockReset();
 		taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReset();
 		taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockReset();
+		worktreePostCreateHookMocks.runWorktreePostCreateHook.mockReset();
 
 		let lockQueue = Promise.resolve();
 		lockedFileSystemMocks.withLock.mockImplementation(
@@ -129,6 +147,13 @@ describe.sequential("task-worktree serialization", () => {
 			},
 		);
 		lockedFileSystemMocks.writeTextFileAtomic.mockResolvedValue(undefined);
+		runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({ worktree: {} });
+		worktreePostCreateHookMocks.runWorktreePostCreateHook.mockResolvedValue({
+			ok: true,
+			exitCode: 0,
+			timedOut: false,
+			outputTail: "",
+		});
 	});
 
 	afterEach(() => {
@@ -271,6 +296,265 @@ describe.sequential("task-worktree serialization", () => {
 				lockfileName: "kanban-task-worktree-setup.lock",
 			});
 			expect(maxConcurrentSubmoduleUpdates).toBe(1);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("runs the post-create hook once after ignored paths are synced on genuine worktree creation", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-hook-create-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const runtimeHomePath = join(sandboxRoot, "runtime-home");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+			mkdirSync(runtimeHomePath, { recursive: true });
+			mkdirSync(worktreesHomePath, { recursive: true });
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(runtimeHomePath);
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+			runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({
+				worktree: { postCreateCommand: "echo setup" },
+			});
+
+			const order: string[] = [];
+			const worktreeHeads = new Map<string, string>();
+			worktreePostCreateHookMocks.runWorktreePostCreateHook.mockImplementation(async () => {
+				order.push("hook");
+				return { ok: true, exitCode: 0, timedOut: false, outputTail: "" };
+			});
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+
+					if (command[0] === "rev-parse" && command[1] === "--git-common-dir") {
+						return { stdout: ".git\n", stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "HEAD") {
+						const head = worktreeHeads.get(cwd);
+						if (!head) {
+							throw createGitError("fatal: not a git repository");
+						}
+						return { stdout: `${head}\n`, stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "--verify") {
+						return { stdout: "base-commit\n", stderr: "" };
+					}
+					if (command[0] === "worktree" && command[1] === "prune") {
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "worktree" && command[1] === "add") {
+						const worktreePath = command[3];
+						const commit = command[4] ?? "base-commit";
+						if (!worktreePath) {
+							throw createGitError("fatal: missing worktree path");
+						}
+						mkdirSync(worktreePath, { recursive: true });
+						worktreeHeads.set(worktreePath, commit);
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "ls-files") {
+						order.push("sync");
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "--git-path") {
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					}
+
+					throw createGitError(`Unhandled git command: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-hook",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			expect(ensured.ok).toBe(true);
+			expect(order).toEqual(["sync", "hook"]);
+			expect(worktreePostCreateHookMocks.runWorktreePostCreateHook).toHaveBeenCalledWith(
+				{ postCreateCommand: "echo setup" },
+				expect.objectContaining({
+					taskId: "task-hook",
+					workspaceId: "workspace-1",
+					repoPath,
+					baseRef: "main",
+				}),
+			);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("does not run the post-create hook when an existing worktree is only re-synced", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-hook-existing-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const runtimeHomePath = join(sandboxRoot, "runtime-home");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			const worktreePath = join(worktreesHomePath, "task-existing", "repo");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+			mkdirSync(worktreePath, { recursive: true });
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(runtimeHomePath);
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+
+					if (command[0] === "rev-parse" && command[1] === "HEAD" && cwd === worktreePath) {
+						return { stdout: "existing-commit\n", stderr: "" };
+					}
+					if (command[0] === "ls-files") {
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "--git-path") {
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					}
+
+					throw createGitError(`Unhandled git command: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-existing",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			expect(ensured.ok).toBe(true);
+			expect(worktreePostCreateHookMocks.runWorktreePostCreateHook).not.toHaveBeenCalled();
+			expect(runtimeConfigMocks.loadRuntimeConfig).not.toHaveBeenCalled();
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("keeps the new worktree and returns a warning when the post-create hook fails in warn mode", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-hook-warn-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(join(sandboxRoot, "runtime-home"));
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+			runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({
+				worktree: { postCreateCommand: "exit 1" },
+			});
+			worktreePostCreateHookMocks.runWorktreePostCreateHook.mockResolvedValue({
+				ok: false,
+				exitCode: 1,
+				timedOut: false,
+				outputTail: "install failed",
+			});
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+					if (command[0] === "rev-parse" && command[1] === "--git-common-dir")
+						return { stdout: ".git\n", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "HEAD") throw createGitError("fatal: no worktree");
+					if (command[0] === "rev-parse" && command[1] === "--verify")
+						return { stdout: "base-commit\n", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "prune") return { stdout: "", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "add") {
+						const worktreePath = command[3];
+						if (!worktreePath) throw createGitError("fatal: missing worktree path");
+						mkdirSync(worktreePath, { recursive: true });
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "ls-files") return { stdout: "", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "--git-path")
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					throw createGitError(`Unhandled git command in ${cwd}: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-warn",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			const worktreePath = join(worktreesHomePath, "task-warn", "repo");
+			expect(ensured).toMatchObject({ ok: true, warning: expect.stringContaining("install failed") });
+			expect(existsSync(worktreePath)).toBe(true);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("removes the new worktree and returns ok false when the post-create hook fails in block mode", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-hook-block-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(join(sandboxRoot, "runtime-home"));
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+			runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({
+				worktree: { postCreateCommand: "exit 1", postCreateFailureMode: "block" },
+			});
+			worktreePostCreateHookMocks.runWorktreePostCreateHook.mockResolvedValue({
+				ok: false,
+				exitCode: 1,
+				timedOut: false,
+				outputTail: "install failed",
+			});
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+					if (command[0] === "rev-parse" && command[1] === "--git-common-dir")
+						return { stdout: ".git\n", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "HEAD") throw createGitError("fatal: no worktree");
+					if (command[0] === "rev-parse" && command[1] === "--verify")
+						return { stdout: "base-commit\n", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "prune") return { stdout: "", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "add") {
+						const worktreePath = command[3];
+						if (!worktreePath) throw createGitError("fatal: missing worktree path");
+						mkdirSync(worktreePath, { recursive: true });
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "worktree" && command[1] === "remove") return { stdout: "", stderr: "" };
+					if (command[0] === "ls-files") return { stdout: "", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "--git-path")
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					throw createGitError(`Unhandled git command in ${cwd}: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-block",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			const worktreePath = join(worktreesHomePath, "task-block", "repo");
+			expect(ensured).toMatchObject({ ok: false, error: expect.stringContaining("install failed") });
+			expect(existsSync(worktreePath)).toBe(false);
 		} finally {
 			cleanup();
 		}

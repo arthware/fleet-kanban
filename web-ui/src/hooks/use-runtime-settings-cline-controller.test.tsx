@@ -88,6 +88,7 @@ function createRuntimeConfigResponse(
 			},
 		],
 		shortcuts: [],
+		worktree: {},
 		clineProviderSettings: {
 			providerId: "cline",
 			modelId: "claude-sonnet-4-6",

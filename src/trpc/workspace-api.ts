@@ -362,6 +362,7 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 			return await ensureTaskWorktreeIfDoesntExist({
 				cwd: workspaceScope.workspacePath,
 				taskId: body.taskId,
+				workspaceId: workspaceScope.workspaceId,
 				baseRef: body.baseRef,
 			});
 		},

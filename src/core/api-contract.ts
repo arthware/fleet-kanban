@@ -1091,6 +1091,16 @@ export const runtimeAgentDefinitionSchema = z.object({
 });
 export type RuntimeAgentDefinition = z.infer<typeof runtimeAgentDefinitionSchema>;
 
+export const runtimeWorktreePostCreateFailureModeSchema = z.enum(["warn", "block"]);
+export type RuntimeWorktreePostCreateFailureMode = z.infer<typeof runtimeWorktreePostCreateFailureModeSchema>;
+
+export const runtimeWorktreeConfigSchema = z.object({
+	postCreateCommand: z.union([z.string(), z.array(z.string())]).optional(),
+	postCreateTimeoutMs: z.number().int().positive().optional(),
+	postCreateFailureMode: runtimeWorktreePostCreateFailureModeSchema.optional(),
+});
+export type RuntimeWorktreeConfig = z.infer<typeof runtimeWorktreeConfigSchema>;
+
 export const runtimeConfigResponseSchema = z.object({
 	selectedAgentId: runtimeAgentIdSchema,
 	selectedShortcutLabel: z.string().nullable(),
@@ -1103,6 +1113,7 @@ export const runtimeConfigResponseSchema = z.object({
 	detectedCommands: z.array(z.string()),
 	agents: z.array(runtimeAgentDefinitionSchema),
 	shortcuts: z.array(runtimeProjectShortcutSchema),
+	worktree: runtimeWorktreeConfigSchema,
 	clineProviderSettings: runtimeClineProviderSettingsSchema,
 	commitPromptTemplate: z.string(),
 	openPrPromptTemplate: z.string(),
@@ -1116,6 +1127,7 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	selectedShortcutLabel: z.string().nullable().optional(),
 	agentAutonomousModeEnabled: z.boolean().optional(),
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
+	worktree: runtimeWorktreeConfigSchema.optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),
 	openPrPromptTemplate: z.string().optional(),

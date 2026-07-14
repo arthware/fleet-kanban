@@ -300,7 +300,8 @@ export function ProjectNavigationPanel({
 				<div className="flex items-center justify-between">
 					<div className="font-semibold text-base flex items-baseline gap-1.5">
 						<ClineIcon size={18} className="text-text-primary shrink-0 self-center" />
-						fleet production line <span className="text-text-secondary font-normal text-xs">{__APP_COMMIT__}</span>
+						fleet production line{" "}
+						<span className="text-text-secondary font-normal text-xs">{__APP_COMMIT__}</span>
 					</div>
 					{isMobile ? (
 						<Button
