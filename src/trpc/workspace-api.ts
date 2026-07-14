@@ -18,12 +18,13 @@ import {
 	parseDesignDocRequest,
 	parseGitCheckoutRequest,
 	parseTaskDurabilityRequest,
+	parseTaskFileRequest,
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
-import { readTaskDesignDoc } from "../workspace/design-doc";
+import { readFileWithinTaskWorktree, readTaskDesignDoc } from "../workspace/design-doc";
 import {
 	createEmptyWorkspaceChangesResponse,
 	getWorkspaceChanges,
@@ -398,6 +399,19 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 				cwd: workspaceScope.workspacePath,
 				taskId: normalizedInput.taskId,
 				baseRef: normalizedInput.baseRef,
+			});
+		},
+		loadTaskFile: async (workspaceScope, input) => {
+			const body = parseTaskFileRequest(input);
+			const card = await findBoardCard(deps, workspaceScope, body.taskId);
+			if (!card) {
+				return { exists: false, path: body.path };
+			}
+			return await readFileWithinTaskWorktree({
+				projectRoot: workspaceScope.workspacePath,
+				taskId: body.taskId,
+				baseRef: card.baseRef,
+				path: body.path,
 			});
 		},
 		searchFiles: async (workspaceScope, input) => {

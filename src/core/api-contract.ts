@@ -73,6 +73,22 @@ export const runtimeDesignDocResponseSchema = z.object({
 });
 export type RuntimeDesignDocResponse = z.infer<typeof runtimeDesignDocResponseSchema>;
 
+export const runtimeTaskFileRequestSchema = z.object({
+	taskId: z.string(),
+	path: z.string(),
+});
+export type RuntimeTaskFileRequest = z.infer<typeof runtimeTaskFileRequestSchema>;
+
+export const runtimeTaskFileResponseSchema = z.object({
+	exists: z.boolean(),
+	path: z.string().optional(),
+	content: z.string().optional(),
+	tooLarge: z.boolean().optional(),
+	binary: z.boolean().optional(),
+	sizeBytes: z.number().int().nonnegative().optional(),
+});
+export type RuntimeTaskFileResponse = z.infer<typeof runtimeTaskFileResponseSchema>;
+
 export const runtimeSlashCommandSchema = z.object({
 	name: z.string(),
 	instructions: z.string(),

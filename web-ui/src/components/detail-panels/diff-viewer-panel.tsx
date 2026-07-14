@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, Command, CornerDownLeft, MessageSquare, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Command, CornerDownLeft, FileText, MessageSquare, X } from "lucide-react";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
+import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
 import {
 	buildDisplayItems,
 	buildHighlightedLineMap,
@@ -16,7 +17,9 @@ import {
 	useIncrementalExpand,
 } from "@/components/shared/diff-renderer";
 import { Button } from "@/components/ui/button";
-import type { RuntimeWorkspaceFileChange } from "@/runtime/types";
+import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
+import type { RuntimeTaskFileResponse, RuntimeWorkspaceFileChange } from "@/runtime/types";
+import { useTrpcQuery } from "@/runtime/use-trpc-query";
 import { buildFileTree } from "@/utils/file-tree";
 import { isBinaryFilePath } from "@/utils/is-binary-file-path";
 import { isMacPlatform } from "@/utils/platform";
@@ -42,6 +45,7 @@ export interface DiffLineComment {
 }
 
 export type DiffViewMode = "unified" | "split";
+type FileBodyMode = "diff" | "file";
 
 function commentKey(filePath: string, lineNumber: number, variant: DiffLineComment["variant"]): string {
 	return `${filePath}:${variant}:${lineNumber}`;
@@ -502,9 +506,73 @@ function SplitDiff({
 	);
 }
 
+function isMarkdownPath(path: string): boolean {
+	const normalized = path.toLowerCase();
+	return normalized.endsWith(".md") || normalized.endsWith(".mdx");
+}
+
+function TaskFileContent({
+	workspaceId,
+	taskId,
+	path,
+}: {
+	workspaceId: string | null;
+	taskId: string | null;
+	path: string;
+}): React.ReactElement {
+	const fileQuery = useTrpcQuery<RuntimeTaskFileResponse>({
+		enabled: Boolean(workspaceId && taskId),
+		queryFn: useCallback(async () => {
+			const trpc = getRuntimeTrpcClient(workspaceId);
+			return await trpc.workspace.getTaskFile.query({
+				taskId: taskId ?? "",
+				path,
+			});
+		}, [path, taskId, workspaceId]),
+	});
+
+	if (!workspaceId || !taskId) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">File content is unavailable.</div>;
+	}
+	if (fileQuery.isLoading) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">Loading file...</div>;
+	}
+	if (fileQuery.isError) {
+		return <div className="px-3 py-4 text-sm text-status-red">Could not load file content.</div>;
+	}
+	const file = fileQuery.data;
+	if (!file?.exists) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">File does not exist in the task worktree.</div>;
+	}
+	if (file.tooLarge) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">File is too large to preview.</div>;
+	}
+	if (file.binary) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">Binary files cannot be previewed.</div>;
+	}
+	const content = file.content ?? "";
+	if (!content.trim()) {
+		return <div className="px-3 py-4 text-sm text-text-secondary">File is empty.</div>;
+	}
+	if (isMarkdownPath(path)) {
+		return (
+			<div className="min-w-0 overflow-auto px-4 py-3">
+				<ClineMarkdownContent content={content} />
+			</div>
+		);
+	}
+	return (
+		<pre className="min-w-0 overflow-auto px-3 py-2 font-mono text-xs leading-5 whitespace-pre text-text-primary">
+			{content}
+		</pre>
+	);
+}
+
 export function DiffViewerPanel({
 	workspaceFiles,
 	selectedPath,
+	workspaceId = null,
+	taskId = null,
 	onSelectedPathChange,
 	onAddToTerminal,
 	onSendToTerminal,
@@ -514,6 +582,8 @@ export function DiffViewerPanel({
 }: {
 	workspaceFiles: RuntimeWorkspaceFileChange[] | null;
 	selectedPath: string | null;
+	workspaceId?: string | null;
+	taskId?: string | null;
 	onSelectedPathChange: (path: string) => void;
 	onAddToTerminal?: (formatted: string) => void;
 	onSendToTerminal?: (formatted: string) => void;
@@ -522,6 +592,7 @@ export function DiffViewerPanel({
 	viewMode?: DiffViewMode;
 }): React.ReactElement {
 	const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
+	const [fileBodyModes, setFileBodyModes] = useState<Record<string, FileBodyMode>>({});
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const sectionElementsRef = useRef<Record<string, HTMLElement | null>>({});
 	const scrollSyncSelectionRef = useRef<{ path: string; at: number } | null>(null);
@@ -837,6 +908,7 @@ export function DiffViewerPanel({
 					>
 						{groupedByPath.map((group) => {
 							const isExpanded = expandedPaths[group.path] ?? true;
+							const fileBodyMode = fileBodyModes[group.path] ?? "diff";
 							const hasBinaryEntry = group.entries.some((entry) => entry.isBinary);
 							return (
 								<section
@@ -846,84 +918,109 @@ export function DiffViewerPanel({
 									}}
 									style={{ marginTop: 12 }}
 								>
-									<button
-										type="button"
-										className="kb-diff-file-header flex w-full items-center gap-2 rounded-t-md border border-border bg-surface-1 px-2 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-3 active:bg-surface-4 cursor-pointer"
-										aria-expanded={isExpanded}
+									<div
+										className="kb-diff-file-header flex w-full items-center gap-2 rounded-t-md border border-border bg-surface-1 px-2 py-1.5 text-[12px] text-text-primary"
 										aria-current={selectedPath === group.path ? "true" : undefined}
-										onClick={() => {
-											const container = scrollContainerRef.current;
-											const sectionEl = sectionElementsRef.current[group.path];
-											const previousTop = sectionEl?.getBoundingClientRect().top ?? null;
-											const nextExpanded = !(expandedPaths[group.path] ?? true);
-											suppressScrollSyncUntilRef.current = Date.now() + 250;
-											setExpandedPaths((prev) => ({
-												...prev,
-												[group.path]: nextExpanded,
-											}));
-											requestAnimationFrame(() => {
-												if (previousTop == null || !container || !sectionEl) {
-													return;
-												}
-												const nextTop = sectionEl.getBoundingClientRect().top;
-												container.scrollTop += nextTop - previousTop;
-											});
-										}}
 									>
-										{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-										<span className="truncate" title={group.path} style={{ flex: "1 1 auto", minWidth: 0 }}>
-											{truncatePathMiddle(group.path)}
-										</span>
-										<span style={{ flexShrink: 0 }}>
-											<span className="text-status-green">+{group.added}</span>{" "}
-											<span className="text-status-red">-{group.removed}</span>
-											{group.added === 0 && group.removed === 0 && hasBinaryEntry ? (
-												<span className="ml-2 text-text-tertiary">Binary</span>
-											) : null}
-										</span>
-									</button>
+										<button
+											type="button"
+											className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+											aria-expanded={isExpanded}
+											onClick={() => {
+												const container = scrollContainerRef.current;
+												const sectionEl = sectionElementsRef.current[group.path];
+												const previousTop = sectionEl?.getBoundingClientRect().top ?? null;
+												const nextExpanded = !(expandedPaths[group.path] ?? true);
+												suppressScrollSyncUntilRef.current = Date.now() + 250;
+												setExpandedPaths((prev) => ({
+													...prev,
+													[group.path]: nextExpanded,
+												}));
+												requestAnimationFrame(() => {
+													if (previousTop == null || !container || !sectionEl) {
+														return;
+													}
+													const nextTop = sectionEl.getBoundingClientRect().top;
+													container.scrollTop += nextTop - previousTop;
+												});
+											}}
+										>
+											{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+											<span
+												className="truncate"
+												title={group.path}
+												style={{ flex: "1 1 auto", minWidth: 0 }}
+											>
+												{truncatePathMiddle(group.path)}
+											</span>
+											<span style={{ flexShrink: 0 }}>
+												<span className="text-status-green">+{group.added}</span>{" "}
+												<span className="text-status-red">-{group.removed}</span>
+												{group.added === 0 && group.removed === 0 && hasBinaryEntry ? (
+													<span className="ml-2 text-text-tertiary">Binary</span>
+												) : null}
+											</span>
+										</button>
+										<Button
+											variant="ghost"
+											size="sm"
+											icon={<FileText size={14} />}
+											onClick={() => {
+												setFileBodyModes((prev) => ({
+													...prev,
+													[group.path]: fileBodyMode === "file" ? "diff" : "file",
+												}));
+											}}
+										>
+											{fileBodyMode === "file" ? "View diff" : "View file"}
+										</Button>
+									</div>
 									{isExpanded ? (
 										<div
 											className="rounded-b-md border-x border-b border-border bg-surface-1"
 											style={{ overflow: "hidden" }}
 										>
-											{group.entries.map((entry) => (
-												<div key={entry.id} className="kb-diff-entry">
-													{entry.isBinary ? null : viewMode === "split" ? (
-														<SplitDiff
-															path={group.path}
-															oldText={entry.oldText}
-															newText={entry.newText}
-															comments={comments}
-															onAddComment={(lineNumber, lineText, variant) =>
-																handleAddComment(group.path, lineNumber, lineText, variant)
-															}
-															onUpdateComment={(lineNumber, variant, text) =>
-																handleUpdateComment(group.path, lineNumber, variant, text)
-															}
-															onDeleteComment={(lineNumber, variant) =>
-																handleDeleteComment(group.path, lineNumber, variant)
-															}
-														/>
-													) : (
-														<UnifiedDiff
-															path={group.path}
-															oldText={entry.oldText}
-															newText={entry.newText}
-															comments={comments}
-															onAddComment={(lineNumber, lineText, variant) =>
-																handleAddComment(group.path, lineNumber, lineText, variant)
-															}
-															onUpdateComment={(lineNumber, variant, text) =>
-																handleUpdateComment(group.path, lineNumber, variant, text)
-															}
-															onDeleteComment={(lineNumber, variant) =>
-																handleDeleteComment(group.path, lineNumber, variant)
-															}
-														/>
-													)}
-												</div>
-											))}
+											{fileBodyMode === "file" ? (
+												<TaskFileContent workspaceId={workspaceId} taskId={taskId} path={group.path} />
+											) : (
+												group.entries.map((entry) => (
+													<div key={entry.id} className="kb-diff-entry">
+														{entry.isBinary ? null : viewMode === "split" ? (
+															<SplitDiff
+																path={group.path}
+																oldText={entry.oldText}
+																newText={entry.newText}
+																comments={comments}
+																onAddComment={(lineNumber, lineText, variant) =>
+																	handleAddComment(group.path, lineNumber, lineText, variant)
+																}
+																onUpdateComment={(lineNumber, variant, text) =>
+																	handleUpdateComment(group.path, lineNumber, variant, text)
+																}
+																onDeleteComment={(lineNumber, variant) =>
+																	handleDeleteComment(group.path, lineNumber, variant)
+																}
+															/>
+														) : (
+															<UnifiedDiff
+																path={group.path}
+																oldText={entry.oldText}
+																newText={entry.newText}
+																comments={comments}
+																onAddComment={(lineNumber, lineText, variant) =>
+																	handleAddComment(group.path, lineNumber, lineText, variant)
+																}
+																onUpdateComment={(lineNumber, variant, text) =>
+																	handleUpdateComment(group.path, lineNumber, variant, text)
+																}
+																onDeleteComment={(lineNumber, variant) =>
+																	handleDeleteComment(group.path, lineNumber, variant)
+																}
+															/>
+														)}
+													</div>
+												))
+											)}
 										</div>
 									) : null}
 								</section>

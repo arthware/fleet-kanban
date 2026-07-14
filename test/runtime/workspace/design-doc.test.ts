@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	readFileWithinRoot,
 	readTaskDesignDoc,
 	resolveDesignDocRefCandidates,
 	sanitizeDesignDocRef,
@@ -78,5 +79,34 @@ describe("design doc resolution", () => {
 
 		await mkdir(join(projectRoot, "docs", "design"), { recursive: true });
 		await expect(readTaskDesignDoc({ projectRoot, taskId: "05506" })).resolves.toEqual({ exists: false });
+	});
+
+	it("given a requested path that escapes the worktree, when the file read runs, then it is rejected", async () => {
+		// Given
+		const projectRoot = await makeProjectRoot();
+		const worktreeRoot = join(projectRoot, "worktree");
+		await mkdir(worktreeRoot, { recursive: true });
+		await writeFile(join(projectRoot, "outside.txt"), "outside");
+
+		// When
+		const result = readFileWithinRoot({
+			root: worktreeRoot,
+			path: "../outside.txt",
+		});
+
+		// Then
+		await expect(result).rejects.toThrow("Invalid task file path.");
+	});
+
+	it("rejects a symlink that resolves outside the worktree", async () => {
+		const projectRoot = await makeProjectRoot();
+		const worktreeRoot = join(projectRoot, "worktree");
+		await mkdir(worktreeRoot, { recursive: true });
+		await writeFile(join(projectRoot, "outside.txt"), "outside");
+		await symlink(join(projectRoot, "outside.txt"), join(worktreeRoot, "linked.txt"));
+
+		await expect(readFileWithinRoot({ root: worktreeRoot, path: "linked.txt" })).rejects.toThrow(
+			"Task file path escapes the worktree.",
+		);
 	});
 });

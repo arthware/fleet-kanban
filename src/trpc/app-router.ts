@@ -79,6 +79,8 @@ import type {
 	RuntimeTaskChatSendResponse,
 	RuntimeTaskDurabilityRequest,
 	RuntimeTaskDurabilityResponse,
+	RuntimeTaskFileRequest,
+	RuntimeTaskFileResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
@@ -178,6 +180,8 @@ import {
 	runtimeTaskChatSendResponseSchema,
 	runtimeTaskDurabilityRequestSchema,
 	runtimeTaskDurabilityResponseSchema,
+	runtimeTaskFileRequestSchema,
+	runtimeTaskFileResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -358,6 +362,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskWorkspaceInfoRequest,
 		) => Promise<RuntimeTaskWorkspaceInfoResponse>;
+		loadTaskFile: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskFileRequest,
+		) => Promise<RuntimeTaskFileResponse>;
 		searchFiles: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorkspaceFileSearchRequest,
@@ -697,6 +705,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeTaskWorkspaceInfoResponseSchema)
 			.query(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.loadTaskContext(ctx.workspaceScope, input);
+			}),
+		getTaskFile: workspaceProcedure
+			.input(runtimeTaskFileRequestSchema)
+			.output(runtimeTaskFileResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.loadTaskFile(ctx.workspaceScope, input);
 			}),
 		searchFiles: workspaceProcedure
 			.input(runtimeWorkspaceFileSearchRequestSchema)

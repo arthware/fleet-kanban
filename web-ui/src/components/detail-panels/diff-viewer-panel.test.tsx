@@ -5,10 +5,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import type { RuntimeWorkspaceFileChange } from "@/runtime/types";
 
+const trpcMocks = vi.hoisted(() => ({
+	getTaskFile: vi.fn(),
+}));
+
 const hotkeyRegistrations: Array<{
 	keys: string;
 	callback: (event: KeyboardEvent) => void;
 }> = [];
+
+vi.mock("@/runtime/trpc-client", () => ({
+	getRuntimeTrpcClient: () => ({
+		workspace: {
+			getTaskFile: {
+				query: trpcMocks.getTaskFile,
+			},
+		},
+	}),
+}));
 
 vi.mock("react-hotkeys-hook", () => ({
 	useHotkeys: (keys: string, callback: (event: KeyboardEvent) => void) => {
@@ -37,6 +51,12 @@ describe("DiffViewerPanel", () => {
 
 	beforeEach(() => {
 		hotkeyRegistrations.length = 0;
+		trpcMocks.getTaskFile.mockReset();
+		trpcMocks.getTaskFile.mockResolvedValue({
+			exists: true,
+			path: "src/example.ts",
+			content: "const value = 2;\n",
+		});
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -266,6 +286,193 @@ describe("DiffViewerPanel", () => {
 		expect(container.textContent).toContain("assets/logo.png");
 		expect(container.textContent).toContain("Binary");
 		expect(container.querySelector(".kb-diff-row")).toBeNull();
+	});
+
+	it('given a file in the diff header, when "View file" is clicked, then the panel shows the file content and not the diff rows', async () => {
+		// Given
+		const workspaceFiles: RuntimeWorkspaceFileChange[] = [
+			{
+				path: "src/example.ts",
+				status: "modified",
+				additions: 1,
+				deletions: 1,
+				oldText: "const value = 1;\n",
+				newText: "const value = 2;\n",
+			},
+		];
+		trpcMocks.getTaskFile.mockResolvedValue({
+			exists: true,
+			path: "src/example.ts",
+			content: "const fullFile = true;\nconst unchanged = true;\n",
+		});
+
+		await act(async () => {
+			root.render(
+				<DiffViewerPanel
+					workspaceFiles={workspaceFiles}
+					selectedPath={null}
+					workspaceId="workspace-1"
+					taskId="task-1"
+					onSelectedPathChange={() => {}}
+					comments={new Map<string, DiffLineComment>()}
+					onCommentsChange={() => {}}
+				/>,
+			);
+		});
+
+		// When
+		const viewFileButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "View file",
+		);
+		await act(async () => {
+			viewFileButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+			await Promise.resolve();
+		});
+
+		// Then
+		expect(trpcMocks.getTaskFile).toHaveBeenCalledWith({ taskId: "task-1", path: "src/example.ts" });
+		expect(container.textContent).toContain("const fullFile = true;");
+		expect(container.querySelector(".kb-diff-row")).toBeNull();
+	});
+
+	it("given a .md file in file mode, when it renders, then it uses the Markdown renderer rather than raw text", async () => {
+		// Given
+		const workspaceFiles: RuntimeWorkspaceFileChange[] = [
+			{
+				path: "docs/design/task-1-plan.md",
+				status: "modified",
+				additions: 2,
+				deletions: 0,
+				oldText: "# Old\n",
+				newText: "# New\n- item\n",
+			},
+		];
+		trpcMocks.getTaskFile.mockResolvedValue({
+			exists: true,
+			path: "docs/design/task-1-plan.md",
+			content: "# Full Plan\n\n- first\n- second\n",
+		});
+
+		await act(async () => {
+			root.render(
+				<DiffViewerPanel
+					workspaceFiles={workspaceFiles}
+					selectedPath={null}
+					workspaceId="workspace-1"
+					taskId="task-1"
+					onSelectedPathChange={() => {}}
+					comments={new Map<string, DiffLineComment>()}
+					onCommentsChange={() => {}}
+				/>,
+			);
+		});
+
+		// When
+		const viewFileButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "View file",
+		);
+		await act(async () => {
+			viewFileButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+			await Promise.resolve();
+		});
+
+		// Then
+		expect(container.querySelector("h1")?.textContent).toBe("Full Plan");
+		expect(container.querySelectorAll("li")).toHaveLength(2);
+		expect(container.querySelector("pre")).toBeNull();
+	});
+
+	it("given a non-markdown file in file mode, when it renders, then it shows plain file text", async () => {
+		// Given
+		const workspaceFiles: RuntimeWorkspaceFileChange[] = [
+			{
+				path: "src/example.ts",
+				status: "modified",
+				additions: 1,
+				deletions: 1,
+				oldText: "const value = 1;\n",
+				newText: "const value = 2;\n",
+			},
+		];
+		trpcMocks.getTaskFile.mockResolvedValue({
+			exists: true,
+			path: "src/example.ts",
+			content: "export const plain = true;\n",
+		});
+
+		await act(async () => {
+			root.render(
+				<DiffViewerPanel
+					workspaceFiles={workspaceFiles}
+					selectedPath={null}
+					workspaceId="workspace-1"
+					taskId="task-1"
+					onSelectedPathChange={() => {}}
+					comments={new Map<string, DiffLineComment>()}
+					onCommentsChange={() => {}}
+				/>,
+			);
+		});
+
+		// When
+		const viewFileButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "View file",
+		);
+		await act(async () => {
+			viewFileButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+			await Promise.resolve();
+		});
+
+		// Then
+		expect(container.querySelector("pre")?.textContent).toContain("export const plain = true;");
+		expect(container.querySelector("h1")).toBeNull();
+	});
+
+	it('given a file in file mode, when "View diff" is clicked, then the diff is shown again', async () => {
+		// Given
+		const workspaceFiles: RuntimeWorkspaceFileChange[] = [
+			{
+				path: "src/example.ts",
+				status: "modified",
+				additions: 1,
+				deletions: 1,
+				oldText: "const value = 1;\n",
+				newText: "const value = 2;\n",
+			},
+		];
+
+		await act(async () => {
+			root.render(
+				<DiffViewerPanel
+					workspaceFiles={workspaceFiles}
+					selectedPath={null}
+					workspaceId="workspace-1"
+					taskId="task-1"
+					onSelectedPathChange={() => {}}
+					comments={new Map<string, DiffLineComment>()}
+					onCommentsChange={() => {}}
+				/>,
+			);
+		});
+		const viewFileButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "View file",
+		);
+		await act(async () => {
+			viewFileButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+			await Promise.resolve();
+		});
+
+		// When
+		const viewDiffButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "View diff",
+		);
+		await act(async () => {
+			viewDiffButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		// Then
+		expect(container.querySelector(".kb-diff-row")).toBeInstanceOf(HTMLDivElement);
+		expect(container.textContent).not.toContain("const fullFile = true;");
 	});
 
 	it("shows shortcut indicators on Add and Send", async () => {
