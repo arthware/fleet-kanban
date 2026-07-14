@@ -26,6 +26,7 @@ export interface RuntimeCreateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	skill?: string;
 	externalIssue?: RuntimeExternalIssue;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
@@ -40,6 +41,7 @@ export interface RuntimeUpdateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
+	skill?: string | null;
 	externalIssue?: RuntimeExternalIssue | null;
 	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
@@ -342,6 +344,7 @@ export function addTaskToColumn(
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
 		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
+		...(input.skill?.trim() ? { skill: input.skill.trim() } : {}),
 		...(externalIssue ? { externalIssue } : {}),
 		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,
@@ -682,6 +685,7 @@ export function updateTask(
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
 				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,
+				skill: input.skill === undefined ? card.skill : input.skill?.trim() || undefined,
 				externalIssue:
 					input.externalIssue === undefined
 						? cloneExternalIssue(card.externalIssue)

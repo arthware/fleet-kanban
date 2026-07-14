@@ -52,6 +52,7 @@ export interface BoardCard {
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	skill?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 	createdAt: number;

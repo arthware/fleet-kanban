@@ -42,6 +42,7 @@ task create --prompt "Fix the flaky test" --agent-id codex
 title: Add the widget            # optional — see "Title" below
 agent: codex                     # codex | claude (any configured agent id, or `default`)
 model: claude-haiku-4-5          # optional per-card model override
+skill: fleet-smoke               # optional Agent Skills / SKILL.md pointer
 base-ref: main                   # optional — defaults to the current branch
 auto-review: pr                  # pr | commit | off — DEFAULT pr (see below)
 plan: false                      # optional — start in plan mode (default false)
@@ -67,6 +68,7 @@ frontmatter is treated as a bare prompt.
 | `title`           | card title                       | Optional; derived from the body when omitted (see below). |
 | `agent`           | `--agent-id`                     | `default` clears the override (workspace default). |
 | `model`           | `--agent-model`                  | Per-card model for the CLI agent. |
+| `skill`           | `--skill`                        | Per-card Agent Skills / `SKILL.md` pointer; only the skill name is injected into the launch prompt. |
 | `base-ref`        | `--base-ref`                     | Defaults to the current branch. |
 | `auto-review`     | `--auto-review-enabled` + `--auto-review-mode` | `pr` / `commit` / `off`. |
 | `plan`            | `--start-in-plan-mode`           | Boolean. |

@@ -22,6 +22,7 @@ const KNOWN_FRONTMATTER_KEYS = [
 	"title",
 	"agent",
 	"model",
+	"skill",
 	"base-ref",
 	"auto-review",
 	"plan",
@@ -45,6 +46,7 @@ export interface ParsedTaskCard {
 	/** `undefined` = leave to default; `null` = explicit "default" (clear override). */
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string;
+	skill?: string;
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
@@ -215,6 +217,9 @@ export function parseTaskCardDocument(source: string): ParsedTaskCard {
 	if (data.model !== undefined) {
 		card.agentModel = expectString("model", data.model);
 	}
+	if (data.skill !== undefined) {
+		card.skill = expectString("skill", data.skill);
+	}
 	if (data["base-ref"] !== undefined) {
 		card.baseRef = expectString("base-ref", data["base-ref"]);
 	}
@@ -300,6 +305,7 @@ export interface TaskCardCreateFlags {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
+	skill?: string | null;
 	externalIssueRef?: string;
 }
 
@@ -312,6 +318,7 @@ export interface ResolvedTaskCardCreate {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	skill?: string;
 	externalIssueRef?: string;
 	links: string[];
 }
@@ -337,6 +344,7 @@ export function resolveTaskCardCreate(
 	// undefined for the create path, which has no separate clear semantics.
 	const agentId = pick(flags.agentId, card?.agentId) ?? undefined;
 	const agentModel = pick(flags.agentModel, card?.agentModel) ?? undefined;
+	const skill = pick(flags.skill, card?.skill) ?? undefined;
 	return {
 		title: pick(flags.title, card?.title),
 		prompt,
@@ -346,6 +354,7 @@ export function resolveTaskCardCreate(
 		autoReviewMode: pick(flags.autoReviewMode, card?.autoReviewMode),
 		agentId,
 		agentModel,
+		skill,
 		externalIssueRef: pick(flags.externalIssueRef, card?.externalIssueRef),
 		links: card?.links ?? [],
 	};

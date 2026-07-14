@@ -506,6 +506,83 @@ describe("createRuntimeApi startTaskSession", () => {
 		});
 	});
 
+	it("given a card with skill fleet-smoke, when it starts, then the launch prompt has the skill pointer", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+			applyTurnCheckpoint: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Implement the body.",
+				skill: "fleet-smoke",
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: 'Use the "fleet-smoke" skill for this task.\n\n---\n\nImplement the body.',
+			}),
+		);
+	});
+
+	it("given a card with no skill field, when it starts, then the prompt is the body verbatim", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+			applyTurnCheckpoint: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Implement the body.",
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: "Implement the body.",
+			}),
+		);
+	});
+
 	it("routes cline start sessions to cline task session service", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 		agentRegistryMocks.resolveAgentCommand.mockReturnValue(null);

@@ -410,6 +410,7 @@ export function formatTaskRecord(
 		autoReviewMode: task.autoReviewMode ?? "commit",
 		...(task.agentId ? { agentId: task.agentId } : {}),
 		...(task.agentModel ? { agentModel: task.agentModel } : {}),
+		...(task.skill ? { skill: task.skill } : {}),
 		...(task.externalIssue ? { externalIssue: task.externalIssue } : {}),
 		...formatTaskClineSettings(task.clineSettings),
 		createdAt: task.createdAt,
@@ -442,6 +443,7 @@ export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepo
 		autoReviewMode: created.autoReviewMode ?? "commit",
 		...(created.agentId ? { agentId: created.agentId } : {}),
 		...(created.agentModel ? { agentModel: created.agentModel } : {}),
+		...(created.skill ? { skill: created.skill } : {}),
 		...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
 		...formatTaskClineSettings(created.clineSettings),
 	};
@@ -620,6 +622,7 @@ async function createTask(input: {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	skill?: string;
 	externalIssueRef?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
@@ -650,6 +653,7 @@ async function createTask(input: {
 				autoReviewMode: input.autoReviewMode,
 				agentId: input.agentId,
 				agentModel: input.agentModel,
+				skill: input.skill,
 				externalIssue,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
@@ -680,6 +684,7 @@ async function updateTaskCommand(input: {
 	autoReviewMode?: "commit" | "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
+	skill?: string | null;
 	externalIssueRef?: string | null;
 	clineProviderId?: string | null;
 	clineModelId?: string | null;
@@ -694,6 +699,7 @@ async function updateTaskCommand(input: {
 		input.autoReviewMode === undefined &&
 		input.agentId === undefined &&
 		input.agentModel === undefined &&
+		input.skill === undefined &&
 		input.externalIssueRef === undefined &&
 		input.clineProviderId === undefined &&
 		input.clineModelId === undefined &&
@@ -721,13 +727,16 @@ async function updateTaskCommand(input: {
 		if (!taskRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 		}
-		// baseRef/agentModel drive worktree creation and the CLI agent's launch
-		// args, both fixed once a task leaves backlog — changing them afterward
-		// wouldn't take effect and would be misleading, so reject rather than
+		// baseRef/agentModel/skill drive worktree creation and launch-time agent
+		// guidance, all fixed once a task leaves backlog. Changing them afterward
+		// would not take effect and would be misleading, so reject rather than
 		// silently ignore.
-		if ((input.baseRef !== undefined || input.agentModel !== undefined) && taskRecord.columnId !== "backlog") {
+		if (
+			(input.baseRef !== undefined || input.agentModel !== undefined || input.skill !== undefined) &&
+			taskRecord.columnId !== "backlog"
+		) {
 			throw new Error(
-				`Task "${taskId}" is in "${taskRecord.columnId}" — base-ref and agent-model can only be changed while a task is in backlog.`,
+				`Task "${taskId}" is in "${taskRecord.columnId}" — base-ref, agent-model, and skill can only be changed while a task is in backlog.`,
 			);
 		}
 		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
@@ -745,6 +754,7 @@ async function updateTaskCommand(input: {
 			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
 			agentId: input.agentId,
 			agentModel: input.agentModel,
+			skill: input.skill,
 			externalIssue,
 			clineSettings: nextTaskClineSettings,
 		});
@@ -876,6 +886,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			baseRef: task.baseRef,
 			agentId: task.agentId,
 			agentModel: task.agentModel,
+			skill: task.skill,
 			clineSettings: task.clineSettings,
 		});
 		if (!started.ok || !started.summary) {
@@ -1592,6 +1603,7 @@ export function registerTaskCommand(program: Command): void {
 			"--agent-model <id>",
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
+		.option("--skill <name>", "Per-card Agent Skills / SKILL.md pointer.")
 		.option("--quiet", "Print only the created task id.")
 		.option("--id-only", "Alias for --quiet.")
 		.option(
@@ -1624,6 +1636,7 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				skill?: string;
 				quiet?: boolean;
 				idOnly?: boolean;
 				externalIssue?: string;
@@ -1646,6 +1659,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
+							skill: parseOptionalStringOrDefault(options.skill),
 							externalIssueRef: options.externalIssue ?? options.issue,
 						});
 						const created = await createTask({
@@ -1659,6 +1673,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: resolved.autoReviewMode,
 							agentId: resolved.agentId,
 							agentModel: resolved.agentModel,
+							skill: resolved.skill,
 							externalIssueRef: resolved.externalIssueRef,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
@@ -1694,6 +1709,7 @@ export function registerTaskCommand(program: Command): void {
 			"--agent-model <id>",
 			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',
 		)
+		.option("--skill <name>", 'Per-card Agent Skills / SKILL.md pointer. Use "default" to clear.')
 		.option(
 			"--external-issue <ref>",
 			'External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Use "default" to clear. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.',
@@ -1720,6 +1736,7 @@ export function registerTaskCommand(program: Command): void {
 				autoReviewMode?: "commit" | "pr";
 				agentId?: string;
 				agentModel?: string;
+				skill?: string;
 				externalIssue?: string;
 				issue?: string;
 				clineProvider?: string;
@@ -1740,6 +1757,7 @@ export function registerTaskCommand(program: Command): void {
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
+							skill: parseOptionalStringOrDefault(options.skill),
 							externalIssueRef: parseOptionalStringOrDefault(options.externalIssue ?? options.issue),
 							clineProviderId: parseOptionalStringOrDefault(options.clineProvider),
 							clineModelId: parseOptionalStringOrDefault(options.clineModel),

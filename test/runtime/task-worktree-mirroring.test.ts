@@ -1,6 +1,15 @@
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
-import { mirrorIgnoredPath } from "../../src/workspace/task-worktree";
+import {
+	ensureWorktreeSkillsDirectory,
+	mirrorIgnoredPath,
+	resolveCanonicalSkillsDir,
+} from "../../src/workspace/task-worktree";
 
 function createErrnoError(code: string): NodeJS.ErrnoException {
 	const error = new Error(code) as NodeJS.ErrnoException;
@@ -64,5 +73,83 @@ describe("mirrorIgnoredPath", () => {
 				createSymlink,
 			}),
 		).resolves.toBe("skipped");
+	});
+});
+
+describe("worktree skills directory placement", () => {
+	async function createSandbox(): Promise<{ root: string; cleanup: () => void }> {
+		const root = await mkdtemp(join(tmpdir(), "kanban-worktree-skills-"));
+		return {
+			root,
+			cleanup: () => {
+				rmSync(root, { recursive: true, force: true });
+			},
+		};
+	}
+
+	it("given a fresh worktree is created, when setup runs, then .agents/skills resolves to the canonical skills dir", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const worktreePath = join(root, "worktree");
+			mkdirSync(canonicalSkillsDir, { recursive: true });
+			mkdirSync(worktreePath, { recursive: true });
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath,
+				canonicalSkillsDir,
+			});
+
+			expect(result).toBe("linked");
+			expect(realpathSync(join(worktreePath, ".agents", "skills"))).toBe(realpathSync(canonicalSkillsDir));
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("given a worktree that already has its own .agents/skills, when setup runs, then it is not clobbered", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const worktreeSkillsDir = join(root, "worktree", ".agents", "skills");
+			mkdirSync(canonicalSkillsDir, { recursive: true });
+			mkdirSync(worktreeSkillsDir, { recursive: true });
+			writeFileSync(join(worktreeSkillsDir, "owned.txt"), "project-owned\n", "utf8");
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath: join(root, "worktree"),
+				canonicalSkillsDir,
+			});
+
+			expect(result).toBe("existing");
+			expect(lstatSync(worktreeSkillsDir).isDirectory()).toBe(true);
+			expect(readFileSync(join(worktreeSkillsDir, "owned.txt"), "utf8")).toBe("project-owned\n");
+			expect(realpathSync(worktreeSkillsDir)).not.toBe(realpathSync(canonicalSkillsDir));
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("given the canonical skills dir cannot be resolved, when setup runs, then no skills link is created and no throw occurs", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const worktreePath = join(root, "worktree");
+			mkdirSync(worktreePath, { recursive: true });
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath,
+				resolveCanonicalSkillsDir: async () => null,
+			});
+
+			expect(result).toBe("missing_canonical");
+			await expect(
+				resolveCanonicalSkillsDir({
+					moduleDir: join(root, "legacy-build"),
+					pathExists: async () => false,
+				}),
+			).resolves.toBeNull();
+		} finally {
+			cleanup();
+		}
 	});
 });
