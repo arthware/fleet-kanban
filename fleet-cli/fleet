@@ -17,7 +17,7 @@
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
 #   fleet service [start|stop|restart [--build]|status]   run the board under launchd (--build = rebuild source, then reload)
 #   fleet kanban daemon [install|uninstall|status]          DEPRECATED synonym for `fleet service`
-#   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands
+#   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands in tracked <project>/fleet/xtools/ (legacy .fleet/xtools supported)
 set -euo pipefail
 # resolve through symlinks so DIR is the real tools/fleet dir, not ~/.local/bin
 SOURCE="${BASH_SOURCE[0]}"
@@ -1007,22 +1007,29 @@ fleet agent implement <ENG-ID>
 
 fleet xtools [<name> [args]]
     Your own ad-hoc commands. `fleet xtools` lists them; `fleet xtools new <name> [--py]`
-    scaffolds an executable stub in the project's .fleet/xtools/ (committed with the repo);
-    edit it, then `fleet xtools <name>` runs it with FLEET_DIR/FLEET_CLINE_HOME/
-    FLEET_KANBAN_URL/FLEET_KANBAN_PORT exported. Build your own automation when a task
-    repeats — a broken tool can't break the core CLI.
+    scaffolds an executable stub in the project's tracked fleet/xtools/ (travels with
+    the repo; legacy .fleet/xtools/ is still resolved); edit it, then `fleet xtools
+    <name>` runs it with FLEET_DIR/FLEET_CLINE_HOME/FLEET_KANBAN_URL/FLEET_KANBAN_PORT
+    exported. Build your own automation when a task repeats — a broken tool can't
+    break the core CLI.
 EOF
 }
 
 # --- xtools: agent-authored ad-hoc automation --------------------------------
 # The architect extends the CLI without touching core code: each tool is a
-# standalone executable in <project>/.fleet/xtools/ (committed with the project)
-# or ~/.config/fleet/xtools/ (shared). `fleet xtools <name> [args]` execs it with
-# the board context wired up — FLEET_DIR / FLEET_CLINE_HOME / FLEET_KANBAN_URL /
+# standalone executable in <project>/fleet/xtools/ (tracked, travels with the
+# repo), <project>/.fleet/xtools/ (legacy back-compat), or
+# ~/.config/fleet/xtools/ (shared). `fleet xtools <name> [args]` execs it with the
+# board context wired up — FLEET_DIR / FLEET_CLINE_HOME / FLEET_KANBAN_URL /
 # FLEET_KANBAN_PORT are exported, and `fleet` itself is on PATH to call back into.
 # Isolated by design: a broken tool breaks only itself, never the core CLI.
-_xtools_dirs() {  # project dir first (shadows global), then global fallback
-  printf '%s\n' "$CFG_DIR/xtools"
+_xtools_dirs() {  # tracked project dir first, legacy project dir, then global fallback
+  if [ "$CFG_DIR" != "$GLOBAL_DIR" ]; then
+    local project_root
+    project_root="$(dirname "$CFG_DIR")"
+    printf '%s\n' "$project_root/fleet/xtools"
+    printf '%s\n' "$CFG_DIR/xtools"
+  fi
   [ "$CFG_DIR" != "$GLOBAL_DIR" ] && printf '%s\n' "$GLOBAL_DIR/xtools"
   return 0
 }
@@ -1064,7 +1071,9 @@ xtools_new() {
   local name="${1:-}" lang="bash"; shift || true
   case "${1:-}" in --py|--python) lang="python";; esac
   _xtools_valid_name "$name" || { dim "usage: fleet xtools new <name> [--py]  (name: letters/digits/_/-)"; return 1; }
-  local dir="$CFG_DIR/xtools" f; mkdir -p "$dir"; f="$dir/$name"
+  local existing dir f
+  existing="$(_xtools_find "$name")" && { dim "already exists: $existing"; return 1; }
+  dir="$(dirname "$CFG_DIR")/fleet/xtools"; mkdir -p "$dir"; f="$dir/$name"
   [ -e "$f" ] && { dim "already exists: $f"; return 1; }
   if [ "$lang" = python ]; then
     cat >"$f" <<'PY'
