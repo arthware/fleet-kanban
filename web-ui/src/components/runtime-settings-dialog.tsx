@@ -48,6 +48,8 @@ import type {
 	RuntimeClineMcpServerAuthStatus,
 	RuntimeConfigResponse,
 	RuntimeProjectShortcut,
+	RuntimeWorktreeConfig,
+	RuntimeWorktreePostCreateFailureMode,
 } from "@/runtime/types";
 import { useRuntimeConfig } from "@/runtime/use-runtime-config";
 import {
@@ -89,6 +91,74 @@ const GIT_PROMPT_VARIANT_OPTIONS: Array<{ value: TaskGitAction; label: string }>
 	{ value: "commit", label: "Commit" },
 	{ value: "pr", label: "Make PR" },
 ];
+
+const WORKTREE_POST_CREATE_TIMEOUT_SECONDS_DEFAULT = 300;
+const WORKTREE_POST_CREATE_FAILURE_MODE_OPTIONS: Array<{ value: RuntimeWorktreePostCreateFailureMode; label: string }> =
+	[
+		{ value: "warn", label: "Warn" },
+		{ value: "block", label: "Block" },
+	];
+
+function formatWorktreeCommandForEditor(command: RuntimeWorktreeConfig["postCreateCommand"]): string {
+	if (Array.isArray(command)) {
+		return JSON.stringify(command);
+	}
+	return command ?? "";
+}
+
+function parseWorktreeCommandFromEditor(value: string): string | string[] | undefined {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	if (trimmed.startsWith("[")) {
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (
+				Array.isArray(parsed) &&
+				parsed.length > 0 &&
+				parsed.every((part): part is string => typeof part === "string" && part.trim().length > 0)
+			) {
+				return parsed.map((part) => part.trim());
+			}
+		} catch {
+			// Fall back to shell-form text.
+		}
+	}
+	return value;
+}
+
+function buildWorktreeConfigFromDraft(input: {
+	commandText: string;
+	timeoutSecondsText: string;
+	failureMode: RuntimeWorktreePostCreateFailureMode;
+}): RuntimeWorktreeConfig {
+	const postCreateCommand = parseWorktreeCommandFromEditor(input.commandText);
+	if (postCreateCommand === undefined) {
+		return {};
+	}
+	const parsedTimeoutSeconds = Number(input.timeoutSecondsText);
+	const postCreateTimeoutMs =
+		Number.isFinite(parsedTimeoutSeconds) && parsedTimeoutSeconds > 0
+			? Math.floor(parsedTimeoutSeconds * 1000)
+			: undefined;
+	return {
+		postCreateCommand,
+		...(postCreateTimeoutMs !== undefined &&
+		postCreateTimeoutMs !== WORKTREE_POST_CREATE_TIMEOUT_SECONDS_DEFAULT * 1000
+			? { postCreateTimeoutMs }
+			: {}),
+		...(input.failureMode !== "warn" ? { postCreateFailureMode: input.failureMode } : {}),
+	};
+}
+
+function normalizeWorktreeConfigForComparison(config: RuntimeWorktreeConfig): string {
+	return JSON.stringify({
+		command: config.postCreateCommand ?? null,
+		timeoutMs: config.postCreateCommand ? (config.postCreateTimeoutMs ?? 300_000) : null,
+		failureMode: config.postCreateCommand ? (config.postCreateFailureMode ?? "warn") : null,
+	});
+}
 
 export type RuntimeSettingsSection = "shortcuts";
 
@@ -381,6 +451,13 @@ export function RuntimeSettingsDialog({
 	const [draftThemeId, setDraftThemeId] = useState<ThemeId>(readStoredThemeId);
 	const [notificationPermission, setNotificationPermission] = useState<BrowserNotificationPermission>("unsupported");
 	const [shortcuts, setShortcuts] = useState<RuntimeProjectShortcut[]>([]);
+	const [worktreePostCreateCommand, setWorktreePostCreateCommand] = useState("");
+	const [worktreePostCreateTimeoutSeconds, setWorktreePostCreateTimeoutSeconds] = useState(
+		String(WORKTREE_POST_CREATE_TIMEOUT_SECONDS_DEFAULT),
+	);
+	const [worktreePostCreateFailureMode, setWorktreePostCreateFailureMode] =
+		useState<RuntimeWorktreePostCreateFailureMode>("warn");
+	const [worktreeAdvancedOpen, setWorktreeAdvancedOpen] = useState(false);
 	const [commitPromptTemplate, setCommitPromptTemplate] = useState("");
 	const [openPrPromptTemplate, setOpenPrPromptTemplate] = useState("");
 	const [selectedPromptVariant, setSelectedPromptVariant] = useState<TaskGitAction>("commit");
@@ -410,6 +487,8 @@ export function RuntimeSettingsDialog({
 	const selectedPromptPlaceholder =
 		selectedPromptVariant === "commit" ? "Commit prompt template" : "PR prompt template";
 	const bypassPermissionsCheckboxId = "runtime-settings-bypass-permissions";
+	const worktreePostCreateTimeoutInputId = "runtime-settings-worktree-post-create-timeout";
+	const worktreePostCreateFailureModeSelectId = "runtime-settings-worktree-post-create-failure-mode";
 	const refreshNotificationPermission = useCallback(() => {
 		setNotificationPermission(getBrowserNotificationPermission());
 	}, []);
@@ -451,6 +530,16 @@ export function RuntimeSettingsDialog({
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
 	const initialShortcuts = config?.shortcuts ?? [];
+	const initialWorktree = config?.worktree ?? {};
+	const worktreeDraft = useMemo(
+		() =>
+			buildWorktreeConfigFromDraft({
+				commandText: worktreePostCreateCommand,
+				timeoutSecondsText: worktreePostCreateTimeoutSeconds,
+				failureMode: worktreePostCreateFailureMode,
+			}),
+		[worktreePostCreateCommand, worktreePostCreateFailureMode, worktreePostCreateTimeoutSeconds],
+	);
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
 	const initialOpenPrPromptTemplate = config?.openPrPromptTemplate ?? "";
 	const clineSettings = useRuntimeSettingsClineController({
@@ -491,6 +580,11 @@ export function RuntimeSettingsDialog({
 			return true;
 		}
 		if (
+			normalizeWorktreeConfigForComparison(worktreeDraft) !== normalizeWorktreeConfigForComparison(initialWorktree)
+		) {
+			return true;
+		}
+		if (
 			normalizeTemplateForComparison(commitPromptTemplate) !==
 			normalizeTemplateForComparison(initialCommitPromptTemplate)
 		) {
@@ -514,10 +608,12 @@ export function RuntimeSettingsDialog({
 		initialSelectedAgentId,
 		initialShortcuts,
 		initialThemeId,
+		initialWorktree,
 		openPrPromptTemplate,
 		readyForReviewNotificationsEnabled,
 		selectedAgentId,
 		shortcuts,
+		worktreeDraft,
 	]);
 
 	useEffect(() => {
@@ -528,6 +624,9 @@ export function RuntimeSettingsDialog({
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
 		setShortcuts(config?.shortcuts ?? []);
+		setWorktreePostCreateCommand(formatWorktreeCommandForEditor(config?.worktree?.postCreateCommand));
+		setWorktreePostCreateTimeoutSeconds(String((config?.worktree?.postCreateTimeoutMs ?? 300_000) / 1000));
+		setWorktreePostCreateFailureMode(config?.worktree?.postCreateFailureMode ?? "warn");
 		setCommitPromptTemplate(config?.commitPromptTemplate ?? "");
 		setOpenPrPromptTemplate(config?.openPrPromptTemplate ?? "");
 		setSaveError(null);
@@ -538,6 +637,9 @@ export function RuntimeSettingsDialog({
 		config?.readyForReviewNotificationsEnabled,
 		config?.selectedAgentId,
 		config?.shortcuts,
+		config?.worktree?.postCreateCommand,
+		config?.worktree?.postCreateFailureMode,
+		config?.worktree?.postCreateTimeoutMs,
 		fallbackAgentId,
 		open,
 	]);
@@ -710,6 +812,7 @@ export function RuntimeSettingsDialog({
 			agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled,
 			shortcuts,
+			worktree: worktreeDraft,
 			commitPromptTemplate,
 			openPrPromptTemplate,
 		});
@@ -1074,6 +1177,73 @@ export function RuntimeSettingsDialog({
 							: "<project>/.cline/kanban/config.json"}
 						{config?.projectConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 					</p>
+					<div className="rounded-lg border border-border bg-surface-0 px-4 py-3 mb-4">
+						<h6 className="text-[12px] font-semibold uppercase tracking-wider text-text-secondary m-0 mb-2">
+							Worktree post-create command
+						</h6>
+						<textarea
+							rows={3}
+							value={worktreePostCreateCommand}
+							onChange={(event) => setWorktreePostCreateCommand(event.target.value)}
+							placeholder="pnpm install --frozen-lockfile"
+							disabled={controlsDisabled}
+							className="w-full rounded-md border border-border bg-surface-2 p-3 text-[13px] text-text-primary font-mono placeholder:text-text-tertiary focus:border-border-focus focus:outline-none resize-none disabled:opacity-40"
+						/>
+						<p className="text-text-secondary text-[13px] mt-2 mb-0">
+							Runs once in each new task worktree, after Kanban links in node_modules. Use for installs/codegen
+							that symlinking can't cover (e.g. Turbopack apps, prisma generate).
+						</p>
+						<Button
+							variant="ghost"
+							size="sm"
+							icon={
+								<ChevronDown
+									size={14}
+									className={cn("transition-transform", worktreeAdvancedOpen && "rotate-180")}
+								/>
+							}
+							onClick={() => setWorktreeAdvancedOpen((current) => !current)}
+							className="mt-2"
+							disabled={controlsDisabled && !worktreeAdvancedOpen}
+						>
+							Advanced
+						</Button>
+						{worktreeAdvancedOpen ? (
+							<div className="mt-2 grid gap-3 sm:grid-cols-[160px_180px]">
+								<label htmlFor={worktreePostCreateTimeoutInputId} className="grid gap-1">
+									<span className="text-xs font-medium text-text-secondary">Timeout seconds</span>
+									<input
+										id={worktreePostCreateTimeoutInputId}
+										type="number"
+										min={1}
+										value={worktreePostCreateTimeoutSeconds}
+										onChange={(event) => setWorktreePostCreateTimeoutSeconds(event.target.value)}
+										disabled={controlsDisabled}
+										className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none disabled:opacity-40"
+									/>
+								</label>
+								<label htmlFor={worktreePostCreateFailureModeSelectId} className="grid gap-1">
+									<span className="text-xs font-medium text-text-secondary">Failure mode</span>
+									<NativeSelect
+										id={worktreePostCreateFailureModeSelectId}
+										value={worktreePostCreateFailureMode}
+										onChange={(event) =>
+											setWorktreePostCreateFailureMode(
+												event.target.value as RuntimeWorktreePostCreateFailureMode,
+											)
+										}
+										disabled={controlsDisabled}
+									>
+										{WORKTREE_POST_CREATE_FAILURE_MODE_OPTIONS.map((option) => (
+											<option key={option.value} value={option.value}>
+												{option.label}
+											</option>
+										))}
+									</NativeSelect>
+								</label>
+							</div>
+						) : null}
+					</div>
 					<div className="rounded-lg border border-border bg-surface-0 px-4 py-3 mb-4">
 						<div className="flex items-center justify-between mb-2">
 							<h6

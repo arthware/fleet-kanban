@@ -437,6 +437,67 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("round-trips the project worktree post-create hook", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-worktree-hook-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-worktree-hook-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				await updateRuntimeConfig(tempProject, {
+					worktree: {
+						postCreateCommand: ["pnpm", "install", "--frozen-lockfile"],
+						postCreateTimeoutMs: 600_000,
+						postCreateFailureMode: "block",
+					},
+				});
+
+				const reloaded = await loadRuntimeConfig(tempProject);
+				expect(reloaded.worktree).toEqual({
+					postCreateCommand: ["pnpm", "install", "--frozen-lockfile"],
+					postCreateTimeoutMs: 600_000,
+					postCreateFailureMode: "block",
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("keeps the project config file when shortcuts are cleared but a worktree hook remains", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-keep-hook-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-keep-hook-");
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				await updateRuntimeConfig(tempProject, {
+					shortcuts: [{ label: "Ship", command: "npm run ship", icon: "rocket" }],
+					worktree: { postCreateCommand: "pnpm install --frozen-lockfile" },
+				});
+
+				await updateRuntimeConfig(tempProject, {
+					shortcuts: [],
+				});
+
+				const configPath = join(tempProject, ".cline", "kanban", "config.json");
+				expect(existsSync(configPath)).toBe(true);
+				const persisted = JSON.parse(readFileSync(configPath, "utf8")) as {
+					shortcuts?: unknown;
+					worktree?: unknown;
+				};
+				expect(persisted.shortcuts).toBeUndefined();
+				expect(persisted.worktree).toEqual({
+					postCreateCommand: "pnpm install --frozen-lockfile",
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("updateRuntimeConfig supports partial updates", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-partial-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-partial-");

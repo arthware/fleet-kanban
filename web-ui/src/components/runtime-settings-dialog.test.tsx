@@ -75,6 +75,7 @@ vi.mock("@radix-ui/react-select", () => ({
 }));
 
 const resetLayoutCustomizationsMock = vi.hoisted(() => vi.fn());
+const saveRuntimeConfigMock = vi.hoisted(() => vi.fn(async () => true));
 const clineSetupSectionOnSavedRef = vi.hoisted(() => ({
 	onSaved: null as null | (() => void),
 }));
@@ -144,7 +145,7 @@ vi.mock("@/runtime/use-runtime-config", () => ({
 		isLoading: false,
 		isSaving: false,
 		refresh: vi.fn(),
-		save: vi.fn(async () => true),
+		save: saveRuntimeConfigMock,
 	}),
 }));
 
@@ -255,6 +256,7 @@ describe("RuntimeSettingsDialog", () => {
 
 	beforeEach(() => {
 		resetLayoutCustomizationsMock.mockReset();
+		saveRuntimeConfigMock.mockClear();
 		clineSetupSectionOnSavedRef.onSaved = null;
 		window.localStorage.clear();
 		document.documentElement.removeAttribute("data-theme");
@@ -445,6 +447,49 @@ describe("RuntimeSettingsDialog", () => {
 		expect(handleOpenChange).toHaveBeenCalledWith(false);
 		expect(window.localStorage.getItem("kanban.theme")).toBe("graphite");
 		expect(document.documentElement.getAttribute("data-theme")).toBe("graphite");
+	});
+
+	it("saves the project worktree post-create command", async () => {
+		const handleOpenChange = vi.fn();
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={handleOpenChange}
+				/>,
+			);
+		});
+
+		const commandInput = document.querySelector(
+			'textarea[placeholder="pnpm install --frozen-lockfile"]',
+		) as HTMLTextAreaElement | null;
+		const saveButton = findButtonByText(document.body, "Save");
+
+		expect(commandInput).toBeInstanceOf(HTMLTextAreaElement);
+		expect(saveButton).toBeInstanceOf(HTMLButtonElement);
+
+		await act(async () => {
+			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+			valueSetter?.call(commandInput, "pnpm install --frozen-lockfile");
+			commandInput?.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+
+		expect(saveButton?.disabled).toBe(false);
+
+		await act(async () => {
+			saveButton?.click();
+		});
+
+		expect(saveRuntimeConfigMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				worktree: {
+					postCreateCommand: "pnpm install --frozen-lockfile",
+				},
+			}),
+		);
+		expect(handleOpenChange).toHaveBeenCalledWith(false);
 	});
 
 	it("forwards cline setup saves to the dialog onSaved callback", async () => {

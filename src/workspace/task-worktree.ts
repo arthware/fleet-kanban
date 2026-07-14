@@ -1,7 +1,8 @@
 import { access, lstat, mkdir, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { createKanbanClineLogger } from "../cline-sdk/cline-runtime-logger";
+import { loadRuntimeConfig } from "../config/runtime-config";
 import type {
 	RuntimeTaskWorkspaceInfoResponse,
 	RuntimeWorktreeDeleteResponse,
@@ -17,12 +18,14 @@ import {
 import { getGitCommandErrorMessage, getGitStdout, readGitHeadInfo, runGit } from "./git-utils";
 import { getWorkspaceFolderLabelForWorktreePath, normalizeTaskIdForWorktreePath } from "./task-worktree-path";
 import { listTurbopackNodeModulesSymlinkSkipPaths } from "./task-worktree-turbopack";
+import { runWorktreePostCreateHook } from "./worktree-post-create-hook";
 
 const KANBAN_MANAGED_EXCLUDE_BLOCK_START = "# kanban-managed-symlinked-ignored-paths:start";
 const KANBAN_MANAGED_EXCLUDE_BLOCK_END = "# kanban-managed-symlinked-ignored-paths:end";
 const KANBAN_TRASHED_TASK_PATCHES_DIR_NAME = "trashed-task-patches";
 const KANBAN_TASK_WORKTREE_SETUP_LOCKFILE_NAME = "kanban-task-worktree-setup.lock";
 const TASK_PATCH_FILE_SUFFIX = ".patch";
+const LOGGER = createKanbanClineLogger({ component: "worktree-post-create" });
 
 const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
 	".git",
@@ -483,13 +486,66 @@ async function initializeSubmodulesIfNeeded(worktreePath: string): Promise<void>
 	await getGitStdout(["submodule", "update", "--init", "--recursive"], worktreePath);
 }
 
-async function prepareNewTaskWorktree(repoPath: string, worktreePath: string): Promise<void> {
+function formatWorktreePostCreateFailure(result: {
+	exitCode: number | null;
+	timedOut: boolean;
+	outputTail: string;
+}): string {
+	const reason = result.timedOut
+		? "timed out"
+		: `failed${result.exitCode === null ? "" : ` (exit ${result.exitCode})`}`;
+	const tail = result.outputTail.trim();
+	return `Worktree post-create command ${reason}.${tail ? ` Output tail:\n${tail}` : ""}`;
+}
+
+function appendWorktreeWarning(current: string | undefined, next: string): string {
+	return current ? `${current}\n\n${next}` : next;
+}
+
+async function prepareNewTaskWorktree(options: {
+	repoPath: string;
+	worktreePath: string;
+	taskId: string;
+	workspaceId: string;
+	baseRef: string;
+}): Promise<{ warning?: string }> {
 	try {
-		await initializeSubmodulesIfNeeded(worktreePath);
-		await syncIgnoredPathsIntoWorktree(repoPath, worktreePath);
-		await ensureWorktreeSkillsDirectory({ worktreePath });
+		await initializeSubmodulesIfNeeded(options.worktreePath);
+		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath);
+		await ensureWorktreeSkillsDirectory({ worktreePath: options.worktreePath });
+		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
+		const hook = runtimeConfig.worktree;
+		if (hook.postCreateCommand === undefined) {
+			return {};
+		}
+		const result = await runWorktreePostCreateHook(hook, {
+			taskId: options.taskId,
+			workspaceId: options.workspaceId,
+			worktreePath: options.worktreePath,
+			repoPath: options.repoPath,
+			baseRef: options.baseRef,
+		});
+		if (result.ok) {
+			if (result.outputTail.trim()) {
+				LOGGER.log("Worktree post-create command completed.", {
+					taskId: options.taskId,
+					outputTail: result.outputTail.trim(),
+				});
+			}
+			return {};
+		}
+		const warning = formatWorktreePostCreateFailure(result);
+		LOGGER.log("Worktree post-create command failed.", {
+			severity: "warn",
+			taskId: options.taskId,
+			warning,
+		});
+		if (hook.postCreateFailureMode === "block") {
+			throw new Error(warning);
+		}
+		return { warning };
 	} catch (error) {
-		await removeTaskWorktreeInternal(repoPath, worktreePath).catch(() => {});
+		await removeTaskWorktreeInternal(options.repoPath, options.worktreePath).catch(() => {});
 		throw error;
 	}
 }
@@ -525,6 +581,7 @@ async function pruneEmptyParents(rootPath: string, fromPath: string): Promise<vo
 export async function ensureTaskWorktreeIfDoesntExist(options: {
 	cwd: string;
 	taskId: string;
+	workspaceId?: string;
 	baseRef: string;
 }): Promise<RuntimeWorktreeEnsureResponse> {
 	try {
@@ -619,7 +676,16 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 					"Could not restore the saved task patch onto its original commit. Started from the task base ref instead.";
 				await getGitStdout(["worktree", "add", "--detach", worktreePath, baseCommit], context.repoPath);
 			}
-			await prepareNewTaskWorktree(context.repoPath, worktreePath);
+			const prepareResult = await prepareNewTaskWorktree({
+				repoPath: context.repoPath,
+				worktreePath,
+				taskId,
+				workspaceId: options.workspaceId ?? "",
+				baseRef: requestedBaseRef,
+			});
+			if (prepareResult.warning) {
+				warning = appendWorktreeWarning(warning, prepareResult.warning);
+			}
 
 			if (storedPatch && baseCommit === storedPatch.commit) {
 				try {
