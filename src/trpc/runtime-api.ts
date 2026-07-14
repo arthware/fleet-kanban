@@ -207,6 +207,10 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					});
 				}
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
+				const skillName = body.skill?.trim();
+				const finalPrompt = skillName
+					? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
+					: body.prompt;
 
 				// Surface a fleet-tools resolution failure to the user without blocking the
 				// start: the architect still launches, but its board commands are unavailable.
@@ -263,7 +267,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					const summary = await clineTaskSessionService.startTaskSession({
 						taskId: body.taskId,
 						cwd: taskCwd,
-						prompt: body.prompt,
+						prompt: finalPrompt,
 						taskTitle: resolvedClineTitle.length > 0 ? resolvedClineTitle : undefined,
 						images: body.images,
 						resumeFromTrash: body.resumeFromTrash,
@@ -325,7 +329,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					args: resolved.args,
 					autonomousModeEnabled: scopedRuntimeConfig.agentAutonomousModeEnabled,
 					cwd: taskCwd,
-					prompt: body.prompt,
+					prompt: finalPrompt,
 					agentModel: body.agentModel,
 					images: body.images,
 					startInPlanMode: body.startInPlanMode,

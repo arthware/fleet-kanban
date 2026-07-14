@@ -28,6 +28,7 @@ export interface TaskDraft {
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
+	skill?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
@@ -180,6 +181,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		baseRef?: unknown;
 		agentId?: unknown;
 		agentModel?: unknown;
+		skill?: unknown;
 		prUrl?: unknown;
 		prState?: unknown;
 		prNumber?: unknown;
@@ -227,6 +229,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		baseRef,
 		...(typeof card.agentId === "string" && card.agentId ? { agentId: card.agentId as RuntimeAgentId } : {}),
 		...(typeof card.agentModel === "string" && card.agentModel ? { agentModel: card.agentModel } : {}),
+		...(typeof card.skill === "string" && card.skill ? { skill: card.skill } : {}),
 		...(typeof card.prUrl === "string" && card.prUrl ? { prUrl: card.prUrl } : {}),
 		...(card.prState === "open" || card.prState === "merged" || card.prState === "closed"
 			? { prState: card.prState }

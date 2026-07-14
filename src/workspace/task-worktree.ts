@@ -1,5 +1,6 @@
 import { access, lstat, mkdir, readdir, readFile, rm, symlink } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
 	RuntimeTaskWorkspaceInfoResponse,
@@ -34,6 +35,19 @@ const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
 ]);
 
 type CreateSymlink = (target: string, path: string, type: "dir" | "file") => Promise<void>;
+type WorktreeSkillsPlacementStatus = "linked" | "existing" | "missing_canonical" | "fallback_created" | "skipped";
+
+interface WorktreeSkillsFs {
+	lstat: typeof lstat;
+	mkdir: typeof mkdir;
+	symlink: typeof symlink;
+}
+
+const DEFAULT_WORKTREE_SKILLS_FS: WorktreeSkillsFs = {
+	lstat,
+	mkdir,
+	symlink,
+};
 
 export async function mirrorIgnoredPath(options: {
 	sourcePath: string;
@@ -66,6 +80,74 @@ async function pathExists(path: string): Promise<boolean> {
 		return true;
 	} catch {
 		return false;
+	}
+}
+
+async function lstatExists(
+	path: string,
+	fs: Pick<WorktreeSkillsFs, "lstat"> = DEFAULT_WORKTREE_SKILLS_FS,
+): Promise<boolean> {
+	try {
+		await fs.lstat(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export async function resolveCanonicalSkillsDir(options?: {
+	moduleDir?: string;
+	pathExists?: (path: string) => Promise<boolean>;
+}): Promise<string | null> {
+	const here = options?.moduleDir ?? dirname(fileURLToPath(import.meta.url));
+	const exists = options?.pathExists ?? pathExists;
+	const candidates = [
+		resolve(here, ".agents/skills"),
+		resolve(here, "../.agents/skills"),
+		resolve(here, "../../.agents/skills"),
+	];
+	for (const candidate of candidates) {
+		if (await exists(candidate)) {
+			return candidate;
+		}
+	}
+	return null;
+}
+
+export async function ensureWorktreeSkillsDirectory(options: {
+	worktreePath: string;
+	canonicalSkillsDir?: string | null;
+	resolveCanonicalSkillsDir?: () => Promise<string | null>;
+	fs?: WorktreeSkillsFs;
+}): Promise<WorktreeSkillsPlacementStatus> {
+	const fs = options.fs ?? DEFAULT_WORKTREE_SKILLS_FS;
+	const targetPath = join(options.worktreePath, ".agents", "skills");
+	if (await lstatExists(targetPath, fs)) {
+		return "existing";
+	}
+
+	const canonicalSkillsDir =
+		options.canonicalSkillsDir === undefined
+			? await (options.resolveCanonicalSkillsDir ?? resolveCanonicalSkillsDir)()
+			: options.canonicalSkillsDir;
+	if (!canonicalSkillsDir || !(await lstatExists(canonicalSkillsDir, fs))) {
+		return "missing_canonical";
+	}
+
+	try {
+		await fs.mkdir(dirname(targetPath), { recursive: true });
+		await fs.symlink(canonicalSkillsDir, targetPath, "dir");
+		return "linked";
+	} catch {
+		try {
+			if (await lstatExists(targetPath, fs)) {
+				return "existing";
+			}
+			await fs.mkdir(targetPath, { recursive: true });
+			return "fallback_created";
+		} catch {
+			return "skipped";
+		}
 	}
 }
 
@@ -405,6 +487,7 @@ async function prepareNewTaskWorktree(repoPath: string, worktreePath: string): P
 	try {
 		await initializeSubmodulesIfNeeded(worktreePath);
 		await syncIgnoredPathsIntoWorktree(repoPath, worktreePath);
+		await ensureWorktreeSkillsDirectory({ worktreePath });
 	} catch (error) {
 		await removeTaskWorktreeInternal(repoPath, worktreePath).catch(() => {});
 		throw error;

@@ -16,6 +16,7 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 				"title: Add the widget",
 				"agent: codex",
 				"model: claude-haiku-4-5",
+				"skill: fleet-smoke",
 				"base-ref: feature/x",
 				"auto-review: commit",
 				"plan: true",
@@ -28,6 +29,7 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		expect(card.title).toBe("Add the widget");
 		expect(card.agentId).toBe("codex");
 		expect(card.agentModel).toBe("claude-haiku-4-5");
+		expect(card.skill).toBe("fleet-smoke");
 		expect(card.baseRef).toBe("feature/x");
 		expect(card.autoReviewEnabled).toBe(true);
 		expect(card.autoReviewMode).toBe("commit");
@@ -155,6 +157,12 @@ describe("invalid frontmatter", () => {
 		);
 	});
 
+	it("given the frontmatter has an empty skill value, when parsed, then it hard-errors", () => {
+		expect(() => parseTaskCardDocument(["---", "skill: ''", "---", "body"].join("\n"))).toThrow(
+			/"skill" must be a non-empty string/,
+		);
+	});
+
 	it("rejects a malformed code-references entry", () => {
 		expect(() => parseTaskCardDocument(["---", "code-references:", "  - nope", "---", "body"].join("\n"))).toThrow(
 			/not a commit SHA/,
@@ -189,13 +197,22 @@ describe("resolveCardSourceRequest", () => {
 
 describe("resolveTaskCardCreate precedence", () => {
 	const baseCard = parseTaskCardDocument(
-		["---", "title: From card", "agent: codex", "base-ref: card-branch", "---", "Card body."].join("\n"),
+		[
+			"---",
+			"title: From card",
+			"agent: codex",
+			"skill: fleet-smoke",
+			"base-ref: card-branch",
+			"---",
+			"Card body.",
+		].join("\n"),
 	);
 
 	it("uses frontmatter values when no flags are given", () => {
 		const resolved = resolveTaskCardCreate(baseCard, {});
 		expect(resolved.title).toBe("From card");
 		expect(resolved.agentId).toBe("codex");
+		expect(resolved.skill).toBe("fleet-smoke");
 		expect(resolved.baseRef).toBe("card-branch");
 		expect(resolved.prompt).toBe("Card body.");
 	});
@@ -204,10 +221,12 @@ describe("resolveTaskCardCreate precedence", () => {
 		const resolved = resolveTaskCardCreate(baseCard, {
 			title: "From flag",
 			agentId: "claude",
+			skill: "other-skill",
 			baseRef: "flag-branch",
 		});
 		expect(resolved.title).toBe("From flag");
 		expect(resolved.agentId).toBe("claude");
+		expect(resolved.skill).toBe("other-skill");
 		expect(resolved.baseRef).toBe("flag-branch");
 	});
 

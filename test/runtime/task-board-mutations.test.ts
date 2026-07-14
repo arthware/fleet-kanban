@@ -399,6 +399,17 @@ describe("per-task agent/model/provider overrides", () => {
 		expect(created.task.agentModel).toBe("claude-haiku-4-5");
 	});
 
+	it("persists a per-card skill on the card when creating a task", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Skill task", baseRef: "main", skill: "fleet-smoke" },
+			() => "aaaaa111",
+		);
+
+		expect(created.task.skill).toBe("fleet-smoke");
+	});
+
 	it("leaves the agent model undefined when not provided", () => {
 		const created = addTaskToColumn(
 			createBoard(),
@@ -560,6 +571,30 @@ describe("per-task agent/model/provider overrides", () => {
 
 		expect(moved.moved).toBe(true);
 		expect(moved.task?.agentModel).toBe("claude-haiku-4-5");
+	});
+
+	it("updates, preserves, and clears skill through task updates", () => {
+		const created = addTaskToColumn(createBoard(), "backlog", { prompt: "Task", baseRef: "main" }, () => "aaaaa111");
+
+		const withSkill = updateTask(created.board, created.task.id, {
+			prompt: "Task",
+			baseRef: "main",
+			skill: "fleet-smoke",
+		});
+		expect(withSkill.task?.skill).toBe("fleet-smoke");
+
+		const preserved = updateTask(withSkill.board, created.task.id, {
+			prompt: "Task again",
+			baseRef: "main",
+		});
+		expect(preserved.task?.skill).toBe("fleet-smoke");
+
+		const cleared = updateTask(preserved.board, created.task.id, {
+			prompt: "Task again",
+			baseRef: "main",
+			skill: null,
+		});
+		expect(cleared.task?.skill).toBeUndefined();
 	});
 
 	it("preserves overrides across move operations", () => {
