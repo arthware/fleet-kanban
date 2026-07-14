@@ -354,7 +354,9 @@ _service_restart() {
       dim "  (shared-build consumers: refresh with 'fleet update', then 'fleet service restart')"; return 1
     fi
     say "rebuilding board source: $src"
-    ( cd "$src" && npm run build ) || { dim "build failed"; return 1; }
+    # install:all before build so a pulled lockfile change (new dep) can't build
+    # against a stale node_modules — the "Could not resolve <pkg>" refresh break.
+    ( cd "$src" && npm run install:all && npm run build ) || { dim "build failed"; return 1; }
   fi
   kanban_daemon install
 }
