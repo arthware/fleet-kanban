@@ -3,10 +3,10 @@ description: Analyse one problem and produce a design doc — investigate, weigh
 argument-hint: "[issue or card id] [problem statement / scope]"
 ---
 
-# /plan — analyse a problem, produce a design doc
+# /fleet-plan — analyse a problem, produce a design doc
 
 Take one problem from question to a committed **design doc**: intake → investigate → design →
-write the doc → stop. This is the **plan half** that precedes `/implement`. It produces a decision
+write the doc → stop. This is the **plan half** that precedes `/fleet-implement`. It produces a decision
 and an actionable outline; it deliberately does **not** write implementation code, so plan and
 build never overlap.
 
@@ -54,11 +54,11 @@ Write a design doc at `docs/design/<slug>.md` covering:
 - **Options considered** — 2–3, each with tradeoffs (complexity, risk, blast radius, reversibility).
 - **Recommended approach** — and why it wins.
 - **Implementation outline** — the concrete changes (files / functions / data), phased if needed.
-- **Test strategy** — the tests `/implement` should write RED-first: the BDD user-facing surface
+- **Test strategy** — the tests `/fleet-implement` should write RED-first: the BDD user-facing surface
   tests (if any) and the internal unit tests, named for intent.
 - **Risks, open questions, and out-of-scope.**
 
-Keep it tight and decision-oriented — a reader should be able to hand it straight to `/implement`.
+Keep it tight and decision-oriented — a reader should be able to hand it straight to `/fleet-implement`.
 
 ### 5. Verify
 
@@ -69,12 +69,12 @@ changes; don't run the app.
 
 - Commit the design doc on the branch, referencing the id. Follow the repo's commit convention
   (its `AGENTS.md`). Honor the Commit gate.
-- **Do not implement** — the build phase (`/implement`) owns that. Leave the card in review.
+- **Do not implement** — the build phase (`/fleet-implement`) owns that. Leave the card in review.
 
 ## Terminal condition
 
 Print:
 
-> ✅ `<id>` designed — `docs/design/<slug>.md` committed on `<branch>`, ready for review → `/implement`.
+> ✅ `<id>` designed — `docs/design/<slug>.md` committed on `<branch>`, ready for review → `/fleet-implement`.
 
 Then stop. Stop only at the Clarify and Commit gates; elsewhere, decide and document.

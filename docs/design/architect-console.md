@@ -242,14 +242,14 @@ Two homes carry the rule so both sides of the loop honor it:
 
 - **Operator / agent convention** — `fleet-kanban/AGENTS.md` (§ "Don't research from zero" → "Prior-art
   commits") defines the section shape and the read-first rule. It is the canonical definition.
-- **Implementing-agent instructions** — the launched card follows `/implement`, whose in-repo copy
-  lives at `.claude/commands/implement.md` (generic Intake rule) with fleet-kanban specifics in
+- **Implementing-agent instructions** — the launched card follows `/fleet-implement`, whose in-repo copy
+  lives at `.claude/commands/fleet-implement.md` (generic Intake rule) with fleet-kanban specifics in
   `.claude/implement-profile.md`. Both say: *if the card lists Prior art commits, `git show <sha>`
   (and `git log -p -1 <sha>`) each one BEFORE writing code, and match the established pattern.*
 
-**Relation to the parent `/implement`.** `/implement` is a generic skill; the copy under
+**Relation to the parent `/fleet-implement`.** `/fleet-implement` is a generic skill; the copy under
 `fleet-kanban/.claude/` is the in-repo instance a board card actually runs. If a future parent-fleet
-`/implement` command (outside this repo) becomes the real home, the prior-art rule belongs there too —
+`/fleet-implement` command (outside this repo) becomes the real home, the prior-art rule belongs there too —
 for now the in-repo half is implemented and this note is the record of intent. When R1/R2 land, the
 `## Prior art` section becomes the human-authored complement to `fleet task index find`: the ledger
 suggests refs, the operator still hand-cites the ones that matter, and the read-first contract is
@@ -535,7 +535,7 @@ pre-commit port-env memory).
 
 ---
 
-## 15. Ready for `/implement`
+## 15. Ready for `/fleet-implement`
 
 Dispatch order: **G (`AGENTS.md` guardrail)** ships now (zero code), alongside **S1 (`fleet task
 say`) → S2 (`needs_input` signal)** as the priority channel; then **O2 (`fleet task tail`)** once

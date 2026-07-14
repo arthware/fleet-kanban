@@ -3,7 +3,7 @@
 **Status:** design · **Epic:** `fleet/docs/kanban-ui-epic.md` §4.6 · **Scope:** fleet-kanban (fork) ·
 **Supersedes/extends:** `docs/design/durable-agent-sessions.md` (that doc is now §7 of this one)
 
-> Deliverable of `/plan`. No implementation code here. Hand this to `/implement`.
+> Deliverable of `/fleet-plan`. No implementation code here. Hand this to `/fleet-implement`.
 
 ---
 
@@ -331,7 +331,7 @@ still-needed state on a transient signal.**
 
 ---
 
-## 10. Phased implementation breakdown (ordered, `/implement`-able cards)
+## 10. Phased implementation breakdown (ordered, `/fleet-implement`-able cards)
 
 Sequenced so **durability + non-destruction land first** (board robust ASAP), reconciliation next,
 sessions last. Each card: scope · acceptance · RED-first tests.

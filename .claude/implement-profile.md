@@ -1,10 +1,10 @@
-# /implement profile — fleet-kanban
+# /fleet-implement profile — fleet-kanban
 
-Concrete details for the generic `/implement` skill when the work item is in **fleet-kanban** (the
-TypeScript / React fork). The workflow, gates, and test philosophy live in `/implement`; this file
+Concrete details for the generic `/fleet-implement` skill when the work item is in **fleet-kanban** (the
+TypeScript / React fork). The workflow, gates, and test philosophy live in `/fleet-implement`; this file
 only fills in the stack specifics.
 
-**Scope.** Use `/implement` for `fleet-kanban` (TS / React) work. The **`fleet` CLI is
+**Scope.** Use `/fleet-implement` for `fleet-kanban` (TS / React) work. The **`fleet` CLI is
 exploration-mode — no unit tests there**; don't run this flow for CLI-only changes.
 
 ## Intake
@@ -75,4 +75,4 @@ Verify in an **isolated board, never the product board**:
 
 **Semantic-commit type prefix** (`feat:` / `fix:` / `docs:` / `refactor:` / `chore:` / `test:` …) +
 an end-user subject; **no `Co-Authored-By` trailer** (see `AGENTS.md`). Reference the id. Never
-commit unless asked — invoking `/implement` is that ask, but still honor the Commit gate.
+commit unless asked — invoking `/fleet-implement` is that ask, but still honor the Commit gate.

@@ -3,7 +3,7 @@ description: Drive one work item to a verified, committed build. Tests first —
 argument-hint: "[issue or card id] [optional scope notes]"
 ---
 
-# /implement — build a work item (tests-first)
+# /fleet-implement — build a work item (tests-first)
 
 Take one work item from pickup to a **verified, committed build**: intake → tests-first → implement
 → verify → commit. This is the **build half**; it stops at a committed feature branch and

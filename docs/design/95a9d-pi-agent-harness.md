@@ -265,7 +265,7 @@ PR #223. **Ordered; each is a concrete edit, no code here.**
 
 ## 7. Test strategy (Given/When/Then; stub harness, no real Pi)
 
-Follows `.claude/commands/implement.md` (GWT structure) and the deterministic stub harness
+Follows `.claude/commands/fleet-implement.md` (GWT structure) and the deterministic stub harness
 (`92d7eb5`: `KANBAN_TEST_AGENT_BINARY` swaps in a stub for any non-cline agent via
 `resolveAgentCommand`; the stub drives lifecycle by POSTing `hooks.ingest`).
 
