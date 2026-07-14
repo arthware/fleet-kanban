@@ -18,6 +18,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DesignDocBadge } from "@/components/design-doc-badge";
+import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
 import {
 	formatClineReasoningEffortLabel,
 	formatClineSelectedModelButtonText,
@@ -596,6 +597,7 @@ export function BoardCard({
 	}, [tokenUsage]);
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
+	const shouldRenderExpandedMarkdown = isDescriptionExpanded && descriptionDisplay.collapsed.isTruncated;
 
 	return (
 		<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
@@ -837,60 +839,58 @@ export function BoardCard({
 							) : null}
 							{displayDescription ? (
 								<div ref={descriptionContainerRef}>
-									<p
-										ref={descriptionRef}
-										className={cn(
-											"text-sm leading-[1.4]",
-											isTrashCard ? "text-text-tertiary" : "text-text-secondary",
-											!isDescriptionMeasured && !isDescriptionExpanded && "line-clamp-3",
-										)}
-										style={{
-											margin: "2px 0 0",
-										}}
-									>
-										{activeDescriptionDisplay.isTruncated
-											? activeDescriptionDisplay.text
-											: displayDescription}
-										{activeDescriptionDisplay.isTruncated ? (
-											<>
-												{"… "}
-												<button
-													type="button"
-													className="inline cursor-pointer rounded-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [font:inherit]"
-													aria-expanded={isDescriptionExpanded}
-													aria-label={
-														isDescriptionExpanded
-															? "Collapse task description"
-															: "Expand task description"
-													}
-													onMouseDown={stopEvent}
-													onClick={(event) => {
-														stopEvent(event);
-														setIsDescriptionExpanded(!isDescriptionExpanded);
-													}}
-												>
-													{isDescriptionExpanded ? DESCRIPTION_COLLAPSE_LABEL : DESCRIPTION_EXPAND_LABEL}
-												</button>
-											</>
-										) : isDescriptionExpanded && descriptionDisplay.collapsed.isTruncated ? (
-											<>
-												{" "}
-												<button
-													type="button"
-													className="inline cursor-pointer rounded-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [font:inherit]"
-													aria-expanded={isDescriptionExpanded}
-													aria-label="Collapse task description"
-													onMouseDown={stopEvent}
-													onClick={(event) => {
-														stopEvent(event);
-														setIsDescriptionExpanded(false);
-													}}
-												>
-													{DESCRIPTION_COLLAPSE_LABEL}
-												</button>
-											</>
-										) : null}
-									</p>
+									{shouldRenderExpandedMarkdown ? (
+										<div className="mt-0.5 max-h-72 overflow-y-auto pr-1">
+											<ClineMarkdownContent content={card.prompt} />
+											<button
+												type="button"
+												className="mt-1 inline cursor-pointer rounded-sm text-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+												aria-expanded={isDescriptionExpanded}
+												aria-label="Collapse task description"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													setIsDescriptionExpanded(false);
+												}}
+											>
+												{DESCRIPTION_COLLAPSE_LABEL}
+											</button>
+										</div>
+									) : (
+										<p
+											ref={descriptionRef}
+											className={cn(
+												"text-sm leading-[1.4]",
+												isTrashCard ? "text-text-tertiary" : "text-text-secondary",
+												!isDescriptionMeasured && !isDescriptionExpanded && "line-clamp-3",
+											)}
+											style={{
+												margin: "2px 0 0",
+											}}
+										>
+											{activeDescriptionDisplay.isTruncated
+												? activeDescriptionDisplay.text
+												: displayDescription}
+											{activeDescriptionDisplay.isTruncated ? (
+												<>
+													{"… "}
+													<button
+														type="button"
+														className="inline cursor-pointer rounded-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [font:inherit]"
+														aria-expanded={isDescriptionExpanded}
+														aria-label="Expand task description"
+														onMouseDown={stopEvent}
+														onClick={(event) => {
+															stopEvent(event);
+															setIsDescriptionExpanded(true);
+														}}
+													>
+														{DESCRIPTION_EXPAND_LABEL}
+													</button>
+												</>
+											) : null}
+										</p>
+									)}
 								</div>
 							) : null}
 							{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (

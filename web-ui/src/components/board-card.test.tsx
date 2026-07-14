@@ -382,6 +382,54 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("final hidden segment");
 	});
 
+	it("renders expanded truncated descriptions with the Cline markdown viewer", async () => {
+		const prompt = [
+			"Task title",
+			"",
+			"## Implementation notes",
+			"",
+			"- Keep the collapsed preview as measured plain text",
+			"- Render markdown only after the card is expanded",
+			"",
+			"```ts",
+			"const rendered = true;",
+			"```",
+		].join("\n");
+
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ prompt })} index={0} columnId="backlog" />);
+		});
+
+		const findButton = (label: string) =>
+			Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
+
+		const seeMoreButton = findButton("See more");
+		expect(seeMoreButton).toBeDefined();
+		expect(container.querySelector(".kb-markdown")).toBeNull();
+		expect(container.querySelector("h2")).toBeNull();
+		expect(container.textContent).not.toContain("const rendered = true");
+
+		await act(async () => {
+			seeMoreButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			seeMoreButton?.click();
+		});
+
+		expect(findButton("See more")).toBeUndefined();
+		expect(findButton("Less")).toBeDefined();
+		expect(container.querySelector(".kb-markdown")).toBeInstanceOf(HTMLDivElement);
+		expect(container.querySelector("h2")?.textContent).toBe("Implementation notes");
+		expect(container.querySelector("pre code")?.textContent).toBe("const rendered = true;");
+
+		await act(async () => {
+			findButton("Less")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			findButton("Less")?.click();
+		});
+
+		expect(findButton("See more")).toBeDefined();
+		expect(container.querySelector(".kb-markdown")).toBeNull();
+		expect(container.querySelector("h2")).toBeNull();
+	});
+
 	it("reconstructs and shows trashed worktree path when workspace metadata is not tracked", async () => {
 		await act(async () => {
 			root.render(
