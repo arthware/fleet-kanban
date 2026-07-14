@@ -54,7 +54,7 @@ export function PrBadge({ card, className }: { card: PrBadgeCard; className?: st
 			onClick={stopPropagation}
 		>
 			<Icon size={14} className="shrink-0" />
-			<span className="min-w-0 truncate">{label}</span>
+			<span className={cn("min-w-0 truncate", state === "closed" && "line-through")}>{label}</span>
 		</a>
 	);
 }

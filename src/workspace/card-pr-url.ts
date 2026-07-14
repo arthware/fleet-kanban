@@ -78,7 +78,8 @@ export function selectCardPrUrl(prListJson: string): CardPrRef | null {
 
 		const validPrs = prItems.filter((item): item is GhPrListItem => item !== null);
 		const openPr = newestByNumber(validPrs.filter((pr) => pr.state === "open"));
-		const selected = openPr ?? newestByNumber(validPrs.filter((pr) => pr.state === "merged"));
+		const terminalPr = newestByNumber(validPrs.filter((pr) => pr.state === "merged" || pr.state === "closed"));
+		const selected = openPr ?? terminalPr;
 		if (selected === null) {
 			return null;
 		}
