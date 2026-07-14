@@ -43,8 +43,10 @@ lifecycle:
   the agent starts and its success/failure must be observable.
 
 So this is a genuinely new mechanism. It shares only the *name* "hook"; to avoid confusion this
-design calls it the **worktree post-create hook** (config key `worktreePostCreateHook`), never just
-"hook".
+design calls it the **worktree post-create hook** (config key `worktree.postCreateCommand`), never
+just "hook". The name follows the Dev Containers vocabulary (`postCreateCommand`) so the concept is
+recognizable to anyone who has configured a devcontainer — this hook is the direct analogue of
+"run once after the workspace is created."
 
 ## Where it plugs in
 
@@ -96,19 +98,25 @@ preference. The post-create hook is the opposite — it is repo-specific — so 
 `shortcuts` in the **project** file. We follow the prompt templates' *trust model and plumbing shape*
 (see §6), not their storage location.
 
+The config is grouped under a `worktree` namespace so future worktree-lifecycle knobs (e.g. the
+deferred `symlinkExclude`, see Out of scope) have a natural home:
+
 ```jsonc
 // <repo>/.cline/kanban/config.json
 {
   "shortcuts": [ /* … existing … */ ],
-  "worktreePostCreateHook": {
-    "command": "pnpm install --frozen-lockfile && pnpm prisma generate",
-    "timeoutMs": 300000,     // optional; default 300_000
-    "failureMode": "warn"    // optional; "warn" (default) | "block"
+  "worktree": {
+    "postCreateCommand": "pnpm install --frozen-lockfile",
+    "postCreateTimeoutMs": 300000,     // optional; default 300_000
+    "postCreateFailureMode": "warn"    // optional; "warn" (default) | "block"
   }
 }
 ```
 
-**Global support:** kept out of the MVP but trivially added later — a `worktreePostCreateHook` on
+`postCreateCommand` accepts a **string** (run through a shell) or a **string array** (spawned
+directly, no shell) — see §2. The two extra fields are optional and are the only tuning knobs.
+
+**Global support:** kept out of the MVP but trivially added later — a `worktree.postCreateCommand` on
 `RuntimeGlobalConfigFileShape` used as a fallback when the project has none. The plumbing is
 symmetric with the prompt templates; we note it as a follow-up rather than build both now.
 
@@ -118,20 +126,28 @@ symmetric with the prompt templates; we note it as a follow-up rather than build
 must key off *"no shortcuts **and** no hook"*, or a saved hook is silently destroyed the next time
 someone clears their shortcuts. This is the single easiest bug to introduce here.
 
-### 2. Hook shape — an **inline shell command string**, run non-interactively
+### 2. Hook shape — `string | string[]`, matching the industry convention
 
-Store a free-form `command` string, exactly like `RuntimeProjectShortcut.command` already does, and
-run it through a **non-interactive** shell:
+`postCreateCommand` accepts either form, following the near-universal **shell-form vs exec-form**
+convention (Dev Containers lifecycle commands, Docker `CMD`/`ENTRYPOINT`, Kubernetes
+`command`/`args`):
 
-- POSIX: `sh -c "<command>"`
-- Windows: `cmd.exe /d /s /c "<command>"` (and document that `pwsh -NoProfile -Command "<command>"`
-  is available to users who prefer it, by writing `pwsh -NoProfile -Command '…'` as their command).
+- **String** → run through a **non-interactive** shell, so `&&`, globs, and `$VARS` work:
+  - POSIX: `sh -c "<command>"`
+  - Windows: `cmd.exe /d /s /c "<command>"` (users who prefer PowerShell write
+    `pwsh -NoProfile -Command '…'` as their command).
+- **String array** → spawned **directly** (no shell), so there are no quoting/glob surprises:
+  `["pnpm", "install", "--frozen-lockfile"]`. Chaining (`a && b`) is shell syntax and therefore only
+  works in the string form — multi-step setups use a string or delegate to a script.
 
-A single command string is strictly more flexible than a fixed script path and needs no new file
-convention: it can be `pnpm install`, a chain (`a && b`), or a delegation to a checked-in script
-(`bash ./scripts/worktree-setup.sh`). Users who want a script keep it in the repo and point the
-command at it — that also keeps the *interpreter/shebang* choice in the user's hands (decision 2's
-shebang question), rather than Kanban guessing it.
+We deliberately do **not** add an object/map ("named parallel commands") form — Dev Containers offers
+it, but it is overkill for a single setup step. We also do **not** add a separate "script path" field:
+every hook system standardized on *"your command can just call a script"*, so a checked-in script is
+reached with `bash ./scripts/worktree-setup.sh`. That keeps the config to one concept and leaves the
+*interpreter/shebang* choice in the user's hands rather than Kanban guessing it.
+
+The string form mirrors `RuntimeProjectShortcut.command`, which already stores and runs a free-form
+command from this same project config — so this introduces no new execution primitive.
 
 **Non-interactive on purpose.** Per this repo's tribal knowledge (`AGENTS.md`: the `zsh -i` /
 conda / nvm freeze), the hook must **not** spawn an interactive login shell. Use a bare
@@ -172,9 +188,9 @@ starting. This is the *desired* behavior: an agent must not start coding against
 tree (missing `node_modules`, ungenerated Prisma client). The hook runs synchronously within
 creation and the returned worktree-ensure response is withheld until it finishes.
 
-**Timeout:** configurable `timeoutMs`, default **300_000 (5 min)**. On timeout, kill the process
-group (`SIGTERM`, then `SIGKILL` after a short grace) so a hung `install` can't wedge task start
-forever. A timeout is treated as a failure per `failureMode`.
+**Timeout:** configurable `postCreateTimeoutMs`, default **300_000 (5 min)**. On timeout, kill the
+process group (`SIGTERM`, then `SIGKILL` after a short grace) so a hung `install` can't wedge task
+start forever. A timeout is treated as a failure per `postCreateFailureMode`.
 
 **On failure (non-zero exit or timeout) — default `warn`, decouple from teardown:**
 
@@ -182,12 +198,12 @@ forever. A timeout is treated as a failure per `failureMode`.
   rethrows — appropriate for "we couldn't even create/sync the tree." A failed *user* setup step is
   different: the worktree and any restored patch are valid; destroying them loses real state and is
   hostile. So the hook runner must **not** throw out of `prepareNewTaskWorktree` in the default mode.
-- **`failureMode: "warn"` (default):** log the failure, keep the worktree, and **let the agent
+- **`postCreateFailureMode: "warn"` (default):** log the failure, keep the worktree, and **let the agent
   start**. Surface the failure to the user through the **existing `warning` field** already returned
   by `ensureTaskWorktreeIfDoesntExist` (`:555`, `:535`) — no new response channel needed. The warning
   includes the exit code (or "timed out") and a **truncated tail of combined stdout/stderr** (e.g.
   last ~2 KB) so the operator can see what broke without opening logs.
-- **`failureMode: "block"` (opt-in):** treat a failed hook as a creation failure — the worktree is
+- **`postCreateFailureMode: "block"` (opt-in):** treat a failed hook as a creation failure — the worktree is
   torn down (reuse the existing `:408` teardown) and the ensure call returns `ok: false` with the
   captured output as the error, so the agent does **not** start. For projects where an install/codegen
   failure means the tree is unusable.
@@ -245,11 +261,77 @@ template textareas and the shortcuts list). Because the hook is **project-scoped
 - Optional advanced controls (collapsed): timeout (seconds) and a `warn`/`block` failure-mode toggle.
 - Empty field ⇒ no hook (feature is fully opt-in; zero behavior change for existing boards).
 
+## Example: running `pnpm install`
+
+The motivating case, end to end.
+
+**Plain pnpm project** — the whole config is one line:
+
+```jsonc
+// <repo>/.cline/kanban/config.json
+{
+  "worktree": { "postCreateCommand": "pnpm install --frozen-lockfile" }
+}
+```
+
+On a genuine new-worktree creation, after the symlink sync, Kanban runs
+`sh -c "pnpm install --frozen-lockfile"` with **cwd = the new worktree**. `--frozen-lockfile` is the
+right default inside a worktree: it's a clean tree tracking the same lockfile, so we want an exact,
+reproducible install that fails loudly on a stale lockfile rather than silently rewriting it.
+
+**Turbopack app + codegen** — the case this feature exists for. A Turbopack app's `node_modules` is
+deliberately excluded from symlinking (§Problem), so the worktree starts with none; `prisma generate`
+then writes generated client code no symlink can provide. Chain with `&&` (string form) and raise the
+timeout for a cold install:
+
+```jsonc
+{
+  "worktree": {
+    "postCreateCommand": "pnpm install --frozen-lockfile && pnpm prisma generate",
+    "postCreateTimeoutMs": 600000
+  }
+}
+```
+
+**Array form** — a single command with no shell parsing:
+
+```jsonc
+{ "worktree": { "postCreateCommand": ["pnpm", "install", "--frozen-lockfile"] } }
+```
+
+**Script escape hatch** — anything non-trivial delegates to a checked-in script, which sees the
+injected `KANBAN_*` env (§3) on top of the inherited environment:
+
+```jsonc
+{ "worktree": { "postCreateCommand": "bash scripts/kanban-worktree-setup.sh" } }
+```
+
+```bash
+#!/usr/bin/env bash
+# scripts/kanban-worktree-setup.sh
+set -euo pipefail
+echo "Setting up worktree for task $KANBAN_TASK_ID at $KANBAN_WORKTREE_PATH"
+pnpm install --frozen-lockfile
+pnpm prisma generate
+pnpm --filter @app/protos build   # local workspace package the app depends on
+```
+
+**Why per-worktree pnpm install is affordable:** with pnpm's content-addressable store, packages
+hard-link from a global store (`$PNPM_HOME` / `~/.pnpm-store`), so a per-worktree
+`install --frozen-lockfile` **re-links, it doesn't re-download** — fast and disk-cheap. This is a big
+part of why running the hook on every creation is reasonable rather than wasteful. (If a project pins
+its store *inside* the repo, that path is likely already symlinked in, making the install near-instant.)
+
+**On failure** (default `warn`): the worktree is kept, the agent still starts, and the task-start
+response carries a `warning` with the exit code and the last ~2 KB of output — e.g. *"Worktree
+post-create command failed (exit 1): `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` …"*. Set
+`"postCreateFailureMode": "block"` to instead abort task start and tear the worktree down.
+
 ## Files to change (all small)
 
 | File | Change |
 | --- | --- |
-| `src/config/runtime-config.ts` | Add `worktreePostCreateHook` to `RuntimeProjectConfigFileShape`; normalize/read/write it; **fix the "delete project file when shortcuts empty" logic** to also keep the hook. |
+| `src/config/runtime-config.ts` | Add a `worktree` block (`postCreateCommand: string \| string[]`, `postCreateTimeoutMs?`, `postCreateFailureMode?`) to `RuntimeProjectConfigFileShape`; normalize/read/write it; **fix the "delete project file when shortcuts empty" logic** to also keep the `worktree` block. |
 | `src/core/api-contract.ts` | Add the field to `runtimeConfigResponseSchema` and `runtimeConfigSaveRequestSchema` (project-scoped). |
 | `src/trpc/runtime-api.ts` / `app-router.ts` | Thread the new field through `buildRuntimeConfigResponse` / save path (mirrors `shortcuts`). |
 | `src/workspace/task-worktree.ts` | New `runWorktreePostCreateHook()`; call it at the end of `prepareNewTaskWorktree` (`:404`); thread `taskId`/`workspaceId`/`baseRef` into the create path so the hook env can be built; wrap so a `warn`-mode failure does **not** trigger the `:408` teardown. |
@@ -280,6 +362,11 @@ this repo's rule that CLI/runtime logic must be testable without the entry.
 
 ## Out of scope / follow-ups
 
+- User-configurable per-path `worktree.symlinkExclude` (a manual extension of the Turbopack
+  auto-skip) — the natural companion to this hook: exclude a path from symlinking so it starts empty,
+  then let `postCreateCommand` fill it with a real install. Deferred until a non-Turbopack case the
+  auto-detection misses actually appears. Explicitly **not** a global on/off toggle — that's the wrong
+  granularity (it discards the free `node_modules` repo-wide to solve a per-directory problem).
 - Global (operator-level) default hook — plumbing is symmetric; add if requested.
 - Per-hook consent/signing prompt on first run from a repo-supplied command.
 - Live-streaming hook output to the UI (MVP surfaces a tail on failure only).
