@@ -28,6 +28,7 @@ import { ExternalIssueBadge } from "@/components/external-issue-badge";
 import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useTaskDesignDoc } from "@/hooks/use-task-design-doc";
@@ -63,11 +64,8 @@ const SESSION_ACTIVITY_COLOR = {
 } as const;
 
 const DESCRIPTION_COLLAPSE_LINES = 3;
-const DESCRIPTION_EXPANDED_MAX_LINES = 10;
-const DESCRIPTION_EXPAND_LABEL = "See more";
-const DESCRIPTION_COLLAPSE_LABEL = "Less";
+const DESCRIPTION_EXPAND_LABEL = "Show more";
 const DESCRIPTION_COLLAPSE_SUFFIX = `… ${DESCRIPTION_EXPAND_LABEL}`;
-const DESCRIPTION_EXPANDED_SUFFIX = `… ${DESCRIPTION_COLLAPSE_LABEL}`;
 
 // Short display names for the handful of Claude model ids a card's agentModel
 // override can carry. An id absent here (another provider's, or a future
@@ -328,7 +326,7 @@ export function BoardCard({
 	const descriptionRef = useRef<HTMLParagraphElement | null>(null);
 	const [descriptionWidthFallback, setDescriptionWidthFallback] = useState(0);
 	const [descriptionFont, setDescriptionFont] = useState(DEFAULT_TEXT_MEASURE_FONT);
-	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+	const [isDescriptionDialogOpen, setIsDescriptionDialogOpen] = useState(false);
 	const reviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(card.id);
 	const isDoneCard = columnId === "done";
 	const isTrashCard = columnId === "trash";
@@ -369,7 +367,7 @@ export function BoardCard({
 	}, [descriptionWidth, displayDescription]);
 
 	useEffect(() => {
-		setIsDescriptionExpanded(false);
+		setIsDescriptionDialogOpen(false);
 	}, [card.id, displayDescription]);
 
 	useEffect(() => {
@@ -431,13 +429,11 @@ export function BoardCard({
 		if (!displayDescription) {
 			return {
 				collapsed: { text: "", isTruncated: false },
-				expanded: { text: "", isTruncated: false },
 			};
 		}
 		if (descriptionWidth <= 0) {
 			return {
 				collapsed: { text: displayDescription, isTruncated: false },
-				expanded: { text: displayDescription, isTruncated: false },
 			};
 		}
 		const measure = (value: string) => measureTextWidth(value, descriptionFont);
@@ -446,12 +442,6 @@ export function BoardCard({
 				maxWidthPx: descriptionWidth,
 				maxLines: DESCRIPTION_COLLAPSE_LINES,
 				suffix: DESCRIPTION_COLLAPSE_SUFFIX,
-				measureText: measure,
-			}),
-			expanded: clampTextWithInlineSuffix(displayDescription, {
-				maxWidthPx: descriptionWidth,
-				maxLines: DESCRIPTION_EXPANDED_MAX_LINES,
-				suffix: DESCRIPTION_EXPANDED_SUFFIX,
 				measureText: measure,
 			}),
 		};
@@ -596,273 +586,256 @@ export function BoardCard({
 		};
 	}, [tokenUsage]);
 
-	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
-	const shouldRenderExpandedMarkdown = isDescriptionExpanded && descriptionDisplay.collapsed.isTruncated;
+	const activeDescriptionDisplay = descriptionDisplay.collapsed;
+	const dialogColumnLabel = columnId.replace(/_/g, " ");
 
 	return (
-		<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
-			{(provided, snapshot) => {
-				const isDragging = snapshot.isDragging;
-				const draggableContent = (
-					<div
-						ref={provided.innerRef}
-						{...provided.draggableProps}
-						{...provided.dragHandleProps}
-						className="kb-board-card-shell"
-						data-task-id={card.id}
-						data-column-id={columnId}
-						data-selected={selected}
-						onMouseDownCapture={(event) => {
-							if (!isCardInteractive) {
-								return;
-							}
-							if (isDependencyLinking) {
-								event.preventDefault();
-								event.stopPropagation();
-								return;
-							}
-							if (!event.metaKey && !event.ctrlKey) {
-								return;
-							}
-							const target = event.target as HTMLElement | null;
-							if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
-								return;
-							}
-							event.preventDefault();
-							event.stopPropagation();
-							onDependencyPointerDown?.(card.id, event);
-						}}
-						onClick={(event) => {
-							if (!isCardInteractive) {
-								return;
-							}
-							if (isDependencyLinking) {
-								event.preventDefault();
-								event.stopPropagation();
-								return;
-							}
-							if (event.metaKey || event.ctrlKey) {
-								return;
-							}
-							const target = event.target as HTMLElement | null;
-							if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
-								return;
-							}
-							if (!snapshot.isDragging && onClick) {
-								onClick();
-							}
-						}}
-						style={{
-							...provided.draggableProps.style,
-							marginBottom: 6,
-							cursor: "grab",
-						}}
-						onMouseEnter={() => {
-							setIsHovered(true);
-							onDependencyPointerEnter?.(card.id);
-						}}
-						onMouseMove={() => {
-							if (!isDependencyLinking) {
-								return;
-							}
-							onDependencyPointerEnter?.(card.id);
-						}}
-						onMouseLeave={() => setIsHovered(false)}
-					>
+		<>
+			<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
+				{(provided, snapshot) => {
+					const isDragging = snapshot.isDragging;
+					const draggableContent = (
 						<div
-							className={cn(
-								"rounded-md border border-border-bright bg-surface-2 p-2.5",
-								isDoneCard && "border-status-green/50 bg-status-green/5",
-								isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
-								isDoneCard && isCardInteractive && "hover:border-status-green/60 hover:bg-status-green/10",
-								isDragging && "shadow-lg",
-								isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
-								isDoneCard && isHovered && isCardInteractive && "border-status-green/60 bg-status-green/10",
-								isDependencySource && "kb-board-card-dependency-source",
-								isDependencyTarget && "kb-board-card-dependency-target",
-							)}
+							ref={provided.innerRef}
+							{...provided.draggableProps}
+							{...provided.dragHandleProps}
+							className="kb-board-card-shell"
+							data-task-id={card.id}
+							data-column-id={columnId}
+							data-selected={selected}
+							onMouseDownCapture={(event) => {
+								if (!isCardInteractive) {
+									return;
+								}
+								if (isDependencyLinking) {
+									event.preventDefault();
+									event.stopPropagation();
+									return;
+								}
+								if (!event.metaKey && !event.ctrlKey) {
+									return;
+								}
+								const target = event.target as HTMLElement | null;
+								if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
+									return;
+								}
+								event.preventDefault();
+								event.stopPropagation();
+								onDependencyPointerDown?.(card.id, event);
+							}}
+							onClick={(event) => {
+								if (!isCardInteractive) {
+									return;
+								}
+								if (isDependencyLinking) {
+									event.preventDefault();
+									event.stopPropagation();
+									return;
+								}
+								if (event.metaKey || event.ctrlKey) {
+									return;
+								}
+								const target = event.target as HTMLElement | null;
+								if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
+									return;
+								}
+								if (!snapshot.isDragging && onClick) {
+									onClick();
+								}
+							}}
+							style={{
+								...provided.draggableProps.style,
+								marginBottom: 6,
+								cursor: "grab",
+							}}
+							onMouseEnter={() => {
+								setIsHovered(true);
+								onDependencyPointerEnter?.(card.id);
+							}}
+							onMouseMove={() => {
+								if (!isDependencyLinking) {
+									return;
+								}
+								onDependencyPointerEnter?.(card.id);
+							}}
+							onMouseLeave={() => setIsHovered(false)}
 						>
-							{card.externalIssue || card.prUrl || (workspaceId && workspacePath) ? (
-								<div
-									className="mb-1 flex min-w-0 items-center gap-1.5 empty:hidden"
-									data-testid="board-card-meta-row"
-								>
-									<ExternalIssueBadge issue={card.externalIssue} />
-									<PrBadge card={card} />
-									<DesignDocBadge
-										card={card}
-										workspaceId={workspaceId ?? null}
-										workspacePath={workspacePath}
-										designDoc={designDoc}
-									/>
-								</div>
-							) : null}
-							<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
-								{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
-								<div className="flex-1 min-w-0">
-									{isEditingTitle ? (
-										<input
-											ref={titleInputRef}
-											value={draftTitle}
-											onChange={(event) => setDraftTitle(event.currentTarget.value)}
-											onBlur={submitTitle}
-											onKeyDown={handleTitleKeyDown}
-											onMouseDown={(event) => {
-												event.stopPropagation();
-											}}
-											className="h-7 w-full rounded-md border border-border-focus bg-surface-2 px-2 text-sm font-medium text-text-primary focus:outline-none"
-										/>
-									) : onSaveTitle ? (
-										<div className="flex items-center gap-1 min-w-0">
-											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
-												{card.id}
-											</span>
-											<p
-												className={cn(
-													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
-													isTrashCard && "line-through text-text-tertiary",
-												)}
-											>
-												{displayTitle}
-											</p>
-											<button
-												type="button"
-												aria-label="Edit task title"
-												onMouseDown={stopEvent}
-												onClick={(event) => {
-													stopEvent(event);
-													setDraftTitle(card.title);
-													setIsEditingTitle(true);
-												}}
-												className={cn(
-													"shrink-0 cursor-pointer rounded-sm p-0.5 text-text-tertiary hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-													isHovered ? "opacity-100" : "opacity-0",
-												)}
-											>
-												<Pencil size={12} />
-											</button>
-										</div>
-									) : (
-										<div className="flex items-center gap-1 min-w-0">
-											<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
-												{card.id}
-											</span>
-											<p
-												className={cn(
-													"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
-													isTrashCard && "line-through text-text-tertiary",
-												)}
-											>
-												{displayTitle}
-											</p>
-										</div>
-									)}
-								</div>
-								{columnId === "backlog" ? (
-									<Button
-										icon={<Play size={14} />}
-										variant="ghost"
-										size="sm"
-										aria-label="Start task"
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onStart?.(card.id);
-										}}
-									/>
-								) : columnId === "review" ? (
-									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
-										variant="ghost"
-										size="sm"
-										disabled={isMoveToTrashLoading}
-										aria-label="Abandon task"
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onMoveToTrash?.(card.id);
-										}}
-									/>
-								) : isDoneCard ? (
-									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
-										variant="ghost"
-										size="sm"
-										disabled={isMoveToTrashLoading}
-										aria-label="Trash task"
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onMoveToTrash?.(card.id);
-										}}
-									/>
-								) : isTrashCard ? (
-									<Tooltip
-										side="bottom"
-										content={
-											<>
-												{trashRestoreLabel}
-												<br />
-												in new worktree
-											</>
-										}
+							<div
+								className={cn(
+									"rounded-md border border-border-bright bg-surface-2 p-2.5",
+									isDoneCard && "border-status-green/50 bg-status-green/5",
+									isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
+									isDoneCard && isCardInteractive && "hover:border-status-green/60 hover:bg-status-green/10",
+									isDragging && "shadow-lg",
+									isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
+									isDoneCard && isHovered && isCardInteractive && "border-status-green/60 bg-status-green/10",
+									isDependencySource && "kb-board-card-dependency-source",
+									isDependencyTarget && "kb-board-card-dependency-target",
+								)}
+							>
+								{card.externalIssue || card.prUrl || (workspaceId && workspacePath) ? (
+									<div
+										className="mb-1 flex min-w-0 items-center gap-1.5 empty:hidden"
+										data-testid="board-card-meta-row"
 									>
+										<ExternalIssueBadge issue={card.externalIssue} />
+										<PrBadge card={card} />
+										<DesignDocBadge
+											card={card}
+											workspaceId={workspaceId ?? null}
+											workspacePath={workspacePath}
+											designDoc={designDoc}
+										/>
+									</div>
+								) : null}
+								<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
+									{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
+									<div className="flex-1 min-w-0">
+										{isEditingTitle ? (
+											<input
+												ref={titleInputRef}
+												value={draftTitle}
+												onChange={(event) => setDraftTitle(event.currentTarget.value)}
+												onBlur={submitTitle}
+												onKeyDown={handleTitleKeyDown}
+												onMouseDown={(event) => {
+													event.stopPropagation();
+												}}
+												className="h-7 w-full rounded-md border border-border-focus bg-surface-2 px-2 text-sm font-medium text-text-primary focus:outline-none"
+											/>
+										) : onSaveTitle ? (
+											<div className="flex items-center gap-1 min-w-0">
+												<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+													{card.id}
+												</span>
+												<p
+													className={cn(
+														"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
+														isTrashCard && "line-through text-text-tertiary",
+													)}
+												>
+													{displayTitle}
+												</p>
+												<button
+													type="button"
+													aria-label="Edit task title"
+													onMouseDown={stopEvent}
+													onClick={(event) => {
+														stopEvent(event);
+														setDraftTitle(card.title);
+														setIsEditingTitle(true);
+													}}
+													className={cn(
+														"shrink-0 cursor-pointer rounded-sm p-0.5 text-text-tertiary hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+														isHovered ? "opacity-100" : "opacity-0",
+													)}
+												>
+													<Pencil size={12} />
+												</button>
+											</div>
+										) : (
+											<div className="flex items-center gap-1 min-w-0">
+												<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+													{card.id}
+												</span>
+												<p
+													className={cn(
+														"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
+														isTrashCard && "line-through text-text-tertiary",
+													)}
+												>
+													{displayTitle}
+												</p>
+											</div>
+										)}
+									</div>
+									{columnId === "backlog" ? (
 										<Button
-											icon={
-												sessionSummary?.agentSessionLifecycle === "gone" ? (
-													<Play size={12} />
-												) : (
-													<RotateCcw size={12} />
-												)
-											}
+											icon={<Play size={14} />}
 											variant="ghost"
 											size="sm"
-											aria-label={`${trashRestoreLabel} task from archive`}
+											aria-label="Start task"
 											onMouseDown={stopEvent}
 											onClick={(event) => {
 												stopEvent(event);
-												onRestoreFromTrash?.(card.id);
+												onStart?.(card.id);
 											}}
+										/>
+									) : columnId === "review" ? (
+										<Button
+											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+											variant="ghost"
+											size="sm"
+											disabled={isMoveToTrashLoading}
+											aria-label="Abandon task"
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onMoveToTrash?.(card.id);
+											}}
+										/>
+									) : isDoneCard ? (
+										<Button
+											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+											variant="ghost"
+											size="sm"
+											disabled={isMoveToTrashLoading}
+											aria-label="Trash task"
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onMoveToTrash?.(card.id);
+											}}
+										/>
+									) : isTrashCard ? (
+										<Tooltip
+											side="bottom"
+											content={
+												<>
+													{trashRestoreLabel}
+													<br />
+													in new worktree
+												</>
+											}
 										>
-											{trashRestoreLabel}
-										</Button>
-									</Tooltip>
-								) : null}
-							</div>
-							{needsInput ? (
-								<div className="mt-1">
-									<span className="inline-flex max-w-full items-center gap-1 rounded-md border border-status-blue/40 bg-status-blue/10 px-1.5 py-0.5 text-xs font-medium text-status-blue">
-										<MessageCircleQuestion size={12} className="shrink-0" />
-										<span className="truncate">Needs input</span>
-									</span>
-								</div>
-							) : null}
-							{displayDescription ? (
-								<div ref={descriptionContainerRef}>
-									{shouldRenderExpandedMarkdown ? (
-										<div className="mt-0.5 max-h-72 overflow-y-auto pr-1">
-											<ClineMarkdownContent content={card.prompt} />
-											<button
-												type="button"
-												className="mt-1 inline cursor-pointer rounded-sm text-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-												aria-expanded={isDescriptionExpanded}
-												aria-label="Collapse task description"
+											<Button
+												icon={
+													sessionSummary?.agentSessionLifecycle === "gone" ? (
+														<Play size={12} />
+													) : (
+														<RotateCcw size={12} />
+													)
+												}
+												variant="ghost"
+												size="sm"
+												aria-label={`${trashRestoreLabel} task from archive`}
 												onMouseDown={stopEvent}
 												onClick={(event) => {
 													stopEvent(event);
-													setIsDescriptionExpanded(false);
+													onRestoreFromTrash?.(card.id);
 												}}
 											>
-												{DESCRIPTION_COLLAPSE_LABEL}
-											</button>
-										</div>
-									) : (
+												{trashRestoreLabel}
+											</Button>
+										</Tooltip>
+									) : null}
+								</div>
+								{needsInput ? (
+									<div className="mt-1">
+										<span className="inline-flex max-w-full items-center gap-1 rounded-md border border-status-blue/40 bg-status-blue/10 px-1.5 py-0.5 text-xs font-medium text-status-blue">
+											<MessageCircleQuestion size={12} className="shrink-0" />
+											<span className="truncate">Needs input</span>
+										</span>
+									</div>
+								) : null}
+								{displayDescription ? (
+									<div ref={descriptionContainerRef}>
 										<p
 											ref={descriptionRef}
 											className={cn(
 												"text-sm leading-[1.4]",
 												isTrashCard ? "text-text-tertiary" : "text-text-secondary",
-												!isDescriptionMeasured && !isDescriptionExpanded && "line-clamp-3",
+												!isDescriptionMeasured && "line-clamp-3",
 											)}
 											style={{
 												margin: "2px 0 0",
@@ -877,12 +850,12 @@ export function BoardCard({
 													<button
 														type="button"
 														className="inline cursor-pointer rounded-sm text-text-tertiary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [font:inherit]"
-														aria-expanded={isDescriptionExpanded}
-														aria-label="Expand task description"
+														aria-expanded={isDescriptionDialogOpen}
+														aria-label="Open task description"
 														onMouseDown={stopEvent}
 														onClick={(event) => {
 															stopEvent(event);
-															setIsDescriptionExpanded(true);
+															setIsDescriptionDialogOpen(true);
 														}}
 													>
 														{DESCRIPTION_EXPAND_LABEL}
@@ -890,209 +863,263 @@ export function BoardCard({
 												</>
 											) : null}
 										</p>
-									)}
-								</div>
-							) : null}
-							{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
-								<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
-									{isPlanCard ? (
+									</div>
+								) : null}
+								{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
+									<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
+										{isPlanCard ? (
+											<span
+												className={cn(
+													"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+													isTrashCard
+														? "border-border text-text-tertiary bg-surface-1"
+														: "border-status-purple/30 bg-status-purple/10 text-status-purple",
+												)}
+											>
+												Plan
+											</span>
+										) : null}
+										{taskAgentSettings ? (
+											<span
+												className={cn(
+													"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+													isTrashCard
+														? "border-border text-text-tertiary bg-surface-1"
+														: "border-status-blue/30 bg-status-blue/10 text-status-blue",
+												)}
+											>
+												<Bot size={12} className="shrink-0" />
+												<span className="truncate">
+													{taskAgentSettings.agentLabel}
+													{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
+													{taskAgentSettings.modelLabel ? (
+														<span
+															className={cn(
+																taskAgentSettings.modelLabel.isDefault && "text-text-tertiary",
+															)}
+														>
+															{taskAgentSettings.modelLabel.text}
+														</span>
+													) : null}
+												</span>
+											</span>
+										) : null}
+										{tokenUsageChip ? (
+											<span
+												className="shrink-0 font-mono text-[11px] text-text-tertiary"
+												title={tokenUsageChip.title}
+											>
+												{tokenUsageChip.label}
+											</span>
+										) : null}
+										{completionPolicyBadgeLabel ? (
+											<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+												{completionPolicyBadgeLabel}
+											</span>
+										) : null}
+									</div>
+								) : null}
+								{sessionActivity ? (
+									<div
+										className="flex gap-1.5 items-start mt-[6px]"
+										style={{
+											color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
+										}}
+									>
 										<span
-											className={cn(
-												"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
-												isTrashCard
-													? "border-border text-text-tertiary bg-surface-1"
-													: "border-status-purple/30 bg-status-purple/10 text-status-purple",
-											)}
-										>
-											Plan
-										</span>
-									) : null}
-									{taskAgentSettings ? (
-										<span
-											className={cn(
-												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-												isTrashCard
-													? "border-border text-text-tertiary bg-surface-1"
-													: "border-status-blue/30 bg-status-blue/10 text-status-blue",
-											)}
-										>
-											<Bot size={12} className="shrink-0" />
-											<span className="truncate">
-												{taskAgentSettings.agentLabel}
-												{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
-												{taskAgentSettings.modelLabel ? (
+											className="inline-block shrink-0 rounded-full"
+											style={{
+												width: 6,
+												height: 6,
+												backgroundColor: isTrashCard
+													? SESSION_ACTIVITY_COLOR.muted
+													: sessionActivity.dotColor,
+												marginTop: 4,
+											}}
+										/>
+										<div className="min-w-0 flex-1">
+											<p className="m-0 font-mono truncate" style={{ fontSize: 12 }}>
+												{sessionActivity.text}
+											</p>
+										</div>
+									</div>
+								) : null}
+								{showWorkspaceStatus && reviewWorkspacePath ? (
+									<p
+										className="font-mono"
+										style={{
+											margin: "4px 0 0",
+											fontSize: 12,
+											lineHeight: 1.4,
+											whiteSpace: "normal",
+											overflowWrap: "anywhere",
+											color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
+										}}
+									>
+										{isTrashCard ? (
+											<>
+												{reviewWorkspacePath ? (
 													<span
-														className={cn(taskAgentSettings.modelLabel.isDefault && "text-text-tertiary")}
+														style={{
+															color: SESSION_ACTIVITY_COLOR.muted,
+															textDecoration: "line-through",
+														}}
 													>
-														{taskAgentSettings.modelLabel.text}
+														{reviewWorkspacePath}
 													</span>
 												) : null}
-											</span>
-										</span>
-									) : null}
-									{tokenUsageChip ? (
-										<span
-											className="shrink-0 font-mono text-[11px] text-text-tertiary"
-											title={tokenUsageChip.title}
-										>
-											{tokenUsageChip.label}
-										</span>
-									) : null}
-									{completionPolicyBadgeLabel ? (
-										<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
-											{completionPolicyBadgeLabel}
-										</span>
-									) : null}
-								</div>
-							) : null}
-							{sessionActivity ? (
-								<div
-									className="flex gap-1.5 items-start mt-[6px]"
-									style={{
-										color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
-									}}
-								>
-									<span
-										className="inline-block shrink-0 rounded-full"
-										style={{
-											width: 6,
-											height: 6,
-											backgroundColor: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : sessionActivity.dotColor,
-											marginTop: 4,
-										}}
-									/>
-									<div className="min-w-0 flex-1">
-										<p className="m-0 font-mono truncate" style={{ fontSize: 12 }}>
-											{sessionActivity.text}
-										</p>
-									</div>
-								</div>
-							) : null}
-							{showWorkspaceStatus && reviewWorkspacePath ? (
-								<p
-									className="font-mono"
-									style={{
-										margin: "4px 0 0",
-										fontSize: 12,
-										lineHeight: 1.4,
-										whiteSpace: "normal",
-										overflowWrap: "anywhere",
-										color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
-									}}
-								>
-									{isTrashCard ? (
-										<>
-											{reviewWorkspacePath ? (
-												<span
+											</>
+										) : reviewWorkspaceSnapshot ? (
+											<>
+												<GitBranch
+													size={10}
 													style={{
-														color: SESSION_ACTIVITY_COLOR.muted,
-														textDecoration: "line-through",
+														display: "inline",
+														color: SESSION_ACTIVITY_COLOR.secondary,
+														margin: "0px 4px 2px",
+														verticalAlign: "middle",
 													}}
-												>
-													{reviewWorkspacePath}
-												</span>
-											) : null}
-										</>
-									) : reviewWorkspaceSnapshot ? (
-										<>
-											<GitBranch
-												size={10}
-												style={{
-													display: "inline",
-													color: SESSION_ACTIVITY_COLOR.secondary,
-													margin: "0px 4px 2px",
-													verticalAlign: "middle",
-												}}
-											/>
-											<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewRefLabel}</span>
-											{reviewChangeSummary ? (
-												<>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
-														{reviewChangeSummary.filesLabel}
-													</span>
-													<span className="text-status-green"> +{reviewChangeSummary.additions}</span>
-													<span className="text-status-red"> -{reviewChangeSummary.deletions}</span>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
-												</>
-											) : null}
-										</>
-									) : null}
-								</p>
-							) : null}
-							{showImplementHere ? (
-								<div className="mt-1.5">
+												/>
+												<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewRefLabel}</span>
+												{reviewChangeSummary ? (
+													<>
+														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
+														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
+															{reviewChangeSummary.filesLabel}
+														</span>
+														<span className="text-status-green"> +{reviewChangeSummary.additions}</span>
+														<span className="text-status-red"> -{reviewChangeSummary.deletions}</span>
+														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
+													</>
+												) : null}
+											</>
+										) : null}
+									</p>
+								) : null}
+								{showImplementHere ? (
+									<div className="mt-1.5">
+										<Button
+											variant="primary"
+											size="sm"
+											fill
+											icon={<Hammer size={14} />}
+											aria-label="Implement plan in this session"
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onImplementHere?.(card.id);
+											}}
+										>
+											Implement here
+										</Button>
+									</div>
+								) : null}
+								{showReviewGitActions ? (
+									<div className="flex gap-1.5 mt-1.5">
+										<Button
+											variant="primary"
+											size="sm"
+											icon={isCommitLoading ? <Spinner size={12} /> : undefined}
+											disabled={isAnyGitActionLoading}
+											style={{ flex: "1 1 0" }}
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onCommit?.(card.id);
+											}}
+										>
+											Commit
+										</Button>
+										<Button
+											variant="primary"
+											size="sm"
+											icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
+											disabled={isAnyGitActionLoading}
+											style={{ flex: "1 1 0" }}
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onOpenPr?.(card.id);
+											}}
+										>
+											Open PR
+										</Button>
+									</div>
+								) : null}
+								{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
 									<Button
-										variant="primary"
 										size="sm"
 										fill
-										icon={<Hammer size={14} />}
-										aria-label="Implement plan in this session"
+										style={{ marginTop: 12 }}
 										onMouseDown={stopEvent}
 										onClick={(event) => {
 											stopEvent(event);
-											onImplementHere?.(card.id);
+											onCancelAutomaticAction(card.id);
 										}}
 									>
-										Implement here
+										{cancelAutomaticActionLabel}
 									</Button>
-								</div>
-							) : null}
-							{showReviewGitActions ? (
-								<div className="flex gap-1.5 mt-1.5">
-									<Button
-										variant="primary"
-										size="sm"
-										icon={isCommitLoading ? <Spinner size={12} /> : undefined}
-										disabled={isAnyGitActionLoading}
-										style={{ flex: "1 1 0" }}
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onCommit?.(card.id);
-										}}
-									>
-										Commit
-									</Button>
-									<Button
-										variant="primary"
-										size="sm"
-										icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
-										disabled={isAnyGitActionLoading}
-										style={{ flex: "1 1 0" }}
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onOpenPr?.(card.id);
-										}}
-									>
-										Open PR
-									</Button>
-								</div>
-							) : null}
-							{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
-								<Button
-									size="sm"
-									fill
-									style={{ marginTop: 12 }}
-									onMouseDown={stopEvent}
-									onClick={(event) => {
-										stopEvent(event);
-										onCancelAutomaticAction(card.id);
-									}}
-								>
-									{cancelAutomaticActionLabel}
-								</Button>
-							) : null}
+								) : null}
+							</div>
 						</div>
-					</div>
-				);
+					);
 
-				if (isDragging && typeof document !== "undefined") {
-					return createPortal(draggableContent, document.body);
-				}
-				return draggableContent;
-			}}
-		</Draggable>
+					if (isDragging && typeof document !== "undefined") {
+						return createPortal(draggableContent, document.body);
+					}
+					return draggableContent;
+				}}
+			</Draggable>
+			<Dialog
+				open={isDescriptionDialogOpen}
+				onOpenChange={setIsDescriptionDialogOpen}
+				contentClassName="max-w-4xl"
+				contentAriaDescribedBy={undefined}
+				onEscapeKeyDown={(event) => {
+					event.stopPropagation();
+				}}
+			>
+				<DialogHeader title={`${card.id} ${displayTitle}`} />
+				<DialogBody className="max-h-[76vh]">
+					<div className="mb-3 flex min-w-0 flex-wrap items-center gap-1.5">
+						<span className="inline-flex shrink-0 items-center rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-xs capitalize text-text-tertiary">
+							{dialogColumnLabel}
+						</span>
+						<ExternalIssueBadge issue={card.externalIssue} />
+						<PrBadge card={card} />
+						{isPlanCard ? (
+							<span className="inline-flex shrink-0 items-center rounded-md border border-status-purple/30 bg-status-purple/10 px-1.5 py-0.5 font-mono text-xs text-status-purple">
+								Plan
+							</span>
+						) : null}
+						{taskAgentSettings ? (
+							<span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-status-blue/30 bg-status-blue/10 px-1.5 py-0.5 text-xs text-status-blue">
+								<Bot size={12} className="shrink-0" />
+								<span className="truncate">
+									{taskAgentSettings.agentLabel}
+									{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
+									{taskAgentSettings.modelLabel ? (
+										<span className={cn(taskAgentSettings.modelLabel.isDefault && "text-text-tertiary")}>
+											{taskAgentSettings.modelLabel.text}
+										</span>
+									) : null}
+								</span>
+							</span>
+						) : null}
+						{tokenUsageChip ? (
+							<span className="shrink-0 font-mono text-[11px] text-text-tertiary" title={tokenUsageChip.title}>
+								{tokenUsageChip.label}
+							</span>
+						) : null}
+						{completionPolicyBadgeLabel ? (
+							<span className="shrink-0 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+								{completionPolicyBadgeLabel}
+							</span>
+						) : null}
+					</div>
+					<ClineMarkdownContent content={card.prompt} />
+				</DialogBody>
+			</Dialog>
+		</>
 	);
 }
