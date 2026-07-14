@@ -5,6 +5,7 @@ import type { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ClineTaskMessage, ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
 import type {
+	RuntimeBoardData,
 	RuntimeClineMcpServerAuthStatus,
 	RuntimeStateStreamClineSessionContextUpdatedMessage,
 	RuntimeStateStreamErrorMessage,
@@ -20,7 +21,7 @@ import type {
 	RuntimeStateStreamWorkspaceStateMessage,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
-import { setCardPrUrl } from "../core/task-board-mutations";
+import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
 import { mutateWorkspaceState } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
@@ -62,6 +63,29 @@ export interface RuntimeStateHub {
 	close: () => Promise<void>;
 }
 
+export function applyPersistedCardPrToBoard(
+	board: RuntimeBoardData,
+	taskId: string,
+	pr: { url: string; state: "open" | "merged" | "closed"; number: number },
+): { board: RuntimeBoardData; updated: boolean } {
+	const previousColumnId = getTaskColumnId(board, taskId);
+	const result = setCardPrUrl(board, taskId, pr);
+	if (!result.updated) {
+		return result;
+	}
+	if (pr.state !== "merged" && pr.state !== "closed") {
+		return result;
+	}
+	if (previousColumnId !== "in_progress" && previousColumnId !== "review") {
+		return result;
+	}
+	// Closed-without-merge PRs are archived to trash by design, so abandoned work
+	// does not auto-start linked dependent cards.
+	const targetColumnId = pr.state === "merged" ? "done" : "trash";
+	const moved = moveTaskToColumn(result.board, taskId, targetColumnId);
+	return { board: moved.board, updated: true };
+}
+
 export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): RuntimeStateHub {
 	const terminalSummaryUnsubscribeByWorkspaceId = new Map<string, () => void>();
 	const clineSummaryUnsubscribeByWorkspaceId = new Map<string, () => void>();
@@ -89,12 +113,12 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				sendRuntimeStateMessage(client, payload);
 			}
 		},
-		// Persist a first-detected PR onto the card, then push the updated board to
-		// clients so the card renders its PR link. `setCardPrUrl` is idempotent and
-		// `mutateWorkspaceState` skips the write when nothing changed.
+		// Persist a detected PR onto the card, then push the updated board to
+		// clients so the card renders its live PR state. `setCardPrUrl` is
+		// idempotent and `mutateWorkspaceState` skips the write when nothing changed.
 		persistCardPr: async ({ workspaceId, workspacePath, taskId, pr }) => {
 			const mutation = await mutateWorkspaceState(workspacePath, (state) => {
-				const result = setCardPrUrl(state.board, taskId, pr);
+				const result = applyPersistedCardPrToBoard(state.board, taskId, pr);
 				return { board: result.board, value: result.updated, save: result.updated };
 			});
 			if (mutation.value) {

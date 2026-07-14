@@ -39,14 +39,20 @@ vi.mock("../../../src/workspace/git-sync", () => ({
 	})),
 }));
 
-import { createWorkspaceMetadataMonitor } from "../../../src/server/workspace-metadata-monitor";
+import {
+	createWorkspaceMetadataMonitor,
+	PR_STATE_REFRESH_MIN_MS,
+} from "../../../src/server/workspace-metadata-monitor";
 
 const PR: CardPrRef = {
 	url: "https://github.com/cline/kanban/pull/42",
 	state: "open",
 	number: 42,
 };
-const PR_CAPTURE_INTERVAL_MS = 10_000;
+const MERGED_PR: CardPrRef = {
+	...PR,
+	state: "merged",
+};
 
 function boardWith(columnId: RuntimeBoardColumnId, cardOverrides?: Record<string, unknown>): RuntimeBoardData {
 	return {
@@ -102,55 +108,6 @@ describe("workspace metadata monitor PR capture", () => {
 		vi.clearAllMocks();
 	});
 
-	it("given a Review card whose branch resolves to a PR and no subscribed client, when the background capture runs, then the PR is resolved and persisted", async () => {
-		// given
-		await monitor.updateWorkspaceState({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			board: boardWith("review"),
-		});
-
-		// when
-		await vi.advanceTimersByTimeAsync(PR_CAPTURE_INTERVAL_MS);
-
-		// then
-		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
-		expect(persistCardPr).toHaveBeenCalledTimes(1);
-		expect(persistCardPr).toHaveBeenCalledWith({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			taskId: "task-1",
-			pr: PR,
-		});
-	});
-
-	it("given the last subscriber disconnects, when a card is in Review, then PR capture still runs", async () => {
-		// given
-		await monitor.connectWorkspace({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			board: boardWith("in_progress"),
-		});
-		monitor.disconnectWorkspace("ws-1");
-		await monitor.updateWorkspaceState({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			board: boardWith("review"),
-		});
-
-		// when
-		await vi.advanceTimersByTimeAsync(PR_CAPTURE_INTERVAL_MS);
-
-		// then
-		expect(persistCardPr).toHaveBeenCalledTimes(1);
-		expect(persistCardPr).toHaveBeenCalledWith({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			taskId: "task-1",
-			pr: PR,
-		});
-	});
-
 	it("given a card is moved Review to Done before any capture ran, when the transition is processed, then its PR is captured idempotently", async () => {
 		// given
 		await monitor.updateWorkspaceState({
@@ -182,11 +139,11 @@ describe("workspace metadata monitor PR capture", () => {
 		await monitor.updateWorkspaceState({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
-			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
+			board: boardWith("review", { prUrl: PR.url, prState: "merged", prNumber: 42 }),
 		});
 
 		// when
-		await vi.advanceTimersByTimeAsync(PR_CAPTURE_INTERVAL_MS);
+		await Promise.resolve();
 
 		// then
 		expect(resolveCardPr).not.toHaveBeenCalled();
@@ -215,16 +172,62 @@ describe("workspace metadata monitor PR capture", () => {
 		});
 	});
 
-	it("given a subscribed review card that already stores a PR, when the metadata refresh runs, then it does not re-resolve", async () => {
+	it("given a stored open PR that has since merged, when the monitor re-polls past the refresh interval, then the card's prState becomes merged", async () => {
+		// given
+		resolveCardPr.mockResolvedValue(PR);
+		await monitor.connectWorkspace({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
+		});
+		resolveCardPr.mockClear();
+		persistCardPr.mockClear();
+		resolveCardPr.mockResolvedValue(MERGED_PR);
+
+		// when
+		await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS);
+
+		// then
+		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
+		expect(persistCardPr).toHaveBeenCalledWith({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			taskId: "task-1",
+			pr: MERGED_PR,
+		});
+	});
+
+	it.each(["merged", "closed"] as const)(
+		"given a card whose prState is already terminal (%s), when the monitor polls, then it does not re-run gh for that card",
+		async (prState) => {
+			// given
+			await monitor.connectWorkspace({
+				workspaceId: "ws-1",
+				workspacePath: "/repo",
+				board: boardWith("review", { prUrl: PR.url, prState, prNumber: 42 }),
+			});
+
+			// when
+			await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS);
+
+			// then
+			expect(resolveCardPr).not.toHaveBeenCalled();
+			expect(persistCardPr).not.toHaveBeenCalled();
+		},
+	);
+
+	it("given a card checked less than PR_STATE_REFRESH_MIN_MS ago, when the monitor polls, then it is skipped", async () => {
 		// given
 		await monitor.connectWorkspace({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
 			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
 		});
+		resolveCardPr.mockClear();
+		persistCardPr.mockClear();
 
 		// when
-		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS - 1);
 
 		// then
 		expect(resolveCardPr).not.toHaveBeenCalled();

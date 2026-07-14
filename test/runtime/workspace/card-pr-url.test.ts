@@ -81,6 +81,50 @@ describe("selectCardPrUrl", () => {
 		});
 	});
 
+	it("given a PR list with only a closed-unmerged PR, when selectCardPrUrl runs, then it returns that PR with state closed", () => {
+		const result = selectCardPrUrl(
+			JSON.stringify([
+				{
+					url: "https://github.com/cline/kanban/pull/43",
+					state: "CLOSED",
+					number: 43,
+					title: "Closed without merge",
+				},
+			]),
+		);
+
+		expect(result).toEqual({
+			url: "https://github.com/cline/kanban/pull/43",
+			state: "closed",
+			number: 43,
+		});
+	});
+
+	it("selects the highest-numbered terminal PR across merged and closed PRs", () => {
+		const result = selectCardPrUrl(
+			JSON.stringify([
+				{
+					url: "https://github.com/cline/kanban/pull/40",
+					state: "MERGED",
+					number: 40,
+					title: "Merged work",
+				},
+				{
+					url: "https://github.com/cline/kanban/pull/45",
+					state: "CLOSED",
+					number: 45,
+					title: "Later closed work",
+				},
+			]),
+		);
+
+		expect(result).toEqual({
+			url: "https://github.com/cline/kanban/pull/45",
+			state: "closed",
+			number: 45,
+		});
+	});
+
 	it("returns null for an empty array", () => {
 		expect(selectCardPrUrl("[]")).toBeNull();
 	});

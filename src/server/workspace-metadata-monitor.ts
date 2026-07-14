@@ -1,6 +1,7 @@
 import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
+	RuntimeCardPrState,
 	RuntimeGitSyncSummary,
 	RuntimeTaskWorkspaceMetadata,
 	RuntimeWorkspaceMetadata,
@@ -11,7 +12,7 @@ import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree";
 
 const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
-const WORKSPACE_PR_CAPTURE_INTERVAL_MS = 10_000;
+export const PR_STATE_REFRESH_MIN_MS = 60_000;
 // A card that reaches review without a PR yet is re-checked at most this often,
 // so a review card lacking a pushed PR does not spawn a `gh` subprocess on every
 // one-second poll. Capturing a found PR is idempotent and never re-runs.
@@ -22,6 +23,7 @@ interface TrackedTaskWorkspace {
 	baseRef: string;
 	columnId: RuntimeBoardColumnId;
 	hasStoredPrUrl: boolean;
+	storedPrState: RuntimeCardPrState | null;
 }
 
 interface CachedHomeGitMetadata {
@@ -41,17 +43,18 @@ interface WorkspaceMetadataEntry {
 	trackedTasks: TrackedTaskWorkspace[];
 	subscriberCount: number;
 	pollTimer: NodeJS.Timeout | null;
-	prCaptureTimer: NodeJS.Timeout | null;
 	refreshPromise: Promise<RuntimeWorkspaceMetadata> | null;
-	prCapturePromise: Promise<void> | null;
 	homeGit: CachedHomeGitMetadata;
 	taskMetadataByTaskId: Map<string, CachedTaskWorkspaceMetadata>;
-	// Task ids whose PR we have already captured this session, so we never
-	// re-resolve or re-persist after the first detection.
+	// Task ids whose PR we have already captured this session. Stored open PRs
+	// still refresh below; terminal PRs stop because reopen handling is out of scope.
 	capturedPrTaskIds: Set<string>;
 	// Last `gh` resolve attempt per task id (epoch ms), throttling review cards
 	// that do not have a PR yet — see PR_RESOLVE_RETRY_INTERVAL_MS.
 	prResolveAttemptedAtByTaskId: Map<string, number>;
+	// Last `gh` state refresh per task id (epoch ms), keeping stored open PR
+	// re-resolution to at most once per PR_STATE_REFRESH_MIN_MS.
+	lastPrCheckedAtByTaskId: Map<string, number>;
 }
 
 export interface WorkspaceMetadataCardPrCapture {
@@ -102,6 +105,7 @@ function collectTrackedTasks(board: RuntimeBoardData): TrackedTaskWorkspace[] {
 				baseRef: card.baseRef,
 				columnId: column.id,
 				hasStoredPrUrl: typeof card.prUrl === "string" && card.prUrl.length > 0,
+				storedPrState: card.prState ?? null,
 			});
 		}
 	}
@@ -177,11 +181,10 @@ function createWorkspaceEntry(workspaceId: string, workspacePath: string): Works
 		trackedTasks: [],
 		capturedPrTaskIds: new Set<string>(),
 		prResolveAttemptedAtByTaskId: new Map<string, number>(),
+		lastPrCheckedAtByTaskId: new Map<string, number>(),
 		subscriberCount: 0,
 		pollTimer: null,
-		prCaptureTimer: null,
 		refreshPromise: null,
-		prCapturePromise: null,
 		homeGit: {
 			summary: null,
 			stateToken: null,
@@ -318,18 +321,30 @@ export function createWorkspaceMetadataMonitor(
 		metadata: RuntimeTaskWorkspaceMetadata | null,
 		options?: { ignoreRetryThrottle?: boolean },
 	): Promise<void> => {
-		if (task.hasStoredPrUrl || entry.capturedPrTaskIds.has(task.taskId)) {
+		if (task.hasStoredPrUrl) {
+			if (task.storedPrState !== "open") {
+				return;
+			}
+			const now = Date.now();
+			const lastCheckedAt = entry.lastPrCheckedAtByTaskId.get(task.taskId) ?? 0;
+			if (!options?.ignoreRetryThrottle && now - lastCheckedAt < PR_STATE_REFRESH_MIN_MS) {
+				return;
+			}
+			entry.lastPrCheckedAtByTaskId.set(task.taskId, now);
+		} else if (entry.capturedPrTaskIds.has(task.taskId)) {
 			return;
 		}
 		if (!metadata || !metadata.exists || !metadata.branch) {
 			return;
 		}
-		const now = Date.now();
-		const lastAttemptAt = entry.prResolveAttemptedAtByTaskId.get(task.taskId) ?? 0;
-		if (!options?.ignoreRetryThrottle && now - lastAttemptAt < PR_RESOLVE_RETRY_INTERVAL_MS) {
-			return;
+		if (!task.hasStoredPrUrl) {
+			const now = Date.now();
+			const lastAttemptAt = entry.prResolveAttemptedAtByTaskId.get(task.taskId) ?? 0;
+			if (!options?.ignoreRetryThrottle && now - lastAttemptAt < PR_RESOLVE_RETRY_INTERVAL_MS) {
+				return;
+			}
+			entry.prResolveAttemptedAtByTaskId.set(task.taskId, now);
 		}
-		entry.prResolveAttemptedAtByTaskId.set(task.taskId, now);
 
 		let pr: CardPrRef | null = null;
 		try {
@@ -341,9 +356,11 @@ export function createWorkspaceMetadataMonitor(
 			return;
 		}
 
-		// Mark captured before persisting so a concurrent refresh cannot
-		// double-resolve; roll back on failure so a later refresh can retry.
-		entry.capturedPrTaskIds.add(task.taskId);
+		if (!task.hasStoredPrUrl) {
+			// Mark captured before persisting so a concurrent refresh cannot
+			// double-resolve; roll back on failure so a later refresh can retry.
+			entry.capturedPrTaskIds.add(task.taskId);
+		}
 		try {
 			await deps.persistCardPr?.({
 				workspaceId: entry.workspaceId,
@@ -352,19 +369,21 @@ export function createWorkspaceMetadataMonitor(
 				pr,
 			});
 		} catch {
-			entry.capturedPrTaskIds.delete(task.taskId);
+			if (!task.hasStoredPrUrl) {
+				entry.capturedPrTaskIds.delete(task.taskId);
+			}
 		}
 	};
 
-	// Capture the PR of any review card whose branch now leads to one, exactly
-	// once. Never throws — a gh/persist failure just means "retry on a later
-	// capture window; no link yet".
+	// Capture review cards that do not yet have a PR, and refresh stored open PRs
+	// until they become terminal. Never throws — a gh/persist failure just means
+	// "retry on a later refresh".
 	const captureTrackedCardPrs = async (entry: WorkspaceMetadataEntry): Promise<void> => {
 		if (!deps.persistCardPr) {
 			return;
 		}
 		for (const task of entry.trackedTasks) {
-			if (task.columnId !== "review") {
+			if (!task.hasStoredPrUrl && task.columnId !== "review") {
 				continue;
 			}
 			const metadata = entry.taskMetadataByTaskId.get(task.taskId)?.data;
@@ -378,52 +397,6 @@ export function createWorkspaceMetadataMonitor(
 		}
 		clearInterval(entry.pollTimer);
 		entry.pollTimer = null;
-	};
-
-	const stopWorkspacePrCaptureTimer = (entry: WorkspaceMetadataEntry) => {
-		if (!entry.prCaptureTimer) {
-			return;
-		}
-		clearInterval(entry.prCaptureTimer);
-		entry.prCaptureTimer = null;
-	};
-
-	const captureWorkspacePrs = async (workspaceId: string): Promise<void> => {
-		const entry = workspaces.get(workspaceId);
-		if (!entry || !deps.persistCardPr) {
-			return;
-		}
-		if (entry.prCapturePromise) {
-			return await entry.prCapturePromise;
-		}
-
-		entry.prCapturePromise = (async () => {
-			const nextTaskEntries = await Promise.all(
-				entry.trackedTasks.map(async (task) => {
-					if (task.columnId !== "review" || task.hasStoredPrUrl || entry.capturedPrTaskIds.has(task.taskId)) {
-						return null;
-					}
-					const current = entry.taskMetadataByTaskId.get(task.taskId) ?? null;
-					const next = await loadTaskWorkspaceMetadata(entry.workspacePath, task, current);
-					return next ? ([task.taskId, next] satisfies [string, CachedTaskWorkspaceMetadata]) : null;
-				}),
-			);
-
-			for (const nextTaskEntry of nextTaskEntries) {
-				if (nextTaskEntry) {
-					entry.taskMetadataByTaskId.set(nextTaskEntry[0], nextTaskEntry[1]);
-				}
-			}
-
-			await captureTrackedCardPrs(entry);
-		})().finally(() => {
-			const current = workspaces.get(workspaceId);
-			if (current) {
-				current.prCapturePromise = null;
-			}
-		});
-
-		await entry.prCapturePromise;
 	};
 
 	const captureReviewDoneTransitions = async (
@@ -520,30 +493,17 @@ export function createWorkspaceMetadataMonitor(
 		entry.pollTimer = timer;
 	};
 
-	const ensureWorkspacePrCaptureTimer = (workspaceId: string, entry: WorkspaceMetadataEntry) => {
-		if (entry.prCaptureTimer || !deps.persistCardPr) {
-			return;
-		}
-		const timer = setInterval(() => {
-			void captureWorkspacePrs(workspaceId);
-		}, WORKSPACE_PR_CAPTURE_INTERVAL_MS);
-		timer.unref();
-		entry.prCaptureTimer = timer;
-	};
-
 	return {
 		connectWorkspace: async ({ workspaceId, workspacePath, board }) => {
 			const { entry, previousTasks } = updateWorkspaceEntry({ workspaceId, workspacePath, board });
 			await captureReviewDoneTransitions(entry, previousTasks);
 			entry.subscriberCount += 1;
-			ensureWorkspacePrCaptureTimer(workspaceId, entry);
 			ensureWorkspaceTimer(workspaceId, entry);
 			return await refreshWorkspace(workspaceId);
 		},
 		updateWorkspaceState: async ({ workspaceId, workspacePath, board }) => {
 			const { entry, previousTasks } = updateWorkspaceEntry({ workspaceId, workspacePath, board });
 			await captureReviewDoneTransitions(entry, previousTasks);
-			ensureWorkspacePrCaptureTimer(workspaceId, entry);
 			if (entry.subscriberCount === 0) {
 				return buildWorkspaceMetadataSnapshot(entry);
 			}
@@ -566,13 +526,11 @@ export function createWorkspaceMetadataMonitor(
 				return;
 			}
 			stopWorkspaceTimer(entry);
-			stopWorkspacePrCaptureTimer(entry);
 			workspaces.delete(workspaceId);
 		},
 		close: () => {
 			for (const entry of workspaces.values()) {
 				stopWorkspaceTimer(entry);
-				stopWorkspacePrCaptureTimer(entry);
 			}
 			workspaces.clear();
 		},
