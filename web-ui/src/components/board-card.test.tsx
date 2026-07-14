@@ -346,43 +346,54 @@ describe("BoardCard", () => {
 		expect(onRestoreFromTrash).not.toHaveBeenCalled();
 	});
 
-	it("shows inline see more and less controls for long descriptions", async () => {
+	it("opens a markdown dialog from Show more without selecting or dragging the card", async () => {
 		const description =
 			"Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau final hidden segment";
+		const onClick = vi.fn();
+		const onDependencyPointerDown = vi.fn();
 
 		await act(async () => {
 			root.render(
-				<BoardCard card={createCard({ prompt: `Task title||${description}` })} index={0} columnId="backlog" />,
+				<BoardCard
+					card={createCard({ prompt: `Task title||${description}` })}
+					index={0}
+					columnId="backlog"
+					onClick={onClick}
+					onDependencyPointerDown={onDependencyPointerDown}
+				/>,
 			);
 		});
 
 		const findButton = (label: string) =>
 			Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-		const seeMoreButton = findButton("See more");
-		expect(seeMoreButton).toBeDefined();
+		const showMoreButton = findButton("Show more");
+		expect(showMoreButton).toBeDefined();
 		expect(container.textContent).not.toContain("final hidden segment");
+		expect(document.body.querySelector("[role='dialog']")).toBeNull();
 
 		await act(async () => {
-			seeMoreButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			seeMoreButton?.click();
+			showMoreButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+			showMoreButton?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 		});
 
-		expect(findButton("See more")).toBeUndefined();
-		expect(findButton("Less")).toBeDefined();
-		expect(container.textContent).toContain(description);
+		const dialog = document.body.querySelector("[role='dialog']");
+		expect(dialog).toBeInstanceOf(HTMLElement);
+		expect(dialog?.textContent).toContain("task-1 Review API changes");
+		expect(dialog?.textContent).toContain(description);
+		expect(onClick).not.toHaveBeenCalled();
+		expect(onDependencyPointerDown).not.toHaveBeenCalled();
 
-		const lessButton = findButton("Less");
 		await act(async () => {
-			lessButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			lessButton?.click();
+			dialog?.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 		});
 
-		expect(findButton("See more")).toBeDefined();
+		expect(document.body.querySelector("[role='dialog']")).toBeNull();
+		expect(findButton("Show more")).toBeDefined();
 		expect(container.textContent).not.toContain("final hidden segment");
 	});
 
-	it("renders expanded truncated descriptions with the Cline markdown viewer", async () => {
+	it("renders truncated descriptions with markdown in the dialog instead of an inline scroll block", async () => {
 		const prompt = [
 			"Task title",
 			"",
@@ -403,30 +414,24 @@ describe("BoardCard", () => {
 		const findButton = (label: string) =>
 			Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-		const seeMoreButton = findButton("See more");
-		expect(seeMoreButton).toBeDefined();
+		const showMoreButton = findButton("Show more");
+		expect(showMoreButton).toBeDefined();
 		expect(container.querySelector(".kb-markdown")).toBeNull();
+		expect(container.querySelector(".max-h-72")).toBeNull();
 		expect(container.querySelector("h2")).toBeNull();
 		expect(container.textContent).not.toContain("const rendered = true");
 
 		await act(async () => {
-			seeMoreButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			seeMoreButton?.click();
+			showMoreButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+			showMoreButton?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 		});
 
-		expect(findButton("See more")).toBeUndefined();
-		expect(findButton("Less")).toBeDefined();
-		expect(container.querySelector(".kb-markdown")).toBeInstanceOf(HTMLDivElement);
-		expect(container.querySelector("h2")?.textContent).toBe("Implementation notes");
-		expect(container.querySelector("pre code")?.textContent).toBe("const rendered = true;");
-
-		await act(async () => {
-			findButton("Less")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			findButton("Less")?.click();
-		});
-
-		expect(findButton("See more")).toBeDefined();
+		const dialog = document.body.querySelector("[role='dialog']");
+		expect(dialog?.querySelector(".kb-markdown")).toBeInstanceOf(HTMLDivElement);
+		expect(dialog?.querySelector(".kb-markdown h2")?.textContent).toBe("Implementation notes");
+		expect(dialog?.querySelector("pre code")?.textContent).toBe("const rendered = true;");
 		expect(container.querySelector(".kb-markdown")).toBeNull();
+		expect(container.querySelector(".max-h-72")).toBeNull();
 		expect(container.querySelector("h2")).toBeNull();
 	});
 
@@ -987,8 +992,8 @@ describe("BoardCard", () => {
 		const findButton = (label: string) =>
 			Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-		// Session activity uses CSS truncation with no See more / Less buttons
-		expect(findButton("See more")).toBeUndefined();
+		// Session activity uses CSS truncation with no prompt expansion controls.
+		expect(findButton("Show more")).toBeUndefined();
 		expect(findButton("Less")).toBeUndefined();
 
 		// The full text is in the DOM (CSS handles visual truncation)
@@ -1023,8 +1028,8 @@ describe("BoardCard", () => {
 		const findButton = (label: string) =>
 			Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-		// Session activity uses CSS truncation with no See more / Less buttons
-		expect(findButton("See more")).toBeUndefined();
+		// Session activity uses CSS truncation with no prompt expansion controls.
+		expect(findButton("Show more")).toBeUndefined();
 		expect(findButton("Less")).toBeUndefined();
 
 		// The full text is in the DOM (CSS handles visual truncation)
