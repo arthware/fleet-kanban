@@ -26,7 +26,7 @@ Net: the **steer + observe loop is closed** (say + tail) and the **biggest token
 - **The landing mechanism is the fragile seam.** Kanban's built-in commit flow is an LLM narrating cherry-pick + stash + *stale-lock removal* on the **live `main` checkout**. It's too risky to trust unattended, so auto-commit was disabled and the architect landed everything manually — which means **the architect is the bottleneck; the pipeline isn't truly autonomous yet.**
 - **Transient `index.lock` on C1** during its pre-commit test window (the live board/agent touched the shared checkout concurrently). Cost a diagnostic pause. Self-resolved; commit was intact. But it's a preview of what auto-commit would hit unattended.
 - **Base drift.** Cards started on older `main` (S1's base moved; S2 was based on pre-f2c88 `main`), so some couldn't fast-forward — needed cherry-pick + manual overlap checks.
-- **Cards stop at review *uncommitted*.** `/implement` is supposed to stop at a committed branch, but several left the worktree dirty — the architect had to commit in-worktree each time.
+- **Cards stop at review *uncommitted*.** `/fleet-implement` is supposed to stop at a committed branch, but several left the worktree dirty — the architect had to commit in-worktree each time.
 - **Biome nits block commits late.** S2's commit failed on an import-order lint the agent didn't run before stopping.
 - **User-facing verbs aren't live yet.** `say`/`tail`/`--model` engines are on `main`, but need the parent-repo `fleet/fleet` wrapper (partly done, uncommitted) **and a live-board rebuild** before they can be exercised.
 - **Observability was blind until O2 landed** — for most of the run the architect couldn't see *inside* a running agent, only its coarse state.
@@ -49,7 +49,7 @@ Ranked by leverage. Each is grounded in friction actually hit this run, from the
 **P0 — the autonomy blockers (why I still had to babysit)**
 1. **Deterministic in-code landing routine.** Replace the LLM-narrated cherry-pick + stash + *stale-lock removal* on the live checkout with real git plumbing in code. This is *the* unlock: without it I can't trust auto-commit, so I am the bottleneck. Removes the index.lock/stale-lock risk class entirely.
 2. **Land off the live checkout, or serialize against it.** C1's transient `index.lock` came from the landing commit racing the live board on the *same* `main` working tree. Land into a dedicated non-live checkout, or take a lock/queue against the board's git access. Never `rm` a lock to make progress.
-3. **Cards must stop *committed*.** `/implement` claims to stop at a committed branch, but several left dirty worktrees — I had to commit-in-worktree every time. Make the review-stop actually commit (or make landing reliably handle an uncommitted worktree).
+3. **Cards must stop *committed*.** `/fleet-implement` claims to stop at a committed branch, but several left dirty worktrees — I had to commit-in-worktree every time. Make the review-stop actually commit (or make landing reliably handle an uncommitted worktree).
 
 **P1 — freshness & quality of what agents hand me**
 4. **Base-ref freshness.** Cards branched from stale `main` (S2 predated f2c88), forcing cherry-picks + manual overlap checks instead of clean fast-forwards. Rebase-on-start, or rebase at landing time, so a card's base is current `main`.

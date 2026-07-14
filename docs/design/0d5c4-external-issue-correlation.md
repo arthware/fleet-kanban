@@ -1,6 +1,6 @@
 # 0d5c4 — Correlate a Kanban card with an external issue (Linear / GitHub)
 
-**Status:** design — ready for `/implement`
+**Status:** design — ready for `/fleet-implement`
 **Card:** `0d5c4`
 **Branch:** `0d5c4-external-issue-correlation`
 
@@ -262,7 +262,7 @@ rendering), and this doc.
 
 ---
 
-## Test strategy (RED-first for `/implement`)
+## Test strategy (RED-first for `/fleet-implement`)
 
 - **Unit — parser** (`external-issue.test.ts`): exhaustive input→output table incl.
   the reject case. Pure, fast, no mocks.

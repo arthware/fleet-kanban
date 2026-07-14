@@ -305,7 +305,7 @@ Each card is small and independently shippable via its own PR.
 
 ---
 
-## 10. Test strategy (for `/implement`, RED-first)
+## 10. Test strategy (for `/fleet-implement`, RED-first)
 
 **Unit (the derive functions — the core risk):**
 - `agent-usage-reader.test.ts` — `deriveClaudeUsage`:

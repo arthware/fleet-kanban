@@ -5,7 +5,7 @@
 **Status:** design · **Epic:** `fleet/docs/kanban-ui-epic.md` §4.6 · **Scope:** fleet-kanban (fork) ·
 **Applies to:** external CLI/PTY agents (claude, codex, gemini, droid, kiro, opencode)
 
-> Deliverable of `/plan`. No implementation code here. Hand this to `/implement`.
+> Deliverable of `/fleet-plan`. No implementation code here. Hand this to `/fleet-implement`.
 
 ---
 
@@ -249,7 +249,7 @@ neither jumps to Done nor orphans its conversation.
 
 ---
 
-## 7. Test strategy (for `/implement`, RED-first)
+## 7. Test strategy (for `/fleet-implement`, RED-first)
 
 ### Unit
 

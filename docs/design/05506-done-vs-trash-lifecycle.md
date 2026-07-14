@@ -374,7 +374,7 @@ terminal lanes read as ambiguous. Epic §4.4's terminal model has no trash colum
 
 ---
 
-## 11. Test strategy (for `/implement`, RED-first)
+## 11. Test strategy (for `/fleet-implement`, RED-first)
 
 - **Core (Chunks 1–2):** pure-function unit tests on the schema (migration transform) and
   `task-board-mutations` (completion vs trash, auto-start set, dependency rejection). No I/O.
