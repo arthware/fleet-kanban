@@ -11,6 +11,7 @@ import type {
 } from "../core/api-contract";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
+import { prependPlanCardDirective } from "../prompts/plan-card-directive";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import {
 	compactPersistedMessagesForContextOverflow,
@@ -150,16 +151,7 @@ function formatStartWarnings(warnings: readonly string[] | undefined): string | 
 }
 
 function buildClineStartPrompt(prompt: string, startInPlanMode?: boolean): string {
-	if (!startInPlanMode) {
-		return prompt;
-	}
-	const trimmedPrompt = prompt.trim();
-	return [
-		"First, inspect the codebase and produce a clear implementation plan only.",
-		"Do not modify files, do not use write tools, and do not implement anything yet.",
-		"After you present the plan, ask for approval before making changes.",
-		trimmedPrompt ? `\n\nTask:\n${trimmedPrompt}` : " Ask the user what they want planned if the task is unclear.",
-	].join(" ");
+	return prependPlanCardDirective(prompt, startInPlanMode);
 }
 export class InMemoryClineTaskSessionService implements ClineTaskSessionService {
 	private readonly pendingTurnCancelTaskIds = new Set<string>();

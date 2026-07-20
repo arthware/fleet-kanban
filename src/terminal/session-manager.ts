@@ -476,7 +476,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 					}
 					updateSummary(entry, { lastOutputAt: now() });
 
-					// Codex plan-mode startup input is deferred until we know the TUI rendered.
+					// Codex startup input can be deferred until we know the TUI rendered.
 					// Trigger on either the interactive prompt marker or the startup header text.
 					if (
 						entry.summary.agentId === "codex" &&

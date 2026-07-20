@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import matter from "gray-matter";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -102,6 +103,31 @@ describe("worktree skills directory placement", () => {
 
 			expect(result).toBe("linked");
 			expect(realpathSync(join(worktreePath, ".agents", "skills"))).toBe(realpathSync(canonicalSkillsDir));
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("exposes fleet-plan through the same canonical skills injection path as fleet-smoke", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const canonicalSkillsDir = await resolveCanonicalSkillsDir();
+			expect(canonicalSkillsDir).toBeTruthy();
+			const worktreePath = join(root, "worktree");
+			mkdirSync(worktreePath, { recursive: true });
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath,
+				canonicalSkillsDir,
+			});
+
+			expect(result).toBe("linked");
+			for (const skillName of ["fleet-smoke", "fleet-plan"]) {
+				const skill = matter(readFileSync(join(worktreePath, ".agents", "skills", skillName, "SKILL.md"), "utf8"));
+				expect(skill.data.name).toBe(skillName);
+				expect(typeof skill.data.description).toBe("string");
+				expect(skill.data.description).not.toBe("");
+			}
 		} finally {
 			cleanup();
 		}
