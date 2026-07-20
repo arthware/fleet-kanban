@@ -944,7 +944,11 @@ const cursorAdapter: AgentSessionAdapter = {
 			args.push("--force");
 		}
 
-		if (input.resumeFromTrash && !hasCliOption(args, "--resume") && !hasCliOption(args, "--continue")) {
+		if (
+			(input.resumeSession || input.resumeFromTrash) &&
+			!hasCliOption(args, "--resume") &&
+			!hasCliOption(args, "--continue")
+		) {
 			args.push("--continue");
 		}
 
@@ -961,7 +965,7 @@ const cursorAdapter: AgentSessionAdapter = {
 		}
 
 		const prompt = mergeCursorPromptWithHomeSystemPrompt(
-			input.prompt,
+			input.resumeSession ? "" : input.prompt,
 			resolveHomeAgentAppendSystemPrompt(input.taskId, {
 				architectContextPreamble: input.architectContextPreamble,
 			}),

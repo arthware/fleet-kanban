@@ -647,6 +647,68 @@ describe("InMemoryClineTaskSessionService", () => {
 		});
 	});
 
+	it("does not enqueue the card prompt when resuming from persisted history", async () => {
+		const { service, runtime } = createTrackedService();
+		runtime.readPersistedTaskSessionMock.mockResolvedValue({
+			record: {
+				sessionId: "task-1-persisted",
+				source: "core" as ClinePersistedTaskSessionSnapshot["record"]["source"],
+				status: "completed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+				interactive: true,
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				cwd: "/tmp/worktree",
+				workspaceRoot: "/tmp/workspace-root",
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			},
+			messages: [
+				{
+					role: "user",
+					content: "Recovered prompt",
+				},
+				{
+					role: "assistant",
+					content: "Recovered answer",
+				},
+			],
+		});
+
+		const summary = await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Original card prompt",
+			resumeFromPersistence: true,
+		});
+
+		expect(summary.state).toBe("idle");
+		expect(service.listMessages("task-1").map((message) => message.content)).toEqual([
+			"Recovered prompt",
+			"Recovered answer",
+		]);
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					prompt: "resolved:",
+					initialMessages: [
+						{
+							role: "user",
+							content: "Recovered prompt",
+						},
+						{
+							role: "assistant",
+							content: "Recovered answer",
+						},
+					],
+				}),
+			);
+		});
+	});
+
 	it("reinitializes chat history from persisted data when resuming a trashed task", async () => {
 		const { service, runtime } = createTrackedService();
 

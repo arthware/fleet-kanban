@@ -957,6 +957,22 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("--last");
 	});
 
+	it("resumes a Cursor session without appending the initial prompt", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cursor-resume",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Original card prompt",
+			resumeSession: true,
+		});
+
+		expect(launch.args).toContain("--continue");
+		expect(launch.args).not.toContain("Original card prompt");
+	});
+
 	it("does not pass any resume flag for a fresh Codex session", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({

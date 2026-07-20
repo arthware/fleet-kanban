@@ -395,7 +395,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			args: request.args,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
-			prompt: request.prompt,
+			prompt: resumeSession ? "" : request.prompt,
 			agentModel: request.agentModel,
 			images: request.images,
 			startInPlanMode: request.startInPlanMode,
