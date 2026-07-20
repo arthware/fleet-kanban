@@ -292,6 +292,27 @@ PY
 # are separately covered by the daemon's KeepAlive auto-revive.
 _kanban_daemon_loaded() { launchctl list 2>/dev/null | grep -q "$(_kanban_label)"; }
 
+# Hard-restart the loaded launchd board *in place*: kickstart -k sends SIGTERM then
+# escalates to SIGKILL and immediately relaunches, so a fresh process (fresh in-memory
+# state) is guaranteed. This is why plain `launchctl unload && load` isn't enough — the
+# board runs with --skip-shutdown-cleanup and can ignore/outlive SIGTERM, leaving the
+# old, wedged process (and its stale state — e.g. a dead board stream after `fleet
+# update`) still serving. Re-execs the same dist/cli.js path, so a preceding --build
+# (new bytes already on disk) goes live too. Falls back to a full (re)install when the
+# service isn't loaded yet.
+_kanban_hard_restart() {
+  if _kanban_daemon_loaded; then
+    local label; label="$(_kanban_label)"
+    say "hard-restarting board '$label' (kickstart -k) …"
+    if launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null; then
+      local i; for i in $(seq 1 30); do kanban_running && { say "✓ up"; _kanban_url_banner; return 0; }; sleep 1; done
+      dim "restarted but not up in 30s — see $KANBAN_LOG"; return 1
+    fi
+    dim "kickstart failed — falling back to reload"
+  fi
+  kanban_daemon install
+}
+
 kanban_guarded_stop() {
   local force=""; case "${1:-}" in --force|-f|--yes|-y) force=1;; esac
   if _kanban_daemon_loaded && [ -z "$force" ]; then
@@ -305,8 +326,7 @@ kanban_guarded_stop() {
 
 kanban_guarded_restart() {
   if _kanban_daemon_loaded; then
-    say "reloading the launchd daemon (protected board) with the current build…"
-    kanban_daemon install; return $?
+    _kanban_hard_restart; return $?
   fi
   kanban_stop; kanban_start "$@"
 }
@@ -358,7 +378,7 @@ _service_restart() {
     # against a stale node_modules — the "Could not resolve <pkg>" refresh break.
     ( cd "$src" && npm run install:all && npm run build ) || { dim "build failed"; return 1; }
   fi
-  kanban_daemon install
+  _kanban_hard_restart
 }
 
 # --- shared fork build: one checkout every consumer project runs from --------
