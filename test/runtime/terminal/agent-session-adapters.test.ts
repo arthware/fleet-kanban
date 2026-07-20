@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 import { prepareAgentLaunch, toBracketedPasteSubmission } from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
@@ -216,6 +217,50 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(config.hooks?.afterFileEdit?.[0]?.command).toContain("activity");
 		expect(config.hooks?.stop?.[0]?.command).toContain("to_review");
 		expect(config.hooks?.stop?.[0]?.command).toContain("Waiting for review");
+	});
+
+	it("given cursor-agent starts a plan card, then Cursor receives a normal prompt and no native plan flag", async () => {
+		// given
+		const cwd = setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cursor-plan",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd,
+			prompt: "Design Cursor plan handling",
+			startInPlanMode: true,
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.args).not.toContain("--plan");
+		expect(launch.args).toContain("--force");
+		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design Cursor plan handling`);
+	});
+
+	it("given cursor-agent starts a normal card, then Cursor launch args are unchanged", async () => {
+		// given
+		const cwd = setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cursor-normal",
+			agentId: "cursor",
+			binary: "cursor-agent",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd,
+			prompt: "Implement Cursor plan handling",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.args).toContain("--force");
+		expect(launch.args.at(-1)).toBe("Implement Cursor plan handling");
 	});
 
 	it("disables Codex startup update checks for Kanban-launched sessions", async () => {
@@ -490,7 +535,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(readFileSync(imagePath).toString("utf8")).toBe("hello");
 	});
 
-	it("defers Codex plan-mode startup input until startup UI is ready", async () => {
+	it("delivers Codex plan cards as a normal prompt prefixed with the Fleet plan directive", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-plan",
@@ -502,27 +547,24 @@ describe("prepareAgentLaunch hook strategies", () => {
 			startInPlanMode: true,
 		});
 
-		expect(launch.args).not.toContain("Audit the deployment pipeline");
-		expect(launch.deferredStartupInput).toContain("\u001b[200~");
-		expect(launch.deferredStartupInput).toContain("/plan Audit the deployment pipeline");
-		expect(launch.deferredStartupInput?.endsWith("\r")).toBe(true);
+		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Audit the deployment pipeline`);
+		expect(launch.args.join(" ")).not.toContain("/plan");
+		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
-	it("defers a bare /plan command when Codex plan mode has no prompt text", async () => {
+	it("keeps Codex non-plan startup prompts on the normal launch path", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
-			taskId: "task-plan-empty",
+			taskId: "task-codex-normal",
 			agentId: "codex",
 			binary: "codex",
 			args: [],
 			cwd: "/tmp",
-			prompt: "",
-			startInPlanMode: true,
+			prompt: "Implement the audit",
 		});
 
-		expect(launch.deferredStartupInput).toContain("/plan");
-		expect(launch.deferredStartupInput).not.toContain("/plan ");
-		expect(launch.deferredStartupInput?.endsWith("\r")).toBe(true);
+		expect(launch.args.at(-1)).toBe("Implement the audit");
+		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
 	it("writes Cline hook scripts and injects --hooks-dir", async () => {
@@ -593,6 +635,22 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(postToolUseScript).toContain("to_in_progress");
 		expect(postToolUseScript).toContain("ask_followup_question");
 		expect(postToolUseScript).toContain("plan_mode_respond");
+	});
+
+	it("given Cline CLI starts a plan card, then it receives the Fleet plan directive without --plan", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-cline-plan",
+			agentId: "cline",
+			binary: "cline",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Design native Cline plan handling",
+			startInPlanMode: true,
+		});
+
+		expect(launch.args).not.toContain("--plan");
+		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design native Cline plan handling`);
 	});
 
 	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
@@ -822,7 +880,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("auto");
 	});
 
-	it("defers Claude plan cards as manifested /plan startup input without native plan mode", async () => {
+	it("delivers Claude plan cards as a normal prompt prefixed with the Fleet plan directive", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-claude-plan",
@@ -839,12 +897,12 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("plan");
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--allow-dangerously-skip-permissions");
-		expect(launch.args).not.toContain("Design the migration path");
-		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Design the migration path"));
+		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design the migration path`);
+		expect(launch.deferredStartupInput).toBeUndefined();
 		expect(launch.env.CLAUDE_CODE_ENABLE_AUTO_MODE).toBe("1");
 	});
 
-	it("defers a bare /plan command for Claude plan cards with no prompt text", async () => {
+	it("delivers the Fleet plan directive for Claude plan cards with no prompt text", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-claude-plan-empty",
@@ -859,10 +917,11 @@ describe("prepareAgentLaunch hook strategies", () => {
 
 		const permissionModeIndex = launch.args.indexOf("--permission-mode");
 		expect(launch.args[permissionModeIndex + 1]).not.toBe("plan");
-		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan"));
+		expect(launch.args.at(-1)).toBe(PLAN_CARD_PROMPT_DIRECTIVE.trim());
+		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
-	it("preserves an explicit Claude bypass arg for manifested plan cards", async () => {
+	it("preserves an explicit Claude bypass arg for Fleet plan cards", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-claude-plan-bypass",
@@ -877,7 +936,8 @@ describe("prepareAgentLaunch hook strategies", () => {
 
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--permission-mode");
-		expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Document the approach"));
+		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Document the approach`);
+		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
 	it("starts a fresh Claude session under a minted session id", async () => {
@@ -1272,7 +1332,7 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 		}
 	});
 
-	it("uses manifested /plan with write-capable guarded bypass for a weak model plan card", async () => {
+	it("uses Fleet plan directive with write-capable guarded bypass for a weak model plan card", async () => {
 		setupTempHome();
 		clearProviderEnv();
 		try {
@@ -1292,7 +1352,8 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 			expect(launch.args).not.toContain("--permission-mode");
 			expect(launch.args).not.toContain("plan");
 			expect(launch.args).toContain("--dangerously-skip-permissions");
-			expect(launch.deferredStartupInput).toBe(toBracketedPasteSubmission("/plan Write the rollout design"));
+			expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Write the rollout design`);
+			expect(launch.deferredStartupInput).toBeUndefined();
 			expect(findBashGuardHook(readClaudeSettings())).toBeDefined();
 		} finally {
 			restoreProviderEnv();

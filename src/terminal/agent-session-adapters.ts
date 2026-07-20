@@ -13,6 +13,7 @@ import { buildKanbanCommandParts } from "../core/kanban-command";
 import { quoteShellArg } from "../core/shell";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
+import { prependPlanCardDirective } from "../prompts/plan-card-directive";
 import { getRuntimeHomePath } from "../state/workspace-state";
 import { isClaudeCloudProviderBackend, resolveClaudePermissionStrategy } from "./claude-permission-strategy";
 import { configureCodexHooks, hasCodexConfigOverride } from "./codex-hook-config";
@@ -739,25 +740,6 @@ function mergeCursorPromptWithHomeSystemPrompt(prompt: string, appendedSystemPro
 	return `${appendedSystemPrompt}\n\n# User Request\n\n${trimmedPrompt}`;
 }
 
-function removeCursorPlanModeConflicts(args: string[]): string[] {
-	const filtered: string[] = [];
-	for (let index = 0; index < args.length; index += 1) {
-		const arg = args[index];
-		if (arg === "--force" || arg === "-f" || arg === "--yolo" || arg === "--plan") {
-			continue;
-		}
-		if (arg === "--mode") {
-			index += 1;
-			continue;
-		}
-		if (arg.startsWith("--mode=")) {
-			continue;
-		}
-		filtered.push(arg);
-	}
-	return filtered;
-}
-
 const claudeAdapter: AgentSessionAdapter = {
 	async prepare(input) {
 		const args = [...input.args];
@@ -909,18 +891,17 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--append-system-prompt", appendedSystemPrompt);
 		}
 
-		const trimmed = input.prompt.trim();
-		const deferredStartupInput = input.startInPlanMode
-			? toBracketedPasteSubmission(trimmed ? `/plan ${trimmed}` : "/plan")
-			: undefined;
-		const withPromptLaunch = withPrompt(args, input.startInPlanMode ? "" : input.prompt, "append");
+		const withPromptLaunch = withPrompt(
+			args,
+			prependPlanCardDirective(input.prompt, input.startInPlanMode),
+			"append",
+		);
 		return {
 			...withPromptLaunch,
 			env: {
 				...withPromptLaunch.env,
 				...env,
 			},
-			deferredStartupInput,
 		};
 	},
 };
@@ -931,11 +912,7 @@ const cursorAdapter: AgentSessionAdapter = {
 		const env: Record<string, string | undefined> = {};
 		let cleanup: (() => Promise<void>) | null = null;
 
-		if (input.startInPlanMode) {
-			const filteredArgs = removeCursorPlanModeConflicts(args);
-			args.length = 0;
-			args.push(...filteredArgs, "--plan");
-		} else if (
+		if (
 			input.autonomousModeEnabled &&
 			!hasCliOption(args, "--force") &&
 			!hasCliOption(args, "-f") &&
@@ -966,7 +943,7 @@ const cursorAdapter: AgentSessionAdapter = {
 				architectContextPreamble: input.architectContextPreamble,
 			}),
 		);
-		const withPromptLaunch = withPrompt(args, prompt, "append");
+		const withPromptLaunch = withPrompt(args, prependPlanCardDirective(prompt, input.startInPlanMode), "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -1004,7 +981,6 @@ const codexAdapter: AgentSessionAdapter = {
 		const codexArgs = [...input.args];
 		const env: Record<string, string | undefined> = {};
 		const binary = input.binary;
-		let deferredStartupInput: string | undefined;
 		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
 			architectContextPreamble: input.architectContextPreamble,
 		});
@@ -1053,11 +1029,9 @@ const codexAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const trimmed = input.prompt.trim();
-		if (input.startInPlanMode) {
-			const planCommand = trimmed ? `/plan ${trimmed}` : "/plan";
-			deferredStartupInput = toBracketedPasteSubmission(planCommand);
-		} else if (trimmed) {
+		const prompt = prependPlanCardDirective(input.prompt, input.startInPlanMode);
+		const trimmed = prompt.trim();
+		if (trimmed) {
 			codexArgs.push(trimmed);
 		}
 
@@ -1066,7 +1040,6 @@ const codexAdapter: AgentSessionAdapter = {
 				binary,
 				args: codexArgs,
 				env,
-				deferredStartupInput,
 				detectOutputTransition: codexPromptDetector,
 				shouldInspectOutputForTransition: shouldInspectCodexOutputForTransition,
 			};
@@ -1076,7 +1049,6 @@ const codexAdapter: AgentSessionAdapter = {
 			binary,
 			args: codexArgs,
 			env,
-			deferredStartupInput,
 			detectOutputTransition: codexPromptDetector,
 			shouldInspectOutputForTransition: shouldInspectCodexOutputForTransition,
 		};
@@ -1668,10 +1640,6 @@ const clineAdapter: AgentSessionAdapter = {
 			args.push("--continue");
 		}
 
-		if (input.startInPlanMode) {
-			args.push("--plan");
-		}
-
 		const hooks = resolveHookContext(input);
 		if (hooks) {
 			const hooksDir = getHookAgentDirectory("cline");
@@ -1701,7 +1669,11 @@ const clineAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const withPromptLaunch = withPrompt(args, input.prompt, "append");
+		const withPromptLaunch = withPrompt(
+			args,
+			prependPlanCardDirective(input.prompt, input.startInPlanMode),
+			"append",
+		);
 		return {
 			...withPromptLaunch,
 			env: {

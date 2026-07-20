@@ -226,8 +226,8 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(manager.getSummary("task-1")?.pid).toBeNull();
 	});
 
-	it("sends deferred Codex startup input when the prompt marker appears", async () => {
-		const deferredStartupInput = "\u001b[200~/plan Validate rollout\u001b[201~\r";
+	it("sends non-plan deferred Codex startup input when the prompt marker appears", async () => {
+		const deferredStartupInput = "\u001b[200~\r";
 		prepareAgentLaunchMock.mockResolvedValue({
 			binary: "codex",
 			args: [],
@@ -250,7 +250,6 @@ describe("TerminalSessionManager auto-restart", () => {
 			args: [],
 			cwd: "/tmp/task-1",
 			prompt: "Fix the bug",
-			startInPlanMode: true,
 		});
 
 		const session = spawnedSessions[0];
@@ -267,8 +266,8 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(session.write).toHaveBeenCalledTimes(1);
 	});
 
-	it("sends deferred Codex startup input when the startup UI header appears", async () => {
-		const deferredStartupInput = "\u001b[200~/plan Validate startup UI detect\u001b[201~\r";
+	it("sends non-plan deferred Codex startup input when the startup UI header appears", async () => {
+		const deferredStartupInput = "\u001b[200~\r";
 		prepareAgentLaunchMock.mockResolvedValue({
 			binary: "codex",
 			args: [],
@@ -291,7 +290,6 @@ describe("TerminalSessionManager auto-restart", () => {
 			args: [],
 			cwd: "/tmp/task-1",
 			prompt: "Fix the bug",
-			startInPlanMode: true,
 		});
 
 		const session = spawnedSessions[0];

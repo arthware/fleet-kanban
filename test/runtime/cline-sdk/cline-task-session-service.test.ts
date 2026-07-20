@@ -13,6 +13,7 @@ import type { ClineTaskSessionService } from "../../../src/cline-sdk/cline-task-
 import { createInMemoryClineTaskSessionService } from "../../../src/cline-sdk/cline-task-session-service";
 import { createClineWatcherRegistry } from "../../../src/cline-sdk/cline-watcher-registry";
 import type { RuntimeTaskImage, RuntimeTaskSessionMode } from "../../../src/core/api-contract";
+import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 
 const originalArgv = [...process.argv];
 const originalExecArgv = [...process.execArgv];
@@ -856,7 +857,7 @@ describe("InMemoryClineTaskSessionService", () => {
 		expect(service.getSummary("task-1")?.mode).toBe("plan");
 	});
 
-	it("prepends a Kanban-managed planning prompt when start in plan mode is enabled", async () => {
+	it("prepends the Fleet plan directive when start in plan mode is enabled", async () => {
 		const { service, runtime } = createTrackedService();
 
 		await service.startTaskSession({
@@ -872,12 +873,7 @@ describe("InMemoryClineTaskSessionService", () => {
 		expect(runtime.startTaskSessionMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mode: "act",
-				prompt: expect.stringContaining("Do not modify files, do not use write tools"),
-			}),
-		);
-		expect(runtime.startTaskSessionMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				prompt: expect.stringContaining("Task:\nInvestigate startup"),
+				prompt: `resolved:${PLAN_CARD_PROMPT_DIRECTIVE}Investigate startup`,
 			}),
 		);
 		expect(service.getSummary("task-1")?.mode).toBe("act");
