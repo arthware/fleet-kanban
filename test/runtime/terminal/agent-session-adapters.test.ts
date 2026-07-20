@@ -844,6 +844,22 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.env.CLAUDE_CODE_ENABLE_AUTO_MODE).toBe("1");
 	});
 
+	it("passes non-plan Claude prompts as launch args without deferred startup input", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-claude-non-plan",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Implement the regular launch path",
+			startInPlanMode: false,
+		});
+
+		expect(launch.args).toContain("Implement the regular launch path");
+		expect(launch.deferredStartupInput).toBeUndefined();
+	});
+
 	it("defers a bare /plan command for Claude plan cards with no prompt text", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({

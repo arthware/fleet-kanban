@@ -758,6 +758,14 @@ function removeCursorPlanModeConflicts(args: string[]): string[] {
 	return filtered;
 }
 
+function claudePromptDetector(data: string): SessionTransitionEvent | null {
+	const stripped = stripAnsi(data);
+	if (/(?:^|[\n\r])\s*(?:[│┃]\s*)?>\s*(?:$|[\n\r])/u.test(stripped)) {
+		return { type: "agent.prompt-ready" };
+	}
+	return null;
+}
+
 const claudeAdapter: AgentSessionAdapter = {
 	async prepare(input) {
 		const args = [...input.args];
@@ -921,6 +929,7 @@ const claudeAdapter: AgentSessionAdapter = {
 				...env,
 			},
 			deferredStartupInput,
+			detectOutputTransition: input.startInPlanMode ? claudePromptDetector : undefined,
 		};
 	},
 };

@@ -220,18 +220,20 @@ export class TerminalSessionManager implements TerminalSessionService {
 	private readonly entries = new Map<string, SessionEntry>();
 	private readonly summaryListeners = new Set<(summary: RuntimeTaskSessionSummary) => void>();
 
-	private trySendDeferredCodexStartupInput(taskId: string): boolean {
+	private trySendDeferredStartupInput(taskId: string): boolean {
 		const entry = this.entries.get(taskId);
 		const active = entry?.active;
-		if (!entry || !active || entry.summary.agentId !== "codex") {
+		if (!entry || !active) {
 			return false;
 		}
 		if (active.deferredStartupInput === null) {
 			return false;
 		}
-		const trustPromptVisible =
-			active.workspaceTrustBuffer !== null && hasCodexWorkspaceTrustPrompt(active.workspaceTrustBuffer);
-		if (trustPromptVisible) {
+		const codexTrustPromptVisible =
+			entry.summary.agentId === "codex" &&
+			active.workspaceTrustBuffer !== null &&
+			hasCodexWorkspaceTrustPrompt(active.workspaceTrustBuffer);
+		if (codexTrustPromptVisible) {
 			return false;
 		}
 		const deferredInput = active.deferredStartupInput;
@@ -488,11 +490,14 @@ export class TerminalSessionManager implements TerminalSessionService {
 								(hasCodexInteractivePrompt(entry.active.workspaceTrustBuffer) ||
 									hasCodexStartupUiRendered(entry.active.workspaceTrustBuffer))))
 					) {
-						this.trySendDeferredCodexStartupInput(request.taskId);
+						this.trySendDeferredStartupInput(request.taskId);
 					}
 
 					const adapterEvent = entry.active.detectOutputTransition?.(data, entry.summary) ?? null;
 					if (adapterEvent) {
+						if (adapterEvent.type === "agent.prompt-ready" && entry.summary.agentId !== "codex") {
+							this.trySendDeferredStartupInput(request.taskId);
+						}
 						const requiresEnterForCodex =
 							adapterEvent.type === "agent.prompt-ready" &&
 							entry.summary.agentId === "codex" &&

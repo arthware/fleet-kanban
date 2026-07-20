@@ -304,4 +304,46 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(session.write).toHaveBeenCalledWith(deferredStartupInput);
 		expect(session.write).toHaveBeenCalledTimes(1);
 	});
+
+	it("sends deferred Claude startup input when the adapter reports prompt readiness", async () => {
+		const deferredStartupInput = "\u001b[200~/plan Validate Claude plan launch\u001b[201~\r";
+		prepareAgentLaunchMock.mockResolvedValue({
+			binary: "claude",
+			args: [],
+			env: {},
+			deferredStartupInput,
+			detectOutputTransition: (data: string) => (data.includes("│ >") ? { type: "agent.prompt-ready" } : null),
+		});
+
+		const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
+		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {
+			const session = createMockPtySession(111, request);
+			spawnedSessions.push(session);
+			return session;
+		});
+
+		const manager = new TerminalSessionManager();
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: "/tmp/task-1",
+			prompt: "Validate Claude plan launch",
+			startInPlanMode: true,
+		});
+
+		const session = spawnedSessions[0];
+		expect(session).toBeDefined();
+		if (!session) {
+			return;
+		}
+
+		session.triggerData("Claude Code\n");
+		expect(session.write).not.toHaveBeenCalledWith(deferredStartupInput);
+
+		session.triggerData("╭────────────────╮\n│ > \n╰────────────────╯\n");
+		expect(session.write).toHaveBeenCalledWith(deferredStartupInput);
+		expect(session.write).toHaveBeenCalledTimes(1);
+	});
 });
