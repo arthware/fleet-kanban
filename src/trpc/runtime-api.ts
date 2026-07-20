@@ -271,6 +271,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						taskTitle: resolvedClineTitle.length > 0 ? resolvedClineTitle : undefined,
 						images: body.images,
 						resumeFromTrash: body.resumeFromTrash,
+						resumeFromPersistence: body.resumeMode === "resume",
 						providerId: clineLaunchConfig.providerId,
 						modelId: clineLaunchConfig.modelId,
 						mode: requestedClineTaskMode,

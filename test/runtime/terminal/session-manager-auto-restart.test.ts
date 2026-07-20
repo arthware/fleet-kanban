@@ -121,7 +121,7 @@ describe("TerminalSessionManager auto-restart", () => {
 			binary: "claude",
 			args: [],
 			cwd: "/tmp/task-1",
-			prompt: "",
+			prompt: "Original card prompt",
 			resumeFromTrash: true,
 		});
 
@@ -129,6 +129,7 @@ describe("TerminalSessionManager auto-restart", () => {
 			expect.objectContaining({
 				agentSessionId: "stored-session",
 				resumeSession: true,
+				prompt: "",
 			}),
 		);
 	});

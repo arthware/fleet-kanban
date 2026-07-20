@@ -336,16 +336,15 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		const resolvedMode: RuntimeTaskSessionMode = request.startInPlanMode ? "act" : (request.mode ?? "act");
 		const normalizedPrompt = request.prompt.trim();
 		const hasRequestImages = Boolean(request.images && request.images.length > 0);
-		const initialState = request.resumeFromTrash
-			? "awaiting_review"
-			: normalizedPrompt.length > 0 || hasRequestImages
-				? "running"
-				: "idle";
 		const initialReviewReason = request.resumeFromTrash ? "attention" : null;
 		const shouldHydratePersistedHistory = request.resumeFromTrash || request.resumeFromPersistence;
 		const persistedResumeSnapshot = shouldHydratePersistedHistory
 			? await this.sessionRuntime.readPersistedTaskSession(request.taskId).catch(() => null)
 			: null;
+		const isResumingExistingTranscript = Boolean(persistedResumeSnapshot);
+		const shouldSubmitInitialPrompt =
+			!request.resumeFromTrash && !isResumingExistingTranscript && (normalizedPrompt.length > 0 || hasRequestImages);
+		const initialState = request.resumeFromTrash ? "awaiting_review" : shouldSubmitInitialPrompt ? "running" : "idle";
 
 		const entry = persistedResumeSnapshot
 			? createTaskEntryFromPersistedSession(request.taskId, persistedResumeSnapshot.messages, {
@@ -375,7 +374,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		this.messageRepository.setTaskEntry(request.taskId, entry);
 		this.pendingTurnCancelTaskIds.delete(request.taskId);
 
-		if (!request.resumeFromTrash && (normalizedPrompt.length > 0 || hasRequestImages)) {
+		if (shouldSubmitInitialPrompt) {
 			const message = createMessage(request.taskId, "user", normalizedPrompt, request.images);
 			entry.messages.push(message);
 			this.emitMessage(request.taskId, message);
@@ -402,9 +401,10 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			const assistantCountBeforeStart = entry.messages.filter((message) => message.role === "assistant").length;
 			try {
 				const runtimeSetup = await this.ensureRuntimeSetup(request.cwd);
-				const runtimePrompt = runtimeSetup.resolvePrompt(
-					buildClineStartPrompt(request.prompt, request.startInPlanMode),
-				);
+				const startupPrompt = isResumingExistingTranscript
+					? ""
+					: buildClineStartPrompt(request.prompt, request.startInPlanMode);
+				const runtimePrompt = runtimeSetup.resolvePrompt(startupPrompt);
 				let systemPrompt =
 					request.systemPrompt?.trim() ||
 					(await resolveClineSdkSystemPrompt({

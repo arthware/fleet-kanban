@@ -265,6 +265,52 @@ describe("useTaskSessions", () => {
 		);
 	});
 
+	it("does not send the card prompt or images when resuming an existing transcript", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession(
+				{
+					...createTask(),
+					prompt: "Original card prompt",
+					startInPlanMode: true,
+					images: [
+						{
+							id: "img-1",
+							data: "abc123",
+							mimeType: "image/png",
+						},
+					],
+				},
+				{ resumeMode: "resume" },
+			);
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: "",
+				images: undefined,
+				startInPlanMode: undefined,
+				resumeFromTrash: undefined,
+				resumeMode: "resume",
+			}),
+		);
+	});
+
 	it("forwards fresh mode for gone restored cards", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
