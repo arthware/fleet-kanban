@@ -19,6 +19,14 @@ import type {
 
 const STREAM_RECONNECT_BASE_DELAY_MS = 500;
 const STREAM_RECONNECT_MAX_DELAY_MS = 5_000;
+// The server sends its snapshot immediately once a socket opens. If it never arrives —
+// a wedged server that accepts the socket but never sends, or a half-open socket left
+// behind by a server restart that fired no close event — no `onclose`/`onerror` ever
+// runs, so nothing would trigger a reconnect and the board hangs on a blank loader
+// holding a dead connection. This watchdog treats a missing snapshot as a disconnect
+// and forces a reconnect. It must exceed the server's own assembly timeout so that,
+// when the server is alive, its error+close wins first and this is only the backstop.
+const STREAM_SNAPSHOT_TIMEOUT_MS = 15_000;
 
 function mergeTaskSessionSummaries(
 	currentSessions: Record<string, RuntimeTaskSessionSummary>,
@@ -341,13 +349,22 @@ export function useRuntimeStateStream(
 		let cancelled = false;
 		let socket: WebSocket | null = null;
 		let reconnectTimer: number | null = null;
+		let snapshotTimer: number | null = null;
 		let reconnectAttempt = 0;
 		let activeWorkspaceId = requestedWorkspaceId;
 		let requestedWorkspaceForConnection = requestedWorkspaceId;
 
 		dispatch({ type: "requested_workspace_changed" });
 
+		const clearSnapshotTimer = () => {
+			if (snapshotTimer !== null) {
+				window.clearTimeout(snapshotTimer);
+				snapshotTimer = null;
+			}
+		};
+
 		const cleanupSocket = () => {
+			clearSnapshotTimer();
 			if (socket) {
 				socket.onopen = null;
 				socket.onmessage = null;
@@ -391,6 +408,19 @@ export function useRuntimeStateStream(
 				scheduleReconnect();
 				return;
 			}
+			// Backstop for a socket that opens but never delivers a snapshot (wedged or
+			// half-open server): no close/error fires, so nothing else would reconnect.
+			snapshotTimer = window.setTimeout(() => {
+				if (cancelled) {
+					return;
+				}
+				dispatch({
+					type: "stream_disconnected",
+					message: "Runtime stream timed out waiting for initial state.",
+				});
+				cleanupSocket();
+				scheduleReconnect();
+			}, STREAM_SNAPSHOT_TIMEOUT_MS);
 			socket.onopen = () => {
 				reconnectAttempt = 0;
 				dispatch({ type: "stream_connected" });
@@ -399,6 +429,8 @@ export function useRuntimeStateStream(
 				try {
 					const payload = JSON.parse(String(event.data)) as RuntimeStateStreamMessage;
 					if (payload.type === "snapshot") {
+						// Snapshot arrived — the connection is healthy; stand down the watchdog.
+						clearSnapshotTimer();
 						// A pinned stream keeps filtering by its requested workspace, so it
 						// keeps its own events even though the snapshot reports a different
 						// selectable current project (the architect is excluded from the list).

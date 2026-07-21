@@ -29,6 +29,46 @@ import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspa
 
 const TASK_SESSION_STREAM_BATCH_MS = 150;
 
+// The initial snapshot assembly (project payload + workspace state + metadata monitor
+// connect) shells out to git per project and reads board state. If any step blocks, the
+// websocket would otherwise stay open forever with no snapshot — wedging every client on
+// a blank loader with nothing to surface. Bounding it turns a stuck workspace into a
+// reported error + client reconnect instead of an infinite hang.
+export const SNAPSHOT_ASSEMBLY_TIMEOUT_MS = 10_000;
+
+export class SnapshotAssemblyTimeoutError extends Error {
+	constructor(stage: string, timeoutMs: number) {
+		super(`Runtime snapshot assembly timed out after ${timeoutMs}ms (${stage}).`);
+		this.name = "SnapshotAssemblyTimeoutError";
+	}
+}
+
+/**
+ * Reject if `promise` has not settled within `timeoutMs`. `stage` names the assembly
+ * step so a timeout error is self-describing in the client-facing `error` message.
+ */
+export function withSnapshotTimeout<T>(
+	promise: Promise<T>,
+	stage: string,
+	timeoutMs: number = SNAPSHOT_ASSEMBLY_TIMEOUT_MS,
+): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			reject(new SnapshotAssemblyTimeoutError(stage, timeoutMs));
+		}, timeoutMs);
+		promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error: unknown) => {
+				clearTimeout(timer);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			},
+		);
+	});
+}
+
 export interface DisposeRuntimeStateWorkspaceOptions {
 	disconnectClients?: boolean;
 	closeClientErrorMessage?: string;
@@ -447,18 +487,27 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				let workspaceMetadata: RuntimeStateStreamSnapshotMessage["workspaceMetadata"];
 				if (workspace.workspaceId && workspace.workspacePath) {
 					monitorWorkspaceId = workspace.workspaceId;
-					[projectsPayload, workspaceState] = await Promise.all([
-						deps.workspaceRegistry.buildProjectsPayload(workspace.workspaceId),
-						deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspace.workspaceId, workspace.workspacePath),
-					]);
-					workspaceMetadata = await workspaceMetadataMonitor.connectWorkspace({
-						workspaceId: workspace.workspaceId,
-						workspacePath: workspace.workspacePath,
-						board: workspaceState.board,
-					});
+					[projectsPayload, workspaceState] = await withSnapshotTimeout(
+						Promise.all([
+							deps.workspaceRegistry.buildProjectsPayload(workspace.workspaceId),
+							deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspace.workspaceId, workspace.workspacePath),
+						]),
+						"workspace state",
+					);
+					workspaceMetadata = await withSnapshotTimeout(
+						workspaceMetadataMonitor.connectWorkspace({
+							workspaceId: workspace.workspaceId,
+							workspacePath: workspace.workspacePath,
+							board: workspaceState.board,
+						}),
+						"workspace metadata",
+					);
 					didConnectWorkspaceMonitor = true;
 				} else {
-					projectsPayload = await deps.workspaceRegistry.buildProjectsPayload(null);
+					projectsPayload = await withSnapshotTimeout(
+						deps.workspaceRegistry.buildProjectsPayload(null),
+						"projects payload",
+					);
 					workspaceState = null;
 					workspaceMetadata = null;
 				}
@@ -511,6 +560,10 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					type: "error",
 					message,
 				} satisfies RuntimeStateStreamErrorMessage);
+				// Close so a snapshot that never assembled (e.g. a timed-out git probe)
+				// drops the client into its reconnect/backoff path instead of leaving it
+				// holding a socket that will never receive a snapshot.
+				client.close();
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

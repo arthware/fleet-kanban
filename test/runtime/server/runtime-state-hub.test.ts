@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBoardColumnId, RuntimeBoardData } from "../../../src/core/api-contract";
 import { runtimeBoardCardSchema } from "../../../src/core/api-contract";
-import { applyPersistedCardPrToBoard } from "../../../src/server/runtime-state-hub";
+import {
+	applyPersistedCardPrToBoard,
+	SnapshotAssemblyTimeoutError,
+	withSnapshotTimeout,
+} from "../../../src/server/runtime-state-hub";
 import type { CardPrRef } from "../../../src/workspace/card-pr-url";
 
 const MERGED_PR: CardPrRef = {
@@ -84,5 +88,32 @@ describe("applyPersistedCardPrToBoard", () => {
 
 		expect(result.updated).toBe(true);
 		expect(cardColumnId(result.board, "task-1")).toBe("backlog");
+	});
+});
+
+describe("withSnapshotTimeout", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("given a promise that settles before the deadline, when awaited, then it passes the value through", async () => {
+		await expect(withSnapshotTimeout(Promise.resolve("ok"), "projects payload", 1_000)).resolves.toBe("ok");
+	});
+
+	it("given a promise that never settles, when the deadline passes, then it rejects naming the stage", async () => {
+		const guarded = withSnapshotTimeout(new Promise<never>(() => {}), "workspace state", 1_000);
+		const isTimeout = expect(guarded).rejects.toBeInstanceOf(SnapshotAssemblyTimeoutError);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await isTimeout;
+		// `guarded` is now a settled rejection; asserting its message needs no further ticks.
+		await expect(guarded).rejects.toThrow(/workspace state/);
+	});
+
+	it("given a promise that resolves, when the deadline later elapses, then the timer was cleared and does not reject", async () => {
+		await expect(withSnapshotTimeout(Promise.resolve(42), "workspace metadata", 1_000)).resolves.toBe(42);
+		await vi.advanceTimersByTimeAsync(5_000);
 	});
 });
