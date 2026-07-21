@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
 	formatCreatedTaskRecord,
 	formatTaskRecord,
+	notifyRuntimeWorkspaceStateUpdated,
 	renderTaskCommandSuccess,
 	resolveCardIdFromRefOrIssue,
 	resolveExternalIssueForTaskCommand,
@@ -205,5 +206,23 @@ describe("resolveCardIdFromRefOrIssue", () => {
 		const state = createState([createCard("d0cbc", { provider: "linear", key: "ENG-123" })]);
 
 		expect(resolveCardIdFromRefOrIssue(state, "missing-task")).toBe("missing-task");
+	});
+});
+
+describe("notifyRuntimeWorkspaceStateUpdated", () => {
+	it("surfaces and logs a failed runtime notify instead of swallowing it", async () => {
+		const warn = vi.fn();
+		const runtimeClient = {
+			workspace: {
+				notifyStateUpdated: {
+					mutate: vi.fn(async () => {
+						throw new Error("notify failed");
+					}),
+				},
+			},
+		} as unknown as Parameters<typeof notifyRuntimeWorkspaceStateUpdated>[0];
+
+		await expect(notifyRuntimeWorkspaceStateUpdated(runtimeClient, { warn })).rejects.toThrow("notify failed");
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining("notify failed"));
 	});
 });

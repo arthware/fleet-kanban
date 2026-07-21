@@ -41,6 +41,7 @@ import {
 import { renderTranscriptTailLines, selectTranscriptTail } from "./task-transcript-tail";
 
 const LIST_TASK_COLUMNS = ["backlog", "in_progress", "review", "done", "trash"] as const;
+const NOTIFY_WORKSPACE_STATE_TIMEOUT_MS = 2_000;
 type ListTaskColumn = (typeof LIST_TASK_COLUMNS)[number];
 type TaskCommandTarget = { taskId?: string; column?: ListTaskColumn };
 
@@ -333,10 +334,31 @@ async function ensureRuntimeWorkspace(workspaceRepoPath: string): Promise<string
 	return added.project.id;
 }
 
-async function notifyRuntimeWorkspaceStateUpdated(
+function createTimeoutError(message: string, timeoutMs: number): Promise<never> {
+	return new Promise((_, reject) => {
+		const timer = setTimeout(() => {
+			reject(new Error(`${message} after ${timeoutMs}ms.`));
+		}, timeoutMs);
+		timer.unref();
+	});
+}
+
+export async function notifyRuntimeWorkspaceStateUpdated(
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>,
+	options: { timeoutMs?: number; warn?: (message: string) => void } = {},
 ): Promise<void> {
-	await runtimeClient.workspace.notifyStateUpdated.mutate().catch(() => null);
+	const timeoutMs = options.timeoutMs ?? NOTIFY_WORKSPACE_STATE_TIMEOUT_MS;
+	const warn = options.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+	try {
+		await Promise.race([
+			runtimeClient.workspace.notifyStateUpdated.mutate(),
+			createTimeoutError("Timed out notifying the running Kanban board about the workspace update", timeoutMs),
+		]);
+	} catch (error) {
+		const message = toErrorMessage(error);
+		warn(`Kanban board realtime update failed: ${message}`);
+		throw error;
+	}
 }
 
 async function updateRuntimeWorkspaceState<T>(

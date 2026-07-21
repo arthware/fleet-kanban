@@ -471,3 +471,46 @@ describe("createWorkspaceApi loadDesignDoc", () => {
 		});
 	});
 });
+
+describe("createWorkspaceApi notifyStateUpdated", () => {
+	it("awaits workspace and projects broadcasts for the scoped workspace", async () => {
+		const broadcastWorkspace = vi.fn(async () => {});
+		const broadcastProjects = vi.fn(async () => {});
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: broadcastWorkspace,
+			broadcastRuntimeProjectsUpdated: broadcastProjects,
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await expect(
+			api.notifyStateUpdated({
+				workspaceId: "workspace-live",
+				workspacePath: "/tmp/live",
+			}),
+		).resolves.toEqual({ ok: true });
+
+		expect(broadcastWorkspace).toHaveBeenCalledWith("workspace-live", "/tmp/live");
+		expect(broadcastProjects).toHaveBeenCalledWith("workspace-live");
+	});
+
+	it("surfaces a failed workspace-state broadcast instead of reporting success", async () => {
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(async () => {
+				throw new Error("workspace push failed");
+			}),
+			broadcastRuntimeProjectsUpdated: vi.fn(async () => {}),
+			buildWorkspaceStateSnapshot: vi.fn(),
+		});
+
+		await expect(
+			api.notifyStateUpdated({
+				workspaceId: "workspace-live",
+				workspacePath: "/tmp/live",
+			}),
+		).rejects.toThrow("workspace push failed");
+	});
+});
