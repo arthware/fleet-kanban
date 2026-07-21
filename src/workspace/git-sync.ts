@@ -110,11 +110,18 @@ function parseStatusPath(line: string): string | null {
 	return tokens[tokens.length - 1] ?? null;
 }
 
+// Metadata probes (status / rev-parse / numstat) run on the frequent workspace poll,
+// so bound each git subprocess: a wedged git degrades to an `ok: false` result the
+// caller already handles, instead of hanging the whole snapshot/refresh indefinitely.
+const METADATA_GIT_TIMEOUT_MS = 5_000;
+
 export async function probeGitWorkspaceState(cwd: string): Promise<GitWorkspaceProbe> {
 	const repoRoot = await resolveRepoRoot(cwd);
 	const [statusResult, headCommitResult] = await Promise.all([
-		runGit(repoRoot, ["status", "--porcelain=v2", "--branch", "--untracked-files=all"]),
-		runGit(repoRoot, ["rev-parse", "--verify", "HEAD"]),
+		runGit(repoRoot, ["status", "--porcelain=v2", "--branch", "--untracked-files=all"], {
+			timeoutMs: METADATA_GIT_TIMEOUT_MS,
+		}),
+		runGit(repoRoot, ["rev-parse", "--verify", "HEAD"], { timeoutMs: METADATA_GIT_TIMEOUT_MS }),
 	]);
 
 	if (!statusResult.ok) {
@@ -200,7 +207,7 @@ export async function probeGitWorkspaceState(cwd: string): Promise<GitWorkspaceP
 }
 
 async function resolveRepoRoot(cwd: string): Promise<string> {
-	const result = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
+	const result = await runGit(cwd, ["rev-parse", "--show-toplevel"], { timeoutMs: METADATA_GIT_TIMEOUT_MS });
 	if (!result.ok || !result.stdout) {
 		throw new Error("No git repository detected for this workspace.");
 	}
@@ -231,7 +238,9 @@ export async function getGitSyncSummary(
 	options?: { probe?: GitWorkspaceProbe },
 ): Promise<RuntimeGitSyncSummary> {
 	const probe = options?.probe ?? (await probeGitWorkspaceState(cwd));
-	const diffResult = await runGit(probe.repoRoot, ["diff", "--numstat", "HEAD", "--"]);
+	const diffResult = await runGit(probe.repoRoot, ["diff", "--numstat", "HEAD", "--"], {
+		timeoutMs: METADATA_GIT_TIMEOUT_MS,
+	});
 	const trackedTotals = diffResult.ok ? parseNumstatTotals(diffResult.stdout) : { additions: 0, deletions: 0 };
 	const untrackedAdditions = await countUntrackedAdditions(probe.repoRoot, probe.untrackedPaths);
 

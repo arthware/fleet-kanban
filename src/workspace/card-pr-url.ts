@@ -3,6 +3,10 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+// `gh` is a network call on the workspace poll path; bound it so a stalled request
+// (slow network, auth prompt, rate-limit) can't hang PR capture — and, through
+// captureTrackedCardPrs, the whole metadata refresh — indefinitely.
+const GH_COMMAND_TIMEOUT_MS = 5_000;
 const GH_PR_LIST_ARGS_PREFIX = ["pr", "list", "--head"] as const;
 const GH_PR_LIST_ARGS_SUFFIX = ["--state", "all", "--json", "url,state,number,title"] as const;
 
@@ -99,6 +103,7 @@ async function runGh(args: string[], cwd: string): Promise<string> {
 		cwd,
 		encoding: "utf8",
 		maxBuffer: GH_MAX_BUFFER_BYTES,
+		timeout: GH_COMMAND_TIMEOUT_MS,
 	});
 	return stdout;
 }

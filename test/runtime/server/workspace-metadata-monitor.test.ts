@@ -39,10 +39,20 @@ vi.mock("../../../src/workspace/git-sync", () => ({
 	})),
 }));
 
+// The cheap fs-mtime probe. Default it to `null` ("could not resolve") so the monitor
+// always falls through to the full git probe — preserving legacy test behavior. The
+// gating tests override it per-case to exercise the skip path.
+vi.mock("../../../src/workspace/git-dir-token", () => ({
+	computeGitDirToken: vi.fn(async () => null),
+}));
+
 import {
 	createWorkspaceMetadataMonitor,
 	PR_STATE_REFRESH_MIN_MS,
+	WORKSPACE_METADATA_POLL_INTERVAL_MS,
 } from "../../../src/server/workspace-metadata-monitor";
+import { computeGitDirToken } from "../../../src/workspace/git-dir-token";
+import { probeGitWorkspaceState } from "../../../src/workspace/git-sync";
 
 const PR: CardPrRef = {
 	url: "https://github.com/cline/kanban/pull/42",
@@ -132,6 +142,46 @@ describe("workspace metadata monitor PR capture", () => {
 			taskId: "task-1",
 			pr: PR,
 		});
+	});
+
+	const worktreeProbeCount = () =>
+		vi.mocked(probeGitWorkspaceState).mock.calls.filter(([cwd]) => cwd === "/worktrees/task-1").length;
+
+	it("given an idle (non-in_progress) card whose git-dir token is unchanged, when the monitor re-polls, then the git status probe is skipped", async () => {
+		// given: the cheap fs-mtime probe reports 'no change'
+		vi.mocked(computeGitDirToken).mockResolvedValue("stable-token");
+		await monitor.connectWorkspace({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			board: boardWith("done"),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		const probesAfterConnect = worktreeProbeCount();
+		expect(probesAfterConnect).toBeGreaterThan(0);
+
+		// when: a poll tick fires with the token unchanged
+		await vi.advanceTimersByTimeAsync(WORKSPACE_METADATA_POLL_INTERVAL_MS);
+
+		// then: the expensive worktree probe did not run again
+		expect(worktreeProbeCount()).toBe(probesAfterConnect);
+	});
+
+	it("given an in_progress card, when the monitor re-polls, then the git status probe still runs despite an unchanged token", async () => {
+		// given: same unchanged token, but the worktree is actively being edited
+		vi.mocked(computeGitDirToken).mockResolvedValue("stable-token");
+		await monitor.connectWorkspace({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			board: boardWith("in_progress"),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		const probesAfterConnect = worktreeProbeCount();
+
+		// when: a poll tick fires
+		await vi.advanceTimersByTimeAsync(WORKSPACE_METADATA_POLL_INTERVAL_MS);
+
+		// then: unstaged edits aren't visible to the token, so an active card still scans
+		expect(worktreeProbeCount()).toBeGreaterThan(probesAfterConnect);
 	});
 
 	it("given a card whose PR is already stored, when capture runs again, then it does not re-resolve", async () => {

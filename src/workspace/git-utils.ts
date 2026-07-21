@@ -17,6 +17,13 @@ interface GitCommandResult {
 export interface RunGitOptions {
 	trimStdout?: boolean;
 	env?: NodeJS.ProcessEnv;
+	/**
+	 * Kill the git subprocess after this many ms (execFile `timeout`). Opt-in: when
+	 * unset git stays unbounded, so genuinely long ops (clone, history, large diffs) are
+	 * never truncated. Set it on frequently-polled probes so a wedged git can't hang the
+	 * caller (a timed-out call resolves as a normal `ok: false` result).
+	 */
+	timeoutMs?: number;
 }
 
 function normalizeProcessExitCode(code: unknown): number {
@@ -40,6 +47,8 @@ export async function runGit(cwd: string, args: string[], options: RunGitOptions
 			encoding: "utf8",
 			maxBuffer: GIT_MAX_BUFFER_BYTES,
 			env: options.env || createGitProcessEnv(),
+			// undefined → execFile default (0 = no timeout), preserving unbounded behavior.
+			timeout: options.timeoutMs,
 		});
 		const normalizedStdout = String(stdout ?? "").trim();
 		const normalizedStderr = String(stderr ?? "").trim();

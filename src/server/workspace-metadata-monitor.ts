@@ -8,10 +8,11 @@ import type {
 } from "../core/api-contract";
 import type { CardPrRef } from "../workspace/card-pr-url";
 import { resolveCardPrUrl } from "../workspace/card-pr-url";
+import { computeGitDirToken } from "../workspace/git-dir-token";
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync";
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree";
 
-const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
+export const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
 export const PR_STATE_REFRESH_MIN_MS = 60_000;
 // A card that reaches review without a PR yet is re-checked at most this often,
 // so a review card lacking a pushed PR does not spawn a `gh` subprocess on every
@@ -30,11 +31,17 @@ interface CachedHomeGitMetadata {
 	summary: RuntimeGitSyncSummary | null;
 	stateToken: string | null;
 	stateVersion: number;
+	// Cheap fs-mtime token (see computeGitDirToken). When unchanged, the expensive
+	// `git status` probe is skipped and the cached summary is reused.
+	gitDirToken: string | null;
 }
 
 interface CachedTaskWorkspaceMetadata {
 	data: RuntimeTaskWorkspaceMetadata;
 	stateToken: string | null;
+	// Cheap fs-mtime token (see computeGitDirToken). When unchanged and the worktree
+	// is not actively being edited by a running agent, the `git status` probe is skipped.
+	gitDirToken: string | null;
 }
 
 interface WorkspaceMetadataEntry {
@@ -189,6 +196,7 @@ function createWorkspaceEntry(workspaceId: string, workspacePath: string): Works
 			summary: null,
 			stateToken: null,
 			stateVersion: 0,
+			gitDirToken: null,
 		},
 		taskMetadataByTaskId: new Map<string, CachedTaskWorkspaceMetadata>(),
 	};
@@ -206,15 +214,23 @@ function buildWorkspaceMetadataSnapshot(entry: WorkspaceMetadataEntry): RuntimeW
 
 async function loadHomeGitMetadata(entry: WorkspaceMetadataEntry): Promise<CachedHomeGitMetadata> {
 	try {
+		// Cheap fs-mtime probe first: if git hasn't written to the repo since the last
+		// poll, skip the full `git status` scan entirely and reuse the cached summary.
+		const gitDirToken = await computeGitDirToken(entry.workspacePath);
+		if (gitDirToken !== null && entry.homeGit.gitDirToken === gitDirToken) {
+			return entry.homeGit;
+		}
 		const probe = await probeGitWorkspaceState(entry.workspacePath);
 		if (entry.homeGit.stateToken === probe.stateToken) {
-			return entry.homeGit;
+			// State unchanged but refresh the mtime token so the next tick can short-circuit.
+			return { ...entry.homeGit, gitDirToken };
 		}
 		const summary = await getGitSyncSummary(entry.workspacePath, { probe });
 		return {
 			summary,
 			stateToken: probe.stateToken,
 			stateVersion: Date.now(),
+			gitDirToken,
 		};
 	} catch {
 		return entry.homeGit;
@@ -256,7 +272,27 @@ async function loadTaskWorkspaceMetadata(
 				stateVersion: Date.now(),
 			},
 			stateToken: null,
+			gitDirToken: null,
 		};
+	}
+
+	// Cheap fs-mtime probe: skip the expensive `git status` scan when nothing in .git
+	// changed AND the worktree isn't being actively edited by a running agent. Unstaged
+	// edits don't move .git mtimes, so an active (in_progress) card always falls through
+	// to a full scan; idle/done cards only re-scan when git wrote (commit / checkout /
+	// branch move), which the token catches.
+	const gitDirToken = await computeGitDirToken(pathInfo.path);
+	const isActive = task.columnId === "in_progress";
+	if (
+		current &&
+		gitDirToken !== null &&
+		current.gitDirToken === gitDirToken &&
+		!isActive &&
+		current.data.exists === true &&
+		current.data.path === pathInfo.path &&
+		current.data.baseRef === pathInfo.baseRef
+	) {
+		return current;
 	}
 
 	try {
@@ -267,7 +303,7 @@ async function loadTaskWorkspaceMetadata(
 			current.data.path === pathInfo.path &&
 			current.data.baseRef === pathInfo.baseRef
 		) {
-			return current;
+			return { ...current, gitDirToken };
 		}
 		const summary = await getGitSyncSummary(pathInfo.path, { probe });
 		return {
@@ -285,10 +321,13 @@ async function loadTaskWorkspaceMetadata(
 				stateVersion: Date.now(),
 			},
 			stateToken: probe.stateToken,
+			gitDirToken,
 		};
 	} catch {
 		if (current) {
-			return current;
+			// Refresh the mtime token so an inactive card whose git call failed doesn't
+			// re-probe on every tick; the cached data is preserved.
+			return { ...current, gitDirToken };
 		}
 		return {
 			data: {
@@ -305,6 +344,7 @@ async function loadTaskWorkspaceMetadata(
 				stateVersion: Date.now(),
 			},
 			stateToken: null,
+			gitDirToken,
 		};
 	}
 }
