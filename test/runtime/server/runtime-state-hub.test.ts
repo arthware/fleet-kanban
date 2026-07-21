@@ -13,7 +13,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../../../src/core/api-contract";
 import { runtimeBoardCardSchema } from "../../../src/core/api-contract";
-import { addTaskToColumn } from "../../../src/core/task-board-mutations";
+import { addTaskToColumn, moveTaskToColumn } from "../../../src/core/task-board-mutations";
 import {
 	applyPersistedCardPrToBoard,
 	createRuntimeStateHub,
@@ -22,6 +22,28 @@ import {
 } from "../../../src/server/runtime-state-hub";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 import type { CardPrRef } from "../../../src/workspace/card-pr-url";
+
+const monitorMockState = vi.hoisted(() => ({
+	updateWorkspaceState: vi.fn<() => Promise<unknown>>(async () => ({
+		homeGitSummary: null,
+		homeGitStateVersion: 0,
+		taskWorkspaces: [],
+	})),
+}));
+
+vi.mock("../../../src/server/workspace-metadata-monitor", () => ({
+	createWorkspaceMetadataMonitor: () => ({
+		connectWorkspace: vi.fn(async () => ({
+			homeGitSummary: null,
+			homeGitStateVersion: 0,
+			taskWorkspaces: [],
+		})),
+		updateWorkspaceState: monitorMockState.updateWorkspaceState,
+		disconnectWorkspace: vi.fn(),
+		disposeWorkspace: vi.fn(),
+		close: vi.fn(),
+	}),
+}));
 
 const MERGED_PR: CardPrRef = {
 	url: "https://github.com/cline/kanban/pull/42",
@@ -203,6 +225,32 @@ function createCliStyleCard(prompt: string): RuntimeBoardCard {
 	return card;
 }
 
+async function expectNoStreamMessage(
+	messages: RuntimeStateStreamMessage[],
+	predicate: (message: RuntimeStateStreamMessage) => boolean,
+	timeoutMs = 100,
+): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		const deadline = setTimeout(resolve, timeoutMs);
+		const poll = setInterval(() => {
+			if (!messages.some(predicate)) {
+				return;
+			}
+			clearInterval(poll);
+			clearTimeout(deadline);
+			reject(new Error("Received unexpected runtime stream message."));
+		}, 10);
+	});
+}
+
+beforeEach(() => {
+	monitorMockState.updateWorkspaceState.mockResolvedValue({
+		homeGitSummary: null,
+		homeGitStateVersion: 0,
+		taskWorkspaces: [],
+	});
+});
+
 describe("applyPersistedCardPrToBoard", () => {
 	it("given a review card whose PR transitioned to merged, when the monitor persists it, then the card is moved to done", () => {
 		const result = applyPersistedCardPrToBoard(boardWithCard("review"), "task-1", MERGED_PR);
@@ -318,4 +366,85 @@ describe("CLI-style workspace state notify", () => {
 			}
 		},
 	);
+});
+
+describe("workspace state broadcast while metadata refresh is blocked", () => {
+	it("given a subscribed workspace stream, when an agent-driven transition updates the board while metadata refresh is blocked, then the client still receives workspace_state", async () => {
+		monitorMockState.updateWorkspaceState.mockImplementationOnce(() => new Promise(() => {}));
+		const workspaceId = "workspace-live";
+		const workspacePath = "/tmp/workspace-live";
+		const initialBoard = boardWithCard("review");
+		const stream = await setupWorkspaceStateStream({
+			workspaceId,
+			workspacePath,
+			board: initialBoard,
+		});
+		try {
+			const moved = moveTaskToColumn(initialBoard, "task-1", "in_progress");
+			stream.setBoard(moved.board);
+
+			const broadcast = stream.hub.broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath).catch(() => {});
+
+			const update = await waitForMessage(
+				stream.messages,
+				(message): message is RuntimeStateStreamWorkspaceStateMessage =>
+					message.type === "workspace_state_updated" &&
+					cardColumnId(message.workspaceState.board, "task-1") === "in_progress",
+			);
+			expect(update.workspaceId).toBe(workspaceId);
+			await expect(
+				Promise.race([
+					broadcast.then(() => "broadcast returned"),
+					new Promise<string>((resolve) => setTimeout(() => resolve("broadcast blocked"), 100)),
+				]),
+			).resolves.toBe("broadcast returned");
+		} finally {
+			await stream.cleanup();
+		}
+	});
+
+	it("given a subscribed workspace stream, when a CLI-style create notifies while metadata refresh is blocked, then notify returns and the client receives workspace_state", async () => {
+		monitorMockState.updateWorkspaceState.mockImplementationOnce(() => new Promise(() => {}));
+		const workspaceId = "workspace-live";
+		const workspacePath = "/tmp/workspace-live";
+		const stream = await setupWorkspaceStateStream({
+			workspaceId,
+			workspacePath,
+			board: emptyBoard(),
+		});
+		try {
+			const card = createCliStyleCard("CLI created while metadata is slow");
+			stream.setBoard({
+				...emptyBoard(),
+				columns: emptyBoard().columns.map((column) =>
+					column.id === "backlog" ? { ...column, cards: [card] } : column,
+				),
+			});
+			const api = createWorkspaceApi({
+				ensureTerminalManagerForWorkspace: vi.fn(),
+				getScopedClineTaskSessionService: vi.fn(),
+				broadcastRuntimeWorkspaceStateUpdated: stream.hub.broadcastRuntimeWorkspaceStateUpdated,
+				broadcastRuntimeProjectsUpdated: stream.hub.broadcastRuntimeProjectsUpdated,
+				buildWorkspaceStateSnapshot: vi.fn(),
+			});
+
+			await expect(api.notifyStateUpdated({ workspaceId, workspacePath })).resolves.toEqual({ ok: true });
+
+			const update = await waitForMessage(
+				stream.messages,
+				(message): message is RuntimeStateStreamWorkspaceStateMessage =>
+					message.type === "workspace_state_updated" &&
+					message.workspaceState.board.columns.some((column) =>
+						column.cards.some((candidate) => candidate.id === card.id),
+					),
+			);
+			expect(update.workspaceId).toBe(workspaceId);
+			await expectNoStreamMessage(
+				stream.messages,
+				(message) => message.type === "error" && message.message.includes("metadata"),
+			);
+		} finally {
+			await stream.cleanup();
+		}
+	});
 });
