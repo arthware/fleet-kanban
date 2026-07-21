@@ -112,6 +112,7 @@
   },
   "overrides": {
     "protobufjs": "7.6.5",
-    "@opentelemetry/core": "2.9.0"
+    "@opentelemetry/core": "2.9.0",
+    "@ai-sdk/provider-utils": "4.0.26"
   }
 }
