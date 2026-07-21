@@ -380,15 +380,20 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		let workspaceState: RuntimeStateStreamWorkspaceStateMessage["workspaceState"];
 		try {
 			workspaceState = await deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspaceId, workspacePath);
-			await workspaceMetadataMonitor.updateWorkspaceState({
-				workspaceId,
-				workspacePath,
-				board: workspaceState.board,
-			});
 		} catch {
 			// Ignore transient state read failures; next update will resync.
 			return;
 		}
+
+		void workspaceMetadataMonitor
+			.updateWorkspaceState({
+				workspaceId,
+				workspacePath,
+				board: workspaceState.board,
+			})
+			.catch(() => {
+				// Metadata is eventually consistent and must not block board-state fanout.
+			});
 
 		const clients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		if (!clients || clients.size === 0) {

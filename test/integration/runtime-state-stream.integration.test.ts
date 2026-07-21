@@ -897,16 +897,26 @@ describe.sequential("runtime state stream integration", () => {
 			const snapshot = (await stream.waitForMessage(
 				(message): message is RuntimeStateStreamSnapshotMessage => message.type === "snapshot",
 			)) as RuntimeStateStreamSnapshotMessage;
-			expect(snapshot.workspaceMetadata).not.toBeNull();
-			const initialTaskMetadata =
-				snapshot.workspaceMetadata?.taskWorkspaces.find((task) => task.taskId === taskId) ?? null;
-			expect(initialTaskMetadata).not.toBeNull();
-			expect(initialTaskMetadata?.changedFiles ?? 0).toBe(0);
 			expect(snapshot.workspaceMetadata?.taskWorkspaces.some((task) => task.taskId === trashTaskId)).toBe(false);
-			const messagesAfterInitialSnapshot = await stream.collectFor(250);
-			expect(messagesAfterInitialSnapshot.some((message) => message.type === "workspace_metadata_updated")).toBe(
-				false,
+
+			const initialMetadataMessage = await stream.waitForMessage(
+				(message) =>
+					message.type === "workspace_metadata_updated" &&
+					message.workspaceId === workspaceId &&
+					message.workspaceMetadata.taskWorkspaces.some((task) => task.taskId === taskId),
+				10_000,
 			);
+			expect(initialMetadataMessage.type).toBe("workspace_metadata_updated");
+			if (initialMetadataMessage.type !== "workspace_metadata_updated") {
+				throw new Error("Expected initial workspace metadata update message.");
+			}
+			const initialTaskMetadata =
+				initialMetadataMessage.workspaceMetadata.taskWorkspaces.find((task) => task.taskId === taskId) ?? null;
+			expect(initialTaskMetadata).not.toBeNull();
+			const initialChangedFiles = initialTaskMetadata?.changedFiles ?? 0;
+			expect(
+				initialMetadataMessage.workspaceMetadata.taskWorkspaces.some((task) => task.taskId === trashTaskId),
+			).toBe(false);
 
 			writeFileSync(join(ensureResponse.payload.path, "task-change.txt"), "updated\n", "utf8");
 
@@ -926,7 +936,7 @@ describe.sequential("runtime state stream integration", () => {
 			const updatedTaskMetadata = metadataMessage.workspaceMetadata.taskWorkspaces.find(
 				(task) => task.taskId === taskId,
 			);
-			expect(updatedTaskMetadata?.changedFiles).toBeGreaterThan(0);
+			expect(updatedTaskMetadata?.changedFiles).toBeGreaterThan(initialChangedFiles);
 			expect(updatedTaskMetadata?.stateVersion).toBeGreaterThan(initialTaskMetadata?.stateVersion ?? 0);
 		} finally {
 			if (stream) {
