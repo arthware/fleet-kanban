@@ -24,11 +24,9 @@ function ColumnSection({
 	inlineTaskEditor,
 	onEditTask,
 	onSaveTitle,
-	onCommitTask,
 	onOpenPrTask,
 	onMoveToTrashTask,
 	onRestoreFromTrashTask,
-	commitTaskLoadingById,
 	openPrTaskLoadingById,
 	moveToTrashLoadingById,
 	activeDragSourceColumnId,
@@ -48,11 +46,9 @@ function ColumnSection({
 	inlineTaskEditor?: ReactNode;
 	onEditTask?: (card: BoardCardModel) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
-	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
-	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
 	moveToTrashLoadingById?: Record<string, boolean>;
 	activeDragSourceColumnId?: BoardColumnId | null;
@@ -193,9 +189,7 @@ function ColumnSection({
 												onStart={onStartTask}
 												onMoveToTrash={onMoveToTrashTask}
 												onRestoreFromTrash={onRestoreFromTrashTask}
-												onCommit={onCommitTask}
 												onOpenPr={onOpenPrTask}
-												isCommitLoading={commitTaskLoadingById?.[card.id] ?? false}
 												isOpenPrLoading={openPrTaskLoadingById?.[card.id] ?? false}
 												isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
 												workspacePath={workspacePath}
@@ -242,12 +236,10 @@ export function ColumnContextPanel({
 	inlineTaskEditor,
 	onEditTask,
 	onSaveTaskTitle,
-	onCommitTask,
 	onOpenPrTask,
 	onMoveToTrashTask,
 	onMoveDoneTaskToTrash,
 	onRestoreFromTrashTask,
-	commitTaskLoadingById,
 	openPrTaskLoadingById,
 	moveToTrashLoadingById,
 	panelWidth,
@@ -265,12 +257,10 @@ export function ColumnContextPanel({
 	inlineTaskEditor?: ReactNode;
 	onEditTask?: (card: BoardCardModel) => void;
 	onSaveTaskTitle?: (taskId: string, title: string) => void;
-	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onMoveDoneTaskToTrash?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
-	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
 	moveToTrashLoadingById?: Record<string, boolean>;
 	panelWidth?: string;
@@ -355,7 +345,6 @@ export function ColumnContextPanel({
 							inlineTaskEditor={column.id === "backlog" ? inlineTaskEditor : undefined}
 							onEditTask={column.id === "backlog" ? onEditTask : undefined}
 							onSaveTitle={column.id !== "trash" ? onSaveTaskTitle : undefined}
-							onCommitTask={column.id === "review" ? onCommitTask : undefined}
 							onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
 							onMoveToTrashTask={
 								column.id === "review"
@@ -365,7 +354,6 @@ export function ColumnContextPanel({
 										: undefined
 							}
 							onRestoreFromTrashTask={column.id === "trash" ? onRestoreFromTrashTask : undefined}
-							commitTaskLoadingById={column.id === "review" ? commitTaskLoadingById : undefined}
 							openPrTaskLoadingById={column.id === "review" ? openPrTaskLoadingById : undefined}
 							moveToTrashLoadingById={
 								column.id === "review" || column.id === "done" ? moveToTrashLoadingById : undefined

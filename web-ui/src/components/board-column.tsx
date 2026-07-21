@@ -22,13 +22,11 @@ export function BoardColumn({
 	inlineTaskEditor,
 	onEditTask,
 	onSaveTitle,
-	onCommitTask,
 	onOpenPrTask,
 	onImplementHereTask,
 	onCancelAutomaticTaskAction,
 	onMoveToTrashTask,
 	onRestoreFromTrashTask,
-	commitTaskLoadingById,
 	openPrTaskLoadingById,
 	moveToTrashLoadingById,
 	onCardClick,
@@ -57,13 +55,11 @@ export function BoardColumn({
 	inlineTaskEditor?: ReactNode;
 	onEditTask?: (card: BoardCardModel) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
-	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onImplementHereTask?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
-	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
 	moveToTrashLoadingById?: Record<string, boolean>;
 	onCardClick?: (card: BoardCardModel) => void;
@@ -188,11 +184,9 @@ export function BoardColumn({
 											onStart={onStartTask}
 											onMoveToTrash={onMoveToTrashTask}
 											onRestoreFromTrash={onRestoreFromTrashTask}
-											onCommit={onCommitTask}
 											onOpenPr={onOpenPrTask}
 											onImplementHere={onImplementHereTask}
 											onCancelAutomaticAction={onCancelAutomaticTaskAction}
-											isCommitLoading={commitTaskLoadingById?.[card.id] ?? false}
 											isOpenPrLoading={openPrTaskLoadingById?.[card.id] ?? false}
 											isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
 											onDependencyPointerDown={onDependencyPointerDown}

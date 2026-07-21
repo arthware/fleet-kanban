@@ -152,6 +152,12 @@ function findSessionActivityDot(container: HTMLElement): HTMLElement | null {
 	return container.querySelector<HTMLElement>(".inline-block.shrink-0.rounded-full");
 }
 
+function findButtonByText(container: HTMLElement, text: string): HTMLButtonElement | undefined {
+	return Array.from(container.querySelectorAll("button")).find(
+		(button): button is HTMLButtonElement => button.textContent?.trim() === text,
+	);
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -1116,6 +1122,89 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("+12");
 		expect(container.textContent).toContain("-3");
 	});
+
+	it("hides the review action buttons for a changed review card with an open PR", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "task/card-pr-url-helper",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 4,
+			additions: 12,
+			deletions: 3,
+		};
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+					})}
+					index={0}
+					columnId="review"
+				/>,
+			);
+		});
+
+		expect(findButtonByText(container, "Commit")).toBeUndefined();
+		expect(findButtonByText(container, "Open PR")).toBeUndefined();
+	});
+
+	it("shows the Open PR button for a changed review card with no detected PR", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "task/card-pr-url-helper",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 4,
+			additions: 12,
+			deletions: 3,
+		};
+
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="review" />);
+		});
+
+		expect(findButtonByText(container, "Commit")).toBeUndefined();
+		expect(findButtonByText(container, "Open PR")).toBeInstanceOf(HTMLButtonElement);
+	});
+
+	it.each(["merged", "closed"] as const)(
+		"shows the Open PR button for a changed review card with a %s PR",
+		async (prState) => {
+			mockWorkspaceSnapshot = {
+				taskId: "task-1",
+				path: "/tmp/fleet-kanban-worktrees/task-1",
+				branch: "task/card-pr-url-helper",
+				isDetached: false,
+				headCommit: "abc123",
+				changedFiles: 4,
+				additions: 12,
+				deletions: 3,
+			};
+
+			await act(async () => {
+				root.render(
+					<BoardCard
+						card={createCard({
+							prUrl: "https://github.com/cline/kanban/pull/42",
+							prState,
+							prNumber: 42,
+						})}
+						index={0}
+						columnId="review"
+					/>,
+				);
+			});
+
+			expect(findButtonByText(container, "Commit")).toBeUndefined();
+			expect(findButtonByText(container, "Open PR")).toBeInstanceOf(HTMLButtonElement);
+		},
+	);
 
 	it("renders the stored PR as a badge with new-tab link attributes", async () => {
 		await act(async () => {

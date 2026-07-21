@@ -270,11 +270,9 @@ export function BoardCard({
 	onMoveToTrash,
 	onRestoreFromTrash,
 	onSaveTitle,
-	onCommit,
 	onOpenPr,
 	onImplementHere,
 	onCancelAutomaticAction,
-	isCommitLoading = false,
 	isOpenPrLoading = false,
 	isMoveToTrashLoading = false,
 	onDependencyPointerDown,
@@ -299,11 +297,9 @@ export function BoardCard({
 	onMoveToTrash?: (taskId: string) => void;
 	onRestoreFromTrash?: (taskId: string) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
-	onCommit?: (taskId: string) => void;
 	onOpenPr?: (taskId: string) => void;
 	onImplementHere?: (taskId: string) => void;
 	onCancelAutomaticAction?: (taskId: string) => void;
-	isCommitLoading?: boolean;
 	isOpenPrLoading?: boolean;
 	isMoveToTrashLoading?: boolean;
 	onDependencyPointerDown?: (taskId: string, event: MouseEvent<HTMLElement>) => void;
@@ -478,9 +474,8 @@ export function BoardCard({
 					deletions: reviewWorkspaceSnapshot.deletions ?? 0,
 				}
 		: null;
-	const showReviewGitActions =
-		columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0 && Boolean(onCommit || onOpenPr);
-	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
+	const showReviewGitActions = columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0;
+	const showOpenPrAction = showReviewGitActions && card.prState !== "open";
 	// A plan card whose committed design doc exists can flip from plan → build in
 	// this same live session. Reuse the exact signal the Design badge shows: the
 	// review-column "Implement here" action appears only when that doc resolves.
@@ -1015,27 +1010,13 @@ export function BoardCard({
 										</Button>
 									</div>
 								) : null}
-								{showReviewGitActions ? (
+								{showOpenPrAction ? (
 									<div className="flex gap-1.5 mt-1.5">
 										<Button
 											variant="primary"
 											size="sm"
-											icon={isCommitLoading ? <Spinner size={12} /> : undefined}
-											disabled={isAnyGitActionLoading}
-											style={{ flex: "1 1 0" }}
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onCommit?.(card.id);
-											}}
-										>
-											Commit
-										</Button>
-										<Button
-											variant="primary"
-											size="sm"
 											icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
-											disabled={isAnyGitActionLoading}
+											disabled={isOpenPrLoading}
 											style={{ flex: "1 1 0" }}
 											onMouseDown={stopEvent}
 											onClick={(event) => {
