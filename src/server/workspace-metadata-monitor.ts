@@ -119,6 +119,10 @@ function collectTrackedTasks(board: RuntimeBoardData): TrackedTaskWorkspace[] {
 	return tracked;
 }
 
+function shouldResolveMissingCardPr(task: TrackedTaskWorkspace): boolean {
+	return task.columnId === "review" || task.columnId === "done";
+}
+
 function areGitSummariesEqual(a: RuntimeGitSyncSummary | null, b: RuntimeGitSyncSummary | null): boolean {
 	if (a === b) {
 		return true;
@@ -423,7 +427,7 @@ export function createWorkspaceMetadataMonitor(
 			return;
 		}
 		for (const task of entry.trackedTasks) {
-			if (!task.hasStoredPrUrl && task.columnId !== "review") {
+			if (!task.hasStoredPrUrl && !shouldResolveMissingCardPr(task)) {
 				continue;
 			}
 			const metadata = entry.taskMetadataByTaskId.get(task.taskId)?.data;

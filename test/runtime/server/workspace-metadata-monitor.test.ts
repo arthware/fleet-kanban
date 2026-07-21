@@ -231,6 +231,28 @@ describe("workspace metadata monitor PR capture", () => {
 		});
 	});
 
+	it("given a subscribed Done card without a stored PR whose branch led to one, when the metadata refresh runs, then it captures and persists the PR", async () => {
+		// given
+		await monitor.connectWorkspace({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			board: boardWith("done"),
+		});
+
+		// when
+		await settleConnectRefresh();
+
+		// then
+		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
+		expect(persistCardPr).toHaveBeenCalledTimes(1);
+		expect(persistCardPr).toHaveBeenCalledWith({
+			workspaceId: "ws-1",
+			workspacePath: "/repo",
+			taskId: "task-1",
+			pr: PR,
+		});
+	});
+
 	it("given a stored open PR that has since merged, when the monitor re-polls past the refresh interval, then the card's prState becomes merged", async () => {
 		// given
 		resolveCardPr.mockResolvedValue(PR);
