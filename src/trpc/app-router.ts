@@ -6,6 +6,8 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import type {
+	RuntimeArchivedCardsResponse,
+	RuntimeArchivedTaskRestoreRequest,
 	RuntimeClineAccountBalanceResponse,
 	RuntimeClineAccountOrganizationsResponse,
 	RuntimeClineAccountProfileResponse,
@@ -107,6 +109,8 @@ import type {
 	RuntimeWorktreeEnsureResponse,
 } from "../core/api-contract";
 import {
+	runtimeArchivedCardsResponseSchema,
+	runtimeArchivedTaskRestoreRequestSchema,
 	runtimeClineAccountBalanceResponseSchema,
 	runtimeClineAccountOrganizationsResponseSchema,
 	runtimeClineAccountProfileResponseSchema,
@@ -375,6 +379,11 @@ export interface RuntimeTrpcContext {
 			input: RuntimeDesignDocRequest,
 		) => Promise<RuntimeDesignDocResponse>;
 		loadState: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceStateResponse>;
+		loadArchivedCards: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeArchivedCardsResponse>;
+		restoreArchivedTask: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeArchivedTaskRestoreRequest,
+		) => Promise<RuntimeWorkspaceStateResponse>;
 		notifyStateUpdated: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceStateNotifyResponse>;
 		saveState: (
 			scope: RuntimeTrpcWorkspaceScope,
@@ -727,6 +736,15 @@ export const runtimeAppRouter = t.router({
 		getState: workspaceProcedure.output(runtimeWorkspaceStateResponseSchema).query(async ({ ctx }) => {
 			return await ctx.workspaceApi.loadState(ctx.workspaceScope);
 		}),
+		getArchivedCards: workspaceProcedure.output(runtimeArchivedCardsResponseSchema).query(async ({ ctx }) => {
+			return await ctx.workspaceApi.loadArchivedCards(ctx.workspaceScope);
+		}),
+		restoreArchivedTask: workspaceProcedure
+			.input(runtimeArchivedTaskRestoreRequestSchema)
+			.output(runtimeWorkspaceStateResponseSchema)
+			.mutation(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.restoreArchivedTask(ctx.workspaceScope, input);
+			}),
 		notifyStateUpdated: workspaceProcedure
 			.output(runtimeWorkspaceStateNotifyResponseSchema)
 			.mutation(async ({ ctx }) => {

@@ -71,8 +71,8 @@ import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
 import { useRuntimeStateStream } from "@/runtime/use-runtime-state-stream";
 import { useTerminalConnectionReady } from "@/runtime/use-terminal-connection-ready";
 import { useWorkspacePersistence } from "@/runtime/use-workspace-persistence";
-import { saveWorkspaceState } from "@/runtime/workspace-state-query";
-import { applyTaskDetailClineSettingsChange, findCardSelection } from "@/state/board-state";
+import { fetchArchivedCards, restoreArchivedTask, saveWorkspaceState } from "@/runtime/workspace-state-query";
+import { applyTaskDetailClineSettingsChange, findCardSelection, normalizeBoardData } from "@/state/board-state";
 import {
 	getTaskWorkspaceInfo,
 	getTaskWorkspaceSnapshot,
@@ -87,6 +87,9 @@ export default function App(): ReactElement {
 	const [board, setBoard] = useState<BoardData>(() => createInitialBoardData());
 	const [sessions, setSessions] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const [canPersistWorkspaceState, setCanPersistWorkspaceState] = useState(false);
+	const [archivedBoard, setArchivedBoard] = useState<BoardData | null>(null);
+	const [archivedWorkspaceId, setArchivedWorkspaceId] = useState<string | null>(null);
+	const [isArchivedLoading, setIsArchivedLoading] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [settingsInitialSection, setSettingsInitialSection] = useState<RuntimeSettingsSection | null>(null);
 	const [homeSidebarSection, setHomeSidebarSection] = useState<"projects" | "agent">("projects");
@@ -558,6 +561,9 @@ export default function App(): ReactElement {
 
 	useEffect(() => {
 		resetTaskEditorState();
+		setArchivedBoard(null);
+		setArchivedWorkspaceId(null);
+		setIsArchivedLoading(false);
 		setIsClearTrashDialogOpen(false);
 		resetGitActionState();
 		resetProjectNavigationState();
@@ -569,6 +575,64 @@ export default function App(): ReactElement {
 		resetTaskEditorState,
 		resetTerminalPanelsState,
 	]);
+
+	const handleLoadArchivedCards = useCallback(async (): Promise<void> => {
+		if (!currentProjectId || isArchivedLoading) {
+			return;
+		}
+		if (archivedWorkspaceId === currentProjectId && archivedBoard !== null) {
+			return;
+		}
+		setIsArchivedLoading(true);
+		try {
+			const response = await fetchArchivedCards(currentProjectId);
+			const normalized = normalizeBoardData(response.board) ?? createInitialBoardData();
+			setArchivedBoard(normalized);
+			setArchivedWorkspaceId(currentProjectId);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			notifyError(message);
+		} finally {
+			setIsArchivedLoading(false);
+		}
+	}, [archivedBoard, archivedWorkspaceId, currentProjectId, isArchivedLoading]);
+
+	const handleRestoreArchivedTask = useCallback(
+		(taskId: string) => {
+			if (!currentProjectId) {
+				return;
+			}
+			void (async () => {
+				try {
+					const restored = await restoreArchivedTask(currentProjectId, taskId);
+					const normalized = normalizeBoardData(restored.board) ?? createInitialBoardData();
+					setBoard(normalized);
+					setSessions((currentSessions) => ({
+						...currentSessions,
+						...(restored.sessions ?? {}),
+					}));
+					setWorkspaceRevision(restored.revision);
+					setArchivedBoard((currentArchivedBoard) => {
+						if (!currentArchivedBoard) {
+							return currentArchivedBoard;
+						}
+						return {
+							...currentArchivedBoard,
+							columns: currentArchivedBoard.columns.map((column) =>
+								column.id === "trash"
+									? { ...column, cards: column.cards.filter((card) => card.id !== taskId) }
+									: column,
+							),
+						};
+					});
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					notifyError(message);
+				}
+			})();
+		},
+		[currentProjectId, setBoard, setSessions, setWorkspaceRevision],
+	);
 
 	useEffect(() => {
 		if (selectedCard) {
@@ -997,6 +1061,9 @@ export default function App(): ReactElement {
 												workspacePath={workspacePath}
 												workspaceId={currentProjectId}
 												taskWorktreesRoot={taskWorktreesRoot}
+												archivedData={archivedWorkspaceId === currentProjectId ? archivedBoard : null}
+												isArchivedLoading={isArchivedLoading}
+												onLoadArchivedCards={handleLoadArchivedCards}
 												onCardSelect={handleCardSelect}
 												onCreateTask={handleOpenCreateTask}
 												onStartTask={handleStartTaskFromBoard}
@@ -1011,7 +1078,7 @@ export default function App(): ReactElement {
 												moveToTrashLoadingById={moveToTrashLoadingById}
 												onMoveToTrashTask={handleMoveReviewCardToTrash}
 												onMoveDoneTaskToTrash={handleMoveDoneCardToTrash}
-												onRestoreFromTrashTask={handleRestoreTaskFromTrash}
+												onRestoreFromTrashTask={handleRestoreArchivedTask}
 												dependencies={board.dependencies}
 												onCreateDependency={handleCreateDependency}
 												onDeleteDependency={handleDeleteDependency}

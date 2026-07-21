@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
 import type {
+	RuntimeArchivedCardsResponse,
 	RuntimeBoardCard,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitDiscardResponse,
@@ -23,7 +24,12 @@ import {
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation";
 import { deriveTaskBranchName } from "../core/task-ref";
-import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
+import {
+	loadWorkspaceArchivedBoardById,
+	restoreArchivedWorkspaceTask,
+	saveWorkspaceState,
+	WorkspaceStateConflictError,
+} from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { readFileWithinTaskWorktree, readTaskDesignDoc } from "../workspace/design-doc";
 import {
@@ -444,6 +450,14 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 		},
 		loadState: async (workspaceScope) => {
 			return await deps.buildWorkspaceStateSnapshot(workspaceScope.workspaceId, workspaceScope.workspacePath);
+		},
+		loadArchivedCards: async (workspaceScope) => {
+			return {
+				board: await loadWorkspaceArchivedBoardById(workspaceScope.workspaceId),
+			} satisfies RuntimeArchivedCardsResponse;
+		},
+		restoreArchivedTask: async (workspaceScope, input) => {
+			return await restoreArchivedWorkspaceTask(workspaceScope.workspacePath, input.taskId, input.targetColumnId);
 		},
 		notifyStateUpdated: async (workspaceScope) => {
 			await Promise.all([

@@ -61,6 +61,9 @@ export function KanbanBoard({
 	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
+	archivedData,
+	isArchivedLoading,
+	onLoadArchivedCards,
 	defaultClineModelId,
 	defaultAgentId,
 }: {
@@ -94,6 +97,9 @@ export function KanbanBoard({
 	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
+	archivedData?: BoardData | null;
+	isArchivedLoading?: boolean;
+	onLoadArchivedCards?: () => Promise<void> | void;
 	defaultClineModelId?: string | null;
 	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
@@ -386,9 +392,18 @@ export function KanbanBoard({
 	const visibleColumns = BOARD_COLUMN_ORDER.map((columnId) =>
 		data.columns.find((column) => column.id === columnId),
 	).filter((column): column is BoardData["columns"][number] => column !== undefined);
-	const trashColumn = data.columns.find((column) => column.id === "trash") ?? null;
+	const liveTrashColumn = data.columns.find((column) => column.id === "trash") ?? null;
+	const archivedTrashColumn = archivedData?.columns.find((column) => column.id === "trash") ?? null;
+	const trashColumn = isArchivedOpen ? (archivedTrashColumn ?? liveTrashColumn) : liveTrashColumn;
 	const renderedColumns = isArchivedOpen && trashColumn ? [...visibleColumns, trashColumn] : visibleColumns;
 	const archivedTaskCount = trashColumn?.cards.length ?? 0;
+	const handleToggleArchived = useCallback(() => {
+		const nextOpen = !isArchivedOpen;
+		setIsArchivedOpen(nextOpen);
+		if (nextOpen) {
+			void onLoadArchivedCards?.();
+		}
+	}, [isArchivedOpen, onLoadArchivedCards]);
 
 	return (
 		<DragDropContext
@@ -460,11 +475,11 @@ export function KanbanBoard({
 						size="sm"
 						aria-expanded={isArchivedOpen}
 						aria-controls={trashColumn ? "kb-archived-column" : undefined}
-						onClick={() => setIsArchivedOpen((current) => !current)}
+						onClick={handleToggleArchived}
 					>
 						<span className="inline-flex items-center gap-1.5">
 							<Archive size={14} />
-							<span>Archived ({archivedTaskCount})</span>
+							<span>{isArchivedLoading ? "Archived..." : `Archived (${archivedTaskCount})`}</span>
 						</span>
 					</Button>
 				</div>

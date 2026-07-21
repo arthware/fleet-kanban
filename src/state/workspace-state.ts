@@ -6,12 +6,14 @@ import { z } from "zod";
 import { clineHomeDir } from "../config/cline-home";
 
 import {
+	type RuntimeBoardCard,
 	type RuntimeBoardColumnId,
 	type RuntimeBoardData,
 	type RuntimeGitRepositoryInfo,
 	type RuntimeTaskSessionSummary,
 	type RuntimeWorkspaceStateResponse,
 	type RuntimeWorkspaceStateSaveRequest,
+	runtimeBoardCardSchema,
 	runtimeBoardDataSchema,
 	runtimeTaskSessionSummarySchema,
 	runtimeWorkspaceStateSaveRequestSchema,
@@ -25,6 +27,7 @@ const RUNTIME_WORKTREES_DIR = "worktrees";
 const WORKSPACES_DIR = "workspaces";
 const INDEX_FILENAME = "index.json";
 const BOARD_FILENAME = "board.json";
+export const ARCHIVED_CARDS_FILENAME = "archived-cards.json";
 const SESSIONS_FILENAME = "sessions.json";
 const META_FILENAME = "meta.json";
 const INDEX_VERSION = 1;
@@ -182,6 +185,10 @@ function getWorkspaceBoardPath(workspaceId: string): string {
 	return join(getWorkspaceDirectoryPath(workspaceId), BOARD_FILENAME);
 }
 
+export function getWorkspaceArchivedCardsPath(workspaceId: string): string {
+	return join(getWorkspaceDirectoryPath(workspaceId), ARCHIVED_CARDS_FILENAME);
+}
+
 function getWorkspaceSessionsPath(workspaceId: string): string {
 	return join(getWorkspaceDirectoryPath(workspaceId), SESSIONS_FILENAME);
 }
@@ -302,6 +309,186 @@ async function readWorkspaceBoard(workspaceId: string): Promise<RuntimeBoardData
 
 export async function loadWorkspaceBoardById(workspaceId: string): Promise<RuntimeBoardData> {
 	return await readWorkspaceBoard(workspaceId);
+}
+
+function createEmptyArchivedBoard(): RuntimeBoardData {
+	return {
+		columns: [{ id: "trash", title: "Trash", cards: [] }],
+		dependencies: [],
+	};
+}
+
+const archivedCardsBoardSchema = z.object({
+	columns: z.array(
+		z.object({
+			id: z.literal("trash"),
+			title: z.string(),
+			cards: z.array(runtimeBoardCardSchema),
+		}),
+	),
+	dependencies: z.array(z.never()).default([]),
+});
+
+function getColumnCards(board: RuntimeBoardData, columnId: RuntimeBoardColumnId): RuntimeBoardCard[] {
+	return board.columns.find((column) => column.id === columnId)?.cards ?? [];
+}
+
+function getTrashCards(board: RuntimeBoardData): RuntimeBoardCard[] {
+	return getColumnCards(board, "trash");
+}
+
+function getActiveBoardCardIds(board: RuntimeBoardData): Set<string> {
+	const ids = new Set<string>();
+	for (const column of board.columns) {
+		if (column.id === "trash") {
+			continue;
+		}
+		for (const card of column.cards) {
+			ids.add(card.id);
+		}
+	}
+	return ids;
+}
+
+function withoutTrashCards(board: RuntimeBoardData): RuntimeBoardData {
+	return updateTaskDependencies({
+		...board,
+		columns: board.columns.map((column) => (column.id === "trash" ? { ...column, cards: [] } : column)),
+	});
+}
+
+function mergeArchivedTrashCards(
+	archivedBoard: RuntimeBoardData,
+	cardsToArchive: RuntimeBoardCard[],
+): RuntimeBoardData {
+	if (cardsToArchive.length === 0) {
+		return archivedBoard;
+	}
+	const existingIds = new Set(getTrashCards(archivedBoard).map((card) => card.id));
+	const nextCards = [...getTrashCards(archivedBoard)];
+	for (const card of cardsToArchive) {
+		if (existingIds.has(card.id)) {
+			continue;
+		}
+		existingIds.add(card.id);
+		nextCards.push(card);
+	}
+	return {
+		columns: [{ id: "trash", title: "Trash", cards: nextCards }],
+		dependencies: [],
+	};
+}
+
+async function readWorkspaceArchivedBoard(workspaceId: string): Promise<RuntimeBoardData> {
+	const archivePath = getWorkspaceArchivedCardsPath(workspaceId);
+	const rawArchive = await readJsonFile(archivePath);
+	return parsePersistedStateFile(
+		archivePath,
+		ARCHIVED_CARDS_FILENAME,
+		rawArchive,
+		archivedCardsBoardSchema,
+		createEmptyArchivedBoard(),
+	);
+}
+
+async function writeWorkspaceArchivedBoard(workspaceId: string, archivedBoard: RuntimeBoardData): Promise<void> {
+	await lockedFileSystem.writeJsonFileAtomic(getWorkspaceArchivedCardsPath(workspaceId), archivedBoard, {
+		lock: null,
+	});
+}
+
+function assertArchivedCardsCaptured(archivedBoard: RuntimeBoardData, expectedCards: RuntimeBoardCard[]): void {
+	const archivedIds = new Set(getTrashCards(archivedBoard).map((card) => card.id));
+	const missingIds = expectedCards.map((card) => card.id).filter((id) => !archivedIds.has(id));
+	if (missingIds.length > 0) {
+		throw new Error(`Archive write did not capture trash card(s): ${missingIds.join(", ")}.`);
+	}
+}
+
+async function archiveTrashCardsAndTrimBoard(
+	workspaceId: string,
+	board: RuntimeBoardData,
+): Promise<{ board: RuntimeBoardData; archived: boolean }> {
+	const trashCards = getTrashCards(board);
+	if (trashCards.length === 0) {
+		return { board, archived: false };
+	}
+	const currentArchive = await readWorkspaceArchivedBoard(workspaceId);
+	const nextArchive = mergeArchivedTrashCards(currentArchive, trashCards);
+	await writeWorkspaceArchivedBoard(workspaceId, nextArchive);
+	const verifiedArchive = await readWorkspaceArchivedBoard(workspaceId);
+	assertArchivedCardsCaptured(verifiedArchive, trashCards);
+	return {
+		board: withoutTrashCards(board),
+		archived: true,
+	};
+}
+
+async function reconcileArchivedCardsAlreadyOnBoard(
+	workspaceId: string,
+	board: RuntimeBoardData,
+): Promise<RuntimeBoardData> {
+	const activeBoardCardIds = getActiveBoardCardIds(board);
+	if (activeBoardCardIds.size === 0) {
+		return board;
+	}
+	const archive = await readWorkspaceArchivedBoard(workspaceId);
+	const archiveTrashColumn = archive.columns.find((column) => column.id === "trash");
+	if (!archiveTrashColumn) {
+		return board;
+	}
+	const nextArchiveCards = archiveTrashColumn.cards.filter((card) => !activeBoardCardIds.has(card.id));
+	if (nextArchiveCards.length === archiveTrashColumn.cards.length) {
+		return board;
+	}
+	await writeWorkspaceArchivedBoard(workspaceId, {
+		columns: [{ ...archiveTrashColumn, cards: nextArchiveCards }],
+		dependencies: [],
+	});
+	return board;
+}
+
+async function migrateWorkspaceTrashToArchiveLocked(
+	workspaceId: string,
+	options: { reconcileArchiveDuplicates?: boolean } = {},
+): Promise<RuntimeBoardData> {
+	const board = await readWorkspaceBoard(workspaceId);
+	const migration = await archiveTrashCardsAndTrimBoard(workspaceId, board);
+	const migratedBoard = migration.board;
+	if (migration.archived) {
+		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(workspaceId), migratedBoard, {
+			lock: null,
+		});
+	}
+	if (options.reconcileArchiveDuplicates) {
+		return await reconcileArchivedCardsAlreadyOnBoard(workspaceId, migratedBoard);
+	}
+	return migratedBoard;
+}
+
+export async function migrateWorkspaceTrashToArchive(workspaceId: string): Promise<RuntimeBoardData> {
+	return await lockedFileSystem.withLock(
+		getWorkspaceDirectoryLockRequest(workspaceId),
+		async () => await migrateWorkspaceTrashToArchiveLocked(workspaceId),
+	);
+}
+
+export async function migrateAllWorkspaceTrashToArchive(): Promise<void> {
+	const index = await readWorkspaceIndex();
+	await Promise.all(
+		Object.keys(index.entries).map(async (workspaceId) => {
+			await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(workspaceId), async () => {
+				await migrateWorkspaceTrashToArchiveLocked(workspaceId, { reconcileArchiveDuplicates: true });
+			});
+		}),
+	);
+}
+
+export async function loadWorkspaceArchivedBoardById(workspaceId: string): Promise<RuntimeBoardData> {
+	return await lockedFileSystem.withLock(
+		getWorkspaceDirectoryLockRequest(workspaceId),
+		async () => await readWorkspaceArchivedBoard(workspaceId),
+	);
 }
 
 async function readWorkspaceSessions(workspaceId: string): Promise<Record<string, RuntimeTaskSessionSummary>> {
@@ -652,10 +839,12 @@ export async function removeWorkspaceStateFiles(workspaceId: string): Promise<vo
 
 export async function loadWorkspaceState(cwd: string): Promise<RuntimeWorkspaceStateResponse> {
 	const context = await loadWorkspaceContext(cwd);
-	const board = await readWorkspaceBoard(context.workspaceId);
-	const sessions = await readWorkspaceSessions(context.workspaceId);
-	const meta = await readWorkspaceMeta(context.workspaceId);
-	return toWorkspaceStateResponse(context, board, sessions, meta.revision);
+	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
+		const board = await migrateWorkspaceTrashToArchiveLocked(context.workspaceId);
+		const sessions = await readWorkspaceSessions(context.workspaceId);
+		const meta = await readWorkspaceMeta(context.workspaceId);
+		return toWorkspaceStateResponse(context, board, sessions, meta.revision);
+	});
 }
 
 export async function saveWorkspaceState(
@@ -677,6 +866,7 @@ export async function saveWorkspaceState(
 			throw new WorkspaceStateConflictError(expectedRevision, currentMeta.revision);
 		}
 		const board = parsedPayload.board;
+		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, board);
 		const sessions = parsedPayload.sessions;
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
@@ -684,7 +874,7 @@ export async function saveWorkspaceState(
 			updatedAt: Date.now(),
 		};
 
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), board, {
+		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), archivedBoard.board, {
 			lock: null,
 		});
 		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(context.workspaceId), sessions, {
@@ -694,7 +884,7 @@ export async function saveWorkspaceState(
 			lock: null,
 		});
 
-		return toWorkspaceStateResponse(context, board, sessions, nextRevision);
+		return toWorkspaceStateResponse(context, archivedBoard.board, sessions, nextRevision);
 	});
 }
 
@@ -731,7 +921,8 @@ export async function mutateWorkspaceState<T>(
 			};
 		}
 
-		const nextBoard = mutation.board;
+		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, mutation.board);
+		const nextBoard = archivedBoard.board;
 		const nextSessions = mutation.sessions ?? currentSessions;
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
@@ -754,5 +945,85 @@ export async function mutateWorkspaceState<T>(
 			state: toWorkspaceStateResponse(context, nextBoard, nextSessions, nextRevision),
 			saved: true,
 		};
+	});
+}
+
+export async function restoreArchivedWorkspaceTask(
+	cwd: string,
+	taskId: string,
+	targetColumnId: RuntimeBoardColumnId = "review",
+): Promise<RuntimeWorkspaceStateResponse> {
+	const normalizedTaskId = taskId.trim();
+	if (!normalizedTaskId) {
+		throw new Error("Task ID is required.");
+	}
+	if (targetColumnId === "trash") {
+		throw new Error("Archived tasks must be restored to a non-trash column.");
+	}
+	const context = await loadWorkspaceContext(cwd);
+	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
+		const currentBoard = await migrateWorkspaceTrashToArchiveLocked(context.workspaceId);
+		if (currentBoard.columns.some((column) => column.cards.some((card) => card.id === normalizedTaskId))) {
+			throw new Error(`Task "${normalizedTaskId}" already exists on the active board.`);
+		}
+		const currentArchive = await readWorkspaceArchivedBoard(context.workspaceId);
+		const archiveTrashColumn = currentArchive.columns.find((column) => column.id === "trash");
+		const archivedTask = archiveTrashColumn?.cards.find((card) => card.id === normalizedTaskId) ?? null;
+		if (!archiveTrashColumn || !archivedTask) {
+			throw new Error(`Archived task "${normalizedTaskId}" was not found.`);
+		}
+		const targetColumn = currentBoard.columns.find((column) => column.id === targetColumnId);
+		if (!targetColumn) {
+			throw new Error(`Column ${targetColumnId} not found.`);
+		}
+
+		const now = Date.now();
+		const restoredTask: RuntimeBoardCard = {
+			...archivedTask,
+			autoReviewEnabled: false,
+			autoReviewMode: undefined,
+			updatedAt: now,
+			transitions: [...(archivedTask.transitions ?? []), { column: targetColumnId, at: now }],
+		};
+		const nextBoard = {
+			...currentBoard,
+			columns: currentBoard.columns.map((column) =>
+				column.id === targetColumnId ? { ...column, cards: [restoredTask, ...column.cards] } : column,
+			),
+		};
+		const nextArchive = {
+			columns: [
+				{
+					...archiveTrashColumn,
+					cards: archiveTrashColumn.cards.filter((card) => card.id !== normalizedTaskId),
+				},
+			],
+			dependencies: [],
+		};
+		const currentSessions = await readWorkspaceSessions(context.workspaceId);
+		const currentMeta = await readWorkspaceMeta(context.workspaceId);
+		const nextRevision = currentMeta.revision + 1;
+		const nextMeta: WorkspaceStateMeta = {
+			revision: nextRevision,
+			updatedAt: now,
+		};
+
+		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), nextBoard, {
+			lock: null,
+		});
+		const verifiedBoard = await readWorkspaceBoard(context.workspaceId);
+		if (!getColumnCards(verifiedBoard, targetColumnId).some((card) => card.id === normalizedTaskId)) {
+			throw new Error(`Board write did not restore task "${normalizedTaskId}".`);
+		}
+		await writeWorkspaceArchivedBoard(context.workspaceId, nextArchive);
+		const verifiedArchive = await readWorkspaceArchivedBoard(context.workspaceId);
+		if (getTrashCards(verifiedArchive).some((card) => card.id === normalizedTaskId)) {
+			throw new Error(`Archive write did not remove restored task "${normalizedTaskId}".`);
+		}
+		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceMetaPath(context.workspaceId), nextMeta, {
+			lock: null,
+		});
+
+		return toWorkspaceStateResponse(context, nextBoard, currentSessions, nextRevision);
 	});
 }
