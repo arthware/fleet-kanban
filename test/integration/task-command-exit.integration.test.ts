@@ -67,6 +67,7 @@ function createLargeTaskCard(index: number): RuntimeBoardCard {
 		title: `Large stdout regression task ${index}`,
 		prompt: paddedPrompt,
 		startInPlanMode: false,
+		autoReviewEnabled: false,
 		baseRef: "main",
 		createdAt: timestamp,
 		updatedAt: timestamp,

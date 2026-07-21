@@ -415,11 +415,6 @@ export default function App(): ReactElement {
 
 	const {
 		runningGitAction,
-		taskGitActionLoadingByTaskId,
-		commitTaskLoadingById,
-		openPrTaskLoadingById,
-		agentCommitTaskLoadingById,
-		agentOpenPrTaskLoadingById,
 		isDiscardingHomeWorkingChanges,
 		gitActionError,
 		gitActionErrorTitle,
@@ -428,11 +423,6 @@ export default function App(): ReactElement {
 		runGitAction,
 		switchHomeBranch,
 		discardHomeWorkingChanges,
-		handleCommitTask,
-		handleOpenPrTask,
-		handleAgentCommitTask,
-		handleAgentOpenPrTask,
-		runAutoReviewGitAction,
 		runImplementHereAction,
 		resetGitActionState,
 	} = useGitActions({
@@ -650,8 +640,6 @@ export default function App(): ReactElement {
 		fetchTaskWorkspaceInfo,
 		sendTaskSessionInput,
 		readyForReviewNotificationsEnabled,
-		taskGitActionLoadingByTaskId,
-		runAutoReviewGitAction,
 		runImplementHereAction,
 	});
 
@@ -1018,12 +1006,8 @@ export default function App(): ReactElement {
 												inlineTaskEditor={inlineTaskEditor}
 												onEditTask={handleOpenEditTask}
 												onSaveTaskTitle={handleSaveTaskTitle}
-												onCommitTask={handleCommitTask}
-												onOpenPrTask={handleOpenPrTask}
 												onImplementHereTask={handleImplementHere}
 												onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
-												commitTaskLoadingById={commitTaskLoadingById}
-												openPrTaskLoadingById={openPrTaskLoadingById}
 												moveToTrashLoadingById={moveToTrashLoadingById}
 												onMoveToTrashTask={handleMoveReviewCardToTrash}
 												onMoveDoneTaskToTrash={handleMoveDoneCardToTrash}
@@ -1106,14 +1090,6 @@ export default function App(): ReactElement {
 										handleOpenEditTask(task, { preserveDetailSelection: true });
 									}}
 									onSaveTaskTitle={handleSaveTaskTitle}
-									onCommitTask={handleCommitTask}
-									onOpenPrTask={handleOpenPrTask}
-									onAgentCommitTask={handleAgentCommitTask}
-									onAgentOpenPrTask={handleAgentOpenPrTask}
-									commitTaskLoadingById={commitTaskLoadingById}
-									openPrTaskLoadingById={openPrTaskLoadingById}
-									agentCommitTaskLoadingById={agentCommitTaskLoadingById}
-									agentOpenPrTaskLoadingById={agentOpenPrTaskLoadingById}
 									moveToTrashLoadingById={moveToTrashLoadingById}
 									onMoveReviewCardToTrash={handleMoveReviewCardToTrash}
 									onMoveDoneCardToTrash={handleMoveDoneCardToTrash}

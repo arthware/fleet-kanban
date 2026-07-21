@@ -177,10 +177,6 @@ const savedClineOauthConfig = {
 	effectiveCommand: "cline",
 	detectedCommands: [],
 	shortcuts: [],
-	commitPromptTemplate: "",
-	openPrPromptTemplate: "",
-	commitPromptTemplateDefault: "",
-	openPrPromptTemplateDefault: "",
 	globalConfigPath: null,
 	projectConfigPath: null,
 	agents: [

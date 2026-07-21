@@ -31,7 +31,7 @@ const KNOWN_FRONTMATTER_KEYS = [
 	"links",
 ] as const;
 
-const AUTO_REVIEW_VALUES = ["pr", "commit", "off"] as const;
+const AUTO_REVIEW_VALUES = ["pr", "off"] as const;
 type AutoReviewValue = (typeof AUTO_REVIEW_VALUES)[number];
 
 /**
@@ -50,7 +50,7 @@ export interface ParsedTaskCard {
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
-	autoReviewMode?: "commit" | "pr";
+	autoReviewMode?: "pr";
 	externalIssueRef?: string;
 	/** Task ids to link as dependencies after the card is created. */
 	links: string[];
@@ -86,8 +86,11 @@ function parseAgentValue(value: unknown): RuntimeAgentId | null {
 	return result.data;
 }
 
-function parseAutoReviewValue(value: unknown): { autoReviewEnabled: boolean; autoReviewMode?: "commit" | "pr" } {
+function parseAutoReviewValue(value: unknown): { autoReviewEnabled: boolean; autoReviewMode?: "pr" } {
 	const raw = expectString("auto-review", value);
+	if (raw === "commit") {
+		return { autoReviewEnabled: false };
+	}
 	if (!(AUTO_REVIEW_VALUES as readonly string[]).includes(raw)) {
 		throw frontmatterError(`"auto-review" must be one of: ${AUTO_REVIEW_VALUES.join(", ")} (got "${raw}").`);
 	}
@@ -236,8 +239,7 @@ export function parseTaskCardDocument(source: string): ParsedTaskCard {
 		card.codeReferences = parseCodeReferences(data["code-references"]);
 	}
 
-	// auto-review defaults to `pr` for the Markdown-card path (the new default;
-	// the flag-only `task create` still defaults to commit).
+	// auto-review defaults to `pr` for the Markdown-card path.
 	const autoReview =
 		data["auto-review"] !== undefined
 			? parseAutoReviewValue(data["auto-review"])
@@ -302,7 +304,7 @@ export interface TaskCardCreateFlags {
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
-	autoReviewMode?: "commit" | "pr";
+	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
 	skill?: string | null;
@@ -315,7 +317,7 @@ export interface ResolvedTaskCardCreate {
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
-	autoReviewMode?: "commit" | "pr";
+	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;

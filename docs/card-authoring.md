@@ -44,7 +44,7 @@ agent: codex                     # codex | claude (any configured agent id, or `
 model: claude-haiku-4-5          # optional per-card model override
 skill: fleet-smoke               # optional Agent Skills / SKILL.md pointer
 base-ref: main                   # optional — defaults to the current branch
-auto-review: pr                  # pr | commit | off — DEFAULT pr (see below)
+auto-review: pr                  # pr | off — DEFAULT pr (see below)
 plan: false                      # optional — start in plan mode (default false)
 issue: ENG-123                   # optional external issue ref (Linear/GitHub)
 code-references:                 # optional — pointers to read before coding
@@ -70,7 +70,7 @@ frontmatter is treated as a bare prompt.
 | `model`           | `--agent-model`                  | Per-card model for the CLI agent. |
 | `skill`           | `--skill`                        | Per-card Agent Skills / `SKILL.md` pointer; only the skill name is injected into the launch prompt. |
 | `base-ref`        | `--base-ref`                     | Defaults to the current branch. |
-| `auto-review`     | `--auto-review-enabled` + `--auto-review-mode` | `pr` / `commit` / `off`. |
+| `auto-review`     | `--auto-review-enabled` + `--auto-review-mode` | `pr` / `off`. Legacy `commit` is treated as off. |
 | `plan`            | `--start-in-plan-mode`           | Boolean. |
 | `issue`           | `--external-issue`               | Same accepted forms as the flag. |
 | `code-references` | rendered prompt section          | See below — the tool never runs git/gh. |
@@ -84,10 +84,9 @@ non-empty line.
 
 ### auto-review defaults to `pr`
 
-For the Markdown-card path, `auto-review` **defaults to `pr`** — the new default
-for authored cards (the flag-only `task create` still defaults to `commit`).
-Use `auto-review: commit` for the old behavior, or `auto-review: off` to disable
-auto-review entirely.
+For the Markdown-card path, `auto-review` **defaults to `pr`**. Use
+`auto-review: off` to disable auto-review entirely. Legacy `auto-review: commit`
+cards are migrated to off.
 
 ### code-references
 

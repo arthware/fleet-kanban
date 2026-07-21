@@ -102,10 +102,6 @@ function createRuntimeConfigResponse(
 			oauthExpiresAt: null,
 			...clineOverrides,
 		},
-		commitPromptTemplate: "",
-		openPrPromptTemplate: "",
-		commitPromptTemplateDefault: "",
-		openPrPromptTemplateDefault: "",
 	};
 }
 

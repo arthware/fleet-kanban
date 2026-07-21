@@ -67,10 +67,6 @@ function createRuntimeConfigResponse(
 			oauthAccountId: null,
 			oauthExpiresAt: null,
 		},
-		commitPromptTemplate: "",
-		openPrPromptTemplate: "",
-		commitPromptTemplateDefault: "",
-		openPrPromptTemplateDefault: "",
 	};
 }
 

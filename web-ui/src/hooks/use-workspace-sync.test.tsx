@@ -25,7 +25,6 @@ function createBoard(taskId: string): BoardData {
 						prompt: `Prompt ${taskId}`,
 						startInPlanMode: false,
 						autoReviewEnabled: false,
-						autoReviewMode: "commit",
 						baseRef: "main",
 						createdAt: 1,
 						updatedAt: 1,

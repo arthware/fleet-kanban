@@ -39,7 +39,6 @@ function createCard(input: {
 		prompt: input.prompt,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		autoReviewMode: "commit",
 		agentId: "droid",
 		baseRef: input.baseRef ?? "main",
 		createdAt: timestamp,

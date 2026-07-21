@@ -17,29 +17,31 @@ export type ExternalIssue = RuntimeExternalIssue;
 export type TaskAutoReviewMode = RuntimeTaskAutoReviewMode;
 export type TaskImage = RuntimeTaskImage;
 
-export const DEFAULT_TASK_AUTO_REVIEW_MODE: TaskAutoReviewMode = "commit";
+export const DEFAULT_TASK_AUTO_REVIEW_MODE: TaskAutoReviewMode = "pr";
 
-export function resolveTaskAutoReviewMode(mode: TaskAutoReviewMode | null | undefined): TaskAutoReviewMode {
+export function resolveTaskAutoReviewMode(
+	mode: TaskAutoReviewMode | string | null | undefined,
+): TaskAutoReviewMode | undefined {
 	if (mode === "pr") {
 		return mode;
 	}
-	return DEFAULT_TASK_AUTO_REVIEW_MODE;
+	return undefined;
 }
 
-export function getTaskAutoReviewActionLabel(mode: TaskAutoReviewMode | null | undefined): string {
+export function getTaskAutoReviewActionLabel(mode: TaskAutoReviewMode | string | null | undefined): string {
 	const resolvedMode = resolveTaskAutoReviewMode(mode);
 	if (resolvedMode === "pr") {
 		return "PR";
 	}
-	return "commit";
+	return "manual review";
 }
 
-export function getTaskAutoReviewCancelButtonLabel(mode: TaskAutoReviewMode | null | undefined): string {
+export function getTaskAutoReviewCancelButtonLabel(mode: TaskAutoReviewMode | string | null | undefined): string {
 	const resolvedMode = resolveTaskAutoReviewMode(mode);
 	if (resolvedMode === "pr") {
 		return "Cancel Auto-PR";
 	}
-	return "Cancel Auto-commit";
+	return "Cancel auto-review";
 }
 
 export interface BoardCard {
@@ -47,7 +49,7 @@ export interface BoardCard {
 	title: string;
 	prompt: string;
 	startInPlanMode: boolean;
-	autoReviewEnabled?: boolean;
+	autoReviewEnabled: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;

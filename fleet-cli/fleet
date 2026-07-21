@@ -621,7 +621,9 @@ fleet_task() {
         --external-issue|--issue) extra+=(--external-issue "$2"); shift 2;;
         --base-ref) extra+=(--base-ref "$2"); shift 2;;
         --plan) extra+=(--start-in-plan-mode true); shift;;
-        --auto-review) extra+=(--auto-review-enabled true --auto-review-mode "$2"); shift 2;;
+        --auto-review) case "$2" in
+            pr) extra+=(--auto-review-enabled true --auto-review-mode pr);;
+            *) echo "task create: --auto-review pr" >&2; return 1;; esac; shift 2;;
         --start) start=1; shift;;
         *) extra+=("$1"); shift;;   # forward unrecognized flags straight to kanban
       esac; done
@@ -905,14 +907,14 @@ PY
         --no-plan) uargs+=(--start-in-plan-mode false); shift;;
         --auto-review) case "$2" in
             off|false|none) uargs+=(--auto-review-enabled false);;
-            commit|pr) uargs+=(--auto-review-enabled true --auto-review-mode "$2");;
-            *) echo "task update: --auto-review commit|pr|off" >&2; return 1;; esac; shift 2;;
+            pr) uargs+=(--auto-review-enabled true --auto-review-mode pr);;
+            *) echo "task update: --auto-review pr|off" >&2; return 1;; esac; shift 2;;
         --cline-model) uargs+=(--cline-model "$2"); shift 2;;
         --model) echo "task update: the per-card agent model can't be changed in place (kanban limitation)." >&2
                  echo "  recreate instead:  fleet task create … --model $2   then delete the old card." >&2; return 1;;
         *) echo "task update: unknown flag $1" >&2; return 1;;
       esac; done
-      [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review commit|pr|off] [--agent claude|codex|cline] [--plan|--no-plan] [--cline-model <id>] [--repo <name>]" >&2; return 1; }
+      [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review pr|off] [--agent claude|codex|cline] [--plan|--no-plan] [--cline-model <id>] [--repo <name>]" >&2; return 1; }
       [ "${#uargs[@]}" -gt 0 ] || { echo "task update: nothing to change — pass at least one field" >&2; return 1; }
       local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task update: multiple repos — pass --repo <name>" >&2; return 1; }
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task update --task-id "$tid" --project-path "$pp" "${uargs[@]}" 2>&1 || true)"
@@ -976,9 +978,9 @@ PY
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
-    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review commit|pr] [--start]" >&2
+    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review pr] [--start]" >&2
        echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
-       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review commit|pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
+       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
        echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
        echo "       fleet task say <id> \"<text>\" [--submit|--no-submit] [--repo <name>]   steer a running agent" >&2
        echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2

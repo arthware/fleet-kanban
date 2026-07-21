@@ -34,16 +34,20 @@ describe("per-card agent model and skill schema", () => {
 		expect(card.skill).toBeUndefined();
 	});
 
-	it("accepts agentModel and skill on a task-session start request", () => {
+	it("accepts agentModel, skill, and auto-review mode on a task-session start request", () => {
 		const request = runtimeTaskSessionStartRequestSchema.parse({
 			taskId: "task-1",
 			prompt: "go",
 			baseRef: "main",
 			agentModel: "gpt-5-codex",
 			skill: "fleet-smoke",
+			autoReviewEnabled: true,
+			autoReviewMode: "pr",
 		});
 
 		expect(request.agentModel).toBe("gpt-5-codex");
 		expect(request.skill).toBe("fleet-smoke");
+		expect(request.autoReviewEnabled).toBe(true);
+		expect(request.autoReviewMode).toBe("pr");
 	});
 });

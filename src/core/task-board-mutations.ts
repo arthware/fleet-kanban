@@ -47,11 +47,25 @@ export interface RuntimeUpdateTaskInput {
 	baseRef: string;
 }
 
-function normalizeTaskAutoReviewMode(value: RuntimeTaskAutoReviewMode | null | undefined): RuntimeTaskAutoReviewMode {
+function normalizeTaskAutoReviewMode(
+	value: RuntimeTaskAutoReviewMode | null | undefined,
+): RuntimeTaskAutoReviewMode | undefined {
 	if (value === "pr") {
 		return value;
 	}
-	return "commit";
+	return undefined;
+}
+
+function normalizeTaskAutoReview(input: { enabled?: boolean; mode?: RuntimeTaskAutoReviewMode | null }): {
+	autoReviewEnabled: boolean;
+	autoReviewMode?: RuntimeTaskAutoReviewMode;
+} {
+	const mode = normalizeTaskAutoReviewMode(input.mode);
+	const autoReviewEnabled = input.enabled === true && mode === "pr";
+	return {
+		autoReviewEnabled,
+		...(autoReviewEnabled ? { autoReviewMode: mode } : {}),
+	};
 }
 
 // Copy image metadata so board tasks do not retain caller-owned array or object references.
@@ -339,8 +353,7 @@ export function addTaskToColumn(
 		title: resolveTaskTitle(input.title, prompt),
 		prompt,
 		startInPlanMode: Boolean(input.startInPlanMode),
-		autoReviewEnabled: Boolean(input.autoReviewEnabled),
-		autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
+		...normalizeTaskAutoReview({ enabled: input.autoReviewEnabled, mode: input.autoReviewMode }),
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
 		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
@@ -680,8 +693,7 @@ export function updateTask(
 				title: resolveTaskTitle(input.title, prompt),
 				prompt,
 				startInPlanMode: Boolean(input.startInPlanMode),
-				autoReviewEnabled: Boolean(input.autoReviewEnabled),
-				autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
+				...normalizeTaskAutoReview({ enabled: input.autoReviewEnabled, mode: input.autoReviewMode }),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
 				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,

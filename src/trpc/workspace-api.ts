@@ -56,8 +56,8 @@ export interface CreateWorkspaceApiDependencies {
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
 }
 
-function normalizeAutoReviewMode(mode: RuntimeTaskAutoReviewMode | undefined): "commit" | "pr" {
-	return mode === "pr" ? "pr" : "commit";
+function normalizeAutoReviewMode(_mode: RuntimeTaskAutoReviewMode | undefined): "pr" {
+	return "pr";
 }
 
 async function findBoardCard(

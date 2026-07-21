@@ -28,7 +28,6 @@ vi.mock("@/runtime/trpc-client", () => ({
 }));
 
 interface HookSnapshot {
-	handleAgentCommitTask: UseGitActionsResult["handleAgentCommitTask"];
 	runImplementHereAction: UseGitActionsResult["runImplementHereAction"];
 }
 
@@ -74,7 +73,6 @@ function createBoard(): BoardData {
 						prompt: "Ship it",
 						startInPlanMode: false,
 						autoReviewEnabled: false,
-						autoReviewMode: "commit",
 						baseRef: "main",
 						createdAt: 1,
 						updatedAt: 1,
@@ -120,10 +118,6 @@ function createRuntimeConfig(selectedAgentId: RuntimeConfigResponse["selectedAge
 			oauthAccountId: null,
 			oauthExpiresAt: null,
 		},
-		commitPromptTemplate: "commit",
-		openPrPromptTemplate: "pr",
-		commitPromptTemplateDefault: "commit",
-		openPrPromptTemplateDefault: "pr",
 	};
 }
 
@@ -164,10 +158,9 @@ function HookHarness({
 
 	useEffect(() => {
 		onSnapshot({
-			handleAgentCommitTask: gitActions.handleAgentCommitTask,
 			runImplementHereAction: gitActions.runImplementHereAction,
 		});
-	}, [gitActions.handleAgentCommitTask, gitActions.runImplementHereAction, onSnapshot]);
+	}, [gitActions.runImplementHereAction, onSnapshot]);
 
 	return null;
 }
@@ -210,40 +203,6 @@ describe("useGitActions", () => {
 			(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
 				previousActEnvironment;
 		}
-	});
-
-	it("sends commit prompts through the native cline chat API", async () => {
-		const sendTaskSessionInput = vi.fn(async () => ({ ok: true }));
-		const sendTaskChatMessage = vi.fn(async () => ({ ok: true }));
-		let latestSnapshot: HookSnapshot | null = null;
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					sendTaskSessionInput={sendTaskSessionInput}
-					sendTaskChatMessage={sendTaskChatMessage}
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-			await Promise.resolve();
-		});
-
-		if (latestSnapshot === null) {
-			throw new Error("Expected a hook snapshot.");
-		}
-
-		await act(async () => {
-			latestSnapshot?.handleAgentCommitTask("task-1");
-			await Promise.resolve();
-			await Promise.resolve();
-			await Promise.resolve();
-		});
-
-		expect(sendTaskChatMessage).toHaveBeenCalledWith("task-1", expect.any(String), { mode: "act" });
-		expect(sendTaskSessionInput).not.toHaveBeenCalled();
-		expect(showAppToastMock).not.toHaveBeenCalled();
 	});
 
 	it("given a native cline review card, when Implement here runs, then it injects the doc-keyed approval-to-build prompt via the chat API in act mode", async () => {

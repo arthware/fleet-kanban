@@ -635,7 +635,6 @@ describe("board dependency state", () => {
 		board = addTaskToColumn(board, "review", {
 			prompt: "Task A",
 			autoReviewEnabled: true,
-			autoReviewMode: "commit",
 			baseRef: "main",
 		});
 		const task = board.columns.find((column) => column.id === "review")?.cards[0];
@@ -649,7 +648,7 @@ describe("board dependency state", () => {
 
 		const updatedTask = disabled.board.columns.find((column) => column.id === "review")?.cards[0];
 		expect(updatedTask?.autoReviewEnabled).toBe(false);
-		expect(updatedTask?.autoReviewMode).toBe("commit");
+		expect(updatedTask?.autoReviewMode).toBeUndefined();
 	});
 
 	it("updates only the task title", () => {
@@ -728,7 +727,6 @@ describe("board dependency state", () => {
 		board = addTaskToColumn(board, "review", {
 			prompt: "Task with model",
 			autoReviewEnabled: true,
-			autoReviewMode: "commit",
 			agentId: "codex",
 			clineSettings: {
 				providerId: "my-provider",
@@ -767,7 +765,6 @@ describe("board dependency state", () => {
 		board = addTaskToColumn(board, "review", {
 			prompt: "Task with agent model",
 			autoReviewEnabled: true,
-			autoReviewMode: "commit",
 			agentId: "codex",
 			agentModel: "codex-mini",
 			baseRef: "main",

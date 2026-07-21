@@ -160,9 +160,5 @@ export function buildRuntimeConfigResponse(
 		shortcuts: runtimeConfig.shortcuts,
 		worktree: runtimeConfig.worktree,
 		clineProviderSettings,
-		commitPromptTemplate: runtimeConfig.commitPromptTemplate,
-		openPrPromptTemplate: runtimeConfig.openPrPromptTemplate,
-		commitPromptTemplateDefault: runtimeConfig.commitPromptTemplateDefault,
-		openPrPromptTemplateDefault: runtimeConfig.openPrPromptTemplateDefault,
 	};
 }

@@ -48,10 +48,6 @@ function createRuntimeConfigResponse(selectedAgentId: RuntimeConfigResponse["sel
 			oauthAccountId: null,
 			oauthExpiresAt: null,
 		},
-		commitPromptTemplate: "",
-		openPrPromptTemplate: "",
-		commitPromptTemplateDefault: "",
-		openPrPromptTemplateDefault: "",
 	};
 }
 

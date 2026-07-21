@@ -209,7 +209,7 @@ function createCliStyleCard(prompt: string): RuntimeBoardCard {
 			title: prompt.split(/\r?\n/u)[0],
 			startInPlanMode: false,
 			autoReviewEnabled: true,
-			autoReviewMode: "commit",
+			autoReviewMode: "pr",
 			baseRef: "main",
 		},
 		() =>

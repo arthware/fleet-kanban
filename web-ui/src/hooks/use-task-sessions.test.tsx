@@ -37,7 +37,6 @@ function createTask(): BoardCard {
 		prompt: "Resume me",
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		autoReviewMode: "commit",
 		baseRef: "main",
 		createdAt: 1,
 		updatedAt: 1,
@@ -183,14 +182,50 @@ describe("useTaskSessions", () => {
 			taskTitle: "Resume me",
 			images: undefined,
 			startInPlanMode: true,
+			autoReviewEnabled: false,
 			resumeFromTrash: undefined,
 			resumeMode: undefined,
 			baseRef: "main",
 			cols: 120,
 			rows: 40,
 			agentId: undefined,
+			agentModel: undefined,
+			skill: undefined,
 			clineSettings: undefined,
 		});
+	});
+
+	it("forwards PR auto-review mode from the task card when starting a task", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession({
+				...createTask(),
+				autoReviewEnabled: true,
+				autoReviewMode: "pr",
+			});
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				autoReviewEnabled: true,
+				autoReviewMode: "pr",
+			}),
+		);
 	});
 
 	it("forwards task images when starting a task", async () => {

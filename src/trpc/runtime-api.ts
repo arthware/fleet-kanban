@@ -47,6 +47,7 @@ import {
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { resolveTaskTitle } from "../core/task-title.js";
+import { prependPrCardDirective } from "../prompts/pr-card-directive";
 import { resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries } from "../state/workspace-state";
@@ -208,9 +209,10 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
 				const skillName = body.skill?.trim();
-				const finalPrompt = skillName
+				const skillPrompt = skillName
 					? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
 					: body.prompt;
+				const finalPrompt = prependPrCardDirective(skillPrompt, body.autoReviewEnabled, body.autoReviewMode);
 
 				// Surface a fleet-tools resolution failure to the user without blocking the
 				// start: the architect still launches, but its board commands are unavailable.

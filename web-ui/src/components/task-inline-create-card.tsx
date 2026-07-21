@@ -19,7 +19,6 @@ export type TaskInlineCardMode = "create" | "edit";
 export type TaskBranchOption = BranchSelectOption;
 
 const AUTO_REVIEW_MODE_OPTIONS: Array<{ value: TaskAutoReviewMode; label: string }> = [
-	{ value: "commit", label: "Make commit" },
 	{ value: "pr", label: "Make PR" },
 ];
 const AUTO_REVIEW_MODE_SELECT_WIDTH_CH = 16;
