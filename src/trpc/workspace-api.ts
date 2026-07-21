@@ -436,8 +436,10 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 			return await deps.buildWorkspaceStateSnapshot(workspaceScope.workspaceId, workspaceScope.workspacePath);
 		},
 		notifyStateUpdated: async (workspaceScope) => {
-			void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
-			void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
+			await Promise.all([
+				deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath),
+				deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId),
+			]);
 			return {
 				ok: true,
 			};
