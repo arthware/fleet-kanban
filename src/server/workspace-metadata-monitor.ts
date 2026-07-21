@@ -536,10 +536,17 @@ export function createWorkspaceMetadataMonitor(
 	return {
 		connectWorkspace: async ({ workspaceId, workspacePath, board }) => {
 			const { entry, previousTasks } = updateWorkspaceEntry({ workspaceId, workspacePath, board });
-			await captureReviewDoneTransitions(entry, previousTasks);
 			entry.subscriberCount += 1;
 			ensureWorkspaceTimer(workspaceId, entry);
-			return await refreshWorkspace(workspaceId);
+			// Do NOT block the board's first render on a full git scan of every worktree plus
+			// a sequential gh PR sweep — on a large board that can exceed the snapshot deadline
+			// and leave the client looping on a blank loader. Return the cached snapshot now;
+			// the transition capture + refresh run in the background and stream in via
+			// onMetadataUpdated (and the poll timer keeps them fresh thereafter).
+			void captureReviewDoneTransitions(entry, previousTasks)
+				.then(() => refreshWorkspace(workspaceId))
+				.catch(() => {});
+			return buildWorkspaceMetadataSnapshot(entry);
 		},
 		updateWorkspaceState: async ({ workspaceId, workspacePath, board }) => {
 			const { entry, previousTasks } = updateWorkspaceEntry({ workspaceId, workspacePath, board });

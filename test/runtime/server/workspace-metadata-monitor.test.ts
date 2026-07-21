@@ -147,6 +147,15 @@ describe("workspace metadata monitor PR capture", () => {
 	const worktreeProbeCount = () =>
 		vi.mocked(probeGitWorkspaceState).mock.calls.filter(([cwd]) => cwd === "/worktrees/task-1").length;
 
+	// connectWorkspace now refreshes in the background (so the board never blocks on a git
+	// scan); drain the microtask chain — transition capture → refresh → PR sweep — so
+	// assertions observe its effect. No timers fire, so poll-driven call counts stay clean.
+	const settleConnectRefresh = async () => {
+		for (let i = 0; i < 30; i += 1) {
+			await Promise.resolve();
+		}
+	};
+
 	it("given an idle (non-in_progress) card whose git-dir token is unchanged, when the monitor re-polls, then the git status probe is skipped", async () => {
 		// given: the cheap fs-mtime probe reports 'no change'
 		vi.mocked(computeGitDirToken).mockResolvedValue("stable-token");
@@ -209,7 +218,7 @@ describe("workspace metadata monitor PR capture", () => {
 		});
 
 		// when
-		await Promise.resolve();
+		await settleConnectRefresh();
 
 		// then
 		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
@@ -273,6 +282,7 @@ describe("workspace metadata monitor PR capture", () => {
 			workspacePath: "/repo",
 			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
 		});
+		await settleConnectRefresh();
 		resolveCardPr.mockClear();
 		persistCardPr.mockClear();
 
@@ -294,6 +304,7 @@ describe("workspace metadata monitor PR capture", () => {
 			workspacePath: "/repo",
 			board: boardWith("review"),
 		});
+		await settleConnectRefresh();
 
 		// then
 		expect(resolveCardPr).toHaveBeenCalledTimes(1);
