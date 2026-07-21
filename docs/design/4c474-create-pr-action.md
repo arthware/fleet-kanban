@@ -207,7 +207,7 @@ Retire the recipe source in `runtime-config.ts`:
   (`board-card.tsx:489-490,1049-1062`) and `getTaskAutoReviewCancelButtonLabel`,
   `resolveTaskAutoReviewMode`, `TaskAutoReviewMode` from `web-ui/src/types` once unreferenced.
 - Legacy cards with `autoReviewEnabled` in `board.json` load fine (fields stripped). They get the
-  Create PR button from the new column/capability gate, so no behavior is lost (§5.6 backfill).
+  Create PR button from the new column/capability gate, so no behavior is lost (§5.7 backfill).
 
 ---
 
@@ -249,10 +249,33 @@ per-card `gh` call on every render/poll. Base-ref resolvability is per-card but 
 showing/hiding the button, the action is the source of truth. This avoids re-introducing a per-card
 `gh` fan-out (the very cost `card-pr-url.ts` already guards against).
 
-### 5.3 Algorithm (button and CLI share it)
+### 5.3 PR target (base) branch — default to what the worktree was cut from
+
+The PR **targets `card.baseRef` by default** — the branch the worktree was created off. `baseRef` is
+already the per-card record of exactly that: `docs/card-authoring.md` defines `base-ref` as optional,
+**defaulting to the current branch at card-creation time**, and it is what `resolveTaskCwd` and the
+worktree-creation path use. So the default target needs **no new state** — the action passes
+`card.baseRef` straight to `gh pr create --base <baseRef>`.
+
+Rules:
+- **`baseRef` must resolve to a branch name, not a detached SHA.** `gh pr create --base` only accepts
+  a branch. In normal cards `baseRef` *is* a branch ("the current branch" at creation), but the
+  capability probe (§5.2) and the action validate it (`git rev-parse --verify --abbrev-ref`) and fail
+  with a clear message if a card was created off a raw commit — rather than pushing a PR at the wrong
+  target.
+- **`baseRef` must exist on `origin`.** Within the fork, `origin` is `arthware/fleet-kanban` and the
+  PR is head=`<branch>` → base=`baseRef`, both on origin; for a consumer repo (e.g. leapter) origin
+  is that repo. The probe treats a base ref that is missing on origin as *not PR-capable* with a
+  precise reason.
+- **Optional override.** `fleet task pr <id> --base <branch>` (and a corresponding mutation arg) lets
+  a caller retarget when needed; **default is always `card.baseRef`** — no override required for the
+  common case. This is also how `fleet-plan` should stop hardcoding `production-line`: it just runs
+  the Create PR action and inherits the card's `baseRef`.
+
+### 5.4 Algorithm (button and CLI share it)
 
 1. **Probe** capability (§5.2); bail with a clear message if not capable.
-2. **Resolve** worktree (`resolveTaskCwd`), base ref (`card.baseRef`), and branch name
+2. **Resolve** worktree (`resolveTaskCwd`), base ref (`card.baseRef`, §5.3), and branch name
    `<issueRef-or-cardId>-<slug>` (aligns with the branch convention from card `36ab1`; **reuse** the
    branch if it already exists). If HEAD is detached, create/checkout that branch at HEAD.
 3. **Assume the agent already committed** (per `fleet-ship`). If uncommitted changes remain, commit
@@ -269,7 +292,7 @@ showing/hiding the button, the action is the source of truth. This avoids re-int
 6. **Errors surface, never swallowed** — push rejected, `gh` not authed, base gone → returned to the
    button (toast) and the CLI (non-zero exit + message).
 
-### 5.4 Button — repurpose, don't add
+### 5.5 Button — repurpose, don't add
 
 - `board-card.tsx:1033-1046` "Open PR" becomes **Create PR**, calling the new runtime mutation via
   `handleOpenPrTask` (rewired to `workspace.createTaskPr`), not the injection path.
@@ -283,13 +306,13 @@ showing/hiding the button, the action is the source of truth. This avoids re-int
 - If a PR already exists on the card (`prUrl` set), the badge shows and the button reads **Show PR**
   / re-runs idempotently.
 
-### 5.5 CLI `fleet task pr <id>`
+### 5.6 CLI `fleet task pr <id>`
 
 - Resolves the card by id in the current project, runs the same runtime action, prints the PR URL on
   success or the capability/plumbing error on failure (non-zero exit). No-ops with a clear message on
   a local-only repo — so a `/fleet-implement` card's final `fleet task pr` step is safe everywhere.
 
-### 5.6 Backfill
+### 5.7 Backfill
 
 Cards **already in Review with committed work** get the Create PR button **immediately** — the gate
 is `review + prWorkflowCapable`, independent of any per-card auto-review arming state (which is being
@@ -307,6 +330,7 @@ deleted). No migration; the button simply appears for them on next render.
 | Capability probe location | **Workspace-scoped `prWorkflowCapable` flag (cached) gates the button; click-time action re-probes and owns errors** | Avoids per-card `gh` fan-out; action stays the source of truth. |
 | Fate of `autoReviewEnabled`/`autoReviewMode` + CLI flags + `auto-review` frontmatter | **Remove outright**; legacy `board.json` fields stripped on load | Injection substrate is the flaky surface we're retiring; zod stripping makes removal safe. |
 | CLI name | **`fleet task pr <id>`** (not top-level `fleet create pr`) | Fits `fleet task <verb>` + kanban `task` family; no new dispatcher case. |
+| PR target (base) branch | **Default to `card.baseRef`** — the branch the worktree was cut from; validate it is a branch (not a SHA) and exists on origin; `--base` override available | Matches operator preference; `baseRef` already records the creation branch, so zero new state. |
 | Button gate | **`review && prWorkflowCapable`**, not `changedFiles > 0` | Agent already committed → clean worktree; gating on uncommitted changes would hide the button on exactly the cards that should ship. |
 
 ---
@@ -322,9 +346,11 @@ deleted). No migration; the button simply appears for them on next render.
 - **Removing the settings-UI template editors** touches a settings surface some users may have
   customized. Mitigated: the config keys are ignored, not errored; the UI just no longer exposes
   them. Call it out in the PR description.
-- **`fleet-plan` base ref** is `production-line` in the current skill, while kanban's own base is
-  `main`. The Create PR action uses **`card.baseRef`** (per-card), so this is data, not a hardcode —
-  but verify plan cards carry the intended `baseRef` so the PR targets the right branch.
+- **`fleet-plan` base ref** is hardcoded to `production-line` in the current skill, while kanban's
+  own base is `main`. The Create PR action uses **`card.baseRef`** (§5.3), so the target is data, not
+  a hardcode — the skill should drop the literal `--base production-line` and inherit the card's
+  `baseRef`. Verify plan cards carry the intended `baseRef` so the PR targets the right branch, and
+  that `baseRef` is a branch name (a card created off a detached SHA is rejected by the probe, §5.3).
 - **Upstreamability:** deleting `autoReview*` from the contract is a fork-visible change. Keep the
   removal mechanical and well-described so a rebase on `upstream` is clean; the skill files are
   fork-local additions (`.agents/skills/`) and don't conflict.
