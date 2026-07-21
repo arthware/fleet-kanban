@@ -1,29 +1,11 @@
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RuntimeDesignDocResponse, RuntimeTaskFileResponse } from "../core/api-contract";
+import { resolveDesignDocRefCandidates } from "../core/task-ref";
 import { resolveTaskCwd } from "./task-worktree";
 
-const UNSAFE_FILENAME_CHARS_PATTERN = /[^A-Za-z0-9._-]+/g;
-const LEADING_TRAILING_DASHES_PATTERN = /^-+|-+$/g;
 const DEFAULT_TASK_FILE_MAX_BYTES = 1024 * 1024;
 const BINARY_SAMPLE_BYTES = 8192;
-
-export function sanitizeDesignDocRef(value: string): string {
-	return value.trim().replace(UNSAFE_FILENAME_CHARS_PATTERN, "-").replace(LEADING_TRAILING_DASHES_PATTERN, "");
-}
-
-export function resolveDesignDocRefCandidates(input: { taskId: string; externalIssueKey?: string }): string[] {
-	const candidates: string[] = [];
-	const externalIssueRef = input.externalIssueKey ? sanitizeDesignDocRef(input.externalIssueKey) : "";
-	if (externalIssueRef) {
-		candidates.push(externalIssueRef);
-	}
-	const taskIdRef = sanitizeDesignDocRef(input.taskId);
-	if (taskIdRef && !candidates.includes(taskIdRef)) {
-		candidates.push(taskIdRef);
-	}
-	return candidates;
-}
 
 export async function readTaskDesignDoc(input: {
 	projectRoot: string;

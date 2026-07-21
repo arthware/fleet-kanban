@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { deriveTaskBranchName } from "../../src/core/task-ref";
 import { deleteTaskWorktree, ensureTaskWorktreeIfDoesntExist } from "../../src/workspace/task-worktree";
 import { createGitTestEnv } from "../utilities/git-env";
 import { createTempDir } from "../utilities/temp-dir";
@@ -36,6 +37,15 @@ function runGit(cwd: string, args: string[]): string {
 	return result.stdout.trim();
 }
 
+function gitSucceeds(cwd: string, args: string[]): boolean {
+	const result = spawnSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		env: createGitTestEnv(),
+	});
+	return result.status === 0;
+}
+
 async function withTemporaryHome<T>(run: () => Promise<T>): Promise<T> {
 	const { path: tempHome, cleanup } = createTempDir("kanban-home-");
 	const previousHome = process.env.HOME;
@@ -60,6 +70,214 @@ async function withTemporaryHome<T>(run: () => Promise<T>): Promise<T> {
 }
 
 describe.sequential("task-worktree integration", () => {
+	it("creates a fresh task worktree on the expected external-issue branch", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-branch-issue-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const branchName = deriveTaskBranchName({
+					taskId: "36ab1",
+					externalIssueKey: "ENG-142",
+					title: "Create a named branch at worktree creation",
+					prompt: "",
+				});
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName,
+				});
+
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+				expect(runGit(ensured.path, ["symbolic-ref", "--short", "HEAD"])).toBe(branchName);
+				expect(runGit(ensured.path, ["rev-parse", "--abbrev-ref", "HEAD"])).not.toBe("HEAD");
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("creates a fresh task worktree on the expected card-id branch", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-branch-card-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const branchName = deriveTaskBranchName({
+					taskId: "36ab1",
+					title: "Branch from card id",
+					prompt: "",
+				});
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName,
+				});
+
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+				expect(runGit(ensured.path, ["symbolic-ref", "--short", "HEAD"])).toBe(branchName);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("does not re-branch an existing task worktree", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-branch-idempotent-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName: "36ab1-original-title",
+				});
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+
+				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName: "36ab1-renamed-title",
+				});
+
+				expect(ensuredAgain.ok).toBe(true);
+				expect(runGit(ensured.path, ["symbolic-ref", "--short", "HEAD"])).toBe("36ab1-original-title");
+				expect(gitSucceeds(repoPath, ["show-ref", "--verify", "--quiet", "refs/heads/36ab1-renamed-title"])).toBe(
+					false,
+				);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("re-attaches to a genuine leftover branch without resetting it", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-leftover-branch-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const branchName = "36ab1-leftover-branch";
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName,
+				});
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+				writeFileSync(join(ensured.path, "feature.txt"), "feature\n", "utf8");
+				runGit(ensured.path, ["add", "feature.txt"]);
+				runGit(ensured.path, ["commit", "-m", "feature"]);
+				const branchTip = runGit(ensured.path, ["rev-parse", "HEAD"]);
+
+				const deleted = await deleteTaskWorktree({ repoPath, taskId: "36ab1" });
+				expect(deleted.ok).toBe(true);
+				writeFileSync(join(repoPath, "README.md"), "base advanced\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "advance base"]);
+
+				const restored = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "36ab1",
+					baseRef: "HEAD",
+					branchName,
+				});
+
+				expect(restored.ok).toBe(true);
+				if (!restored.ok || !restored.path) {
+					throw new Error("Task worktree was not restored");
+				}
+				expect(runGit(restored.path, ["symbolic-ref", "--short", "HEAD"])).toBe(branchName);
+				expect(runGit(restored.path, ["rev-parse", "HEAD"])).toBe(branchTip);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("uses a card-id suffix when the expected branch is already checked out elsewhere", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-branch-collision-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				const otherWorktreePath = join(sandboxRoot, "other-worktree");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+				runGit(repoPath, ["worktree", "add", "-b", "36ab1-same-title", otherWorktreePath, "HEAD"]);
+
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-b",
+					baseRef: "HEAD",
+					branchName: "36ab1-same-title",
+				});
+
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+				expect(runGit(ensured.path, ["symbolic-ref", "--short", "HEAD"])).toBe("36ab1-same-title-task-b");
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
 	it("returns a friendly error when the repository has no initial commit", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-unborn-");
@@ -314,10 +532,12 @@ describe.sequential("task-worktree integration", () => {
 				runGit(repoPath, ["commit", "-m", "init"]);
 
 				const taskId = `task-restore-${Date.now()}`;
+				const branchName = `${taskId}-restore-patch`;
 				const ensured = await ensureTaskWorktreeIfDoesntExist({
 					cwd: repoPath,
 					taskId,
 					baseRef: "HEAD",
+					branchName,
 				});
 				expect(ensured.ok).toBe(true);
 				if (!ensured.ok || !ensured.path) {
@@ -356,6 +576,7 @@ describe.sequential("task-worktree integration", () => {
 					cwd: repoPath,
 					taskId,
 					baseRef: "HEAD",
+					branchName,
 				});
 				expect(restored.ok).toBe(true);
 				if (!restored.ok || !restored.path) {
@@ -363,6 +584,7 @@ describe.sequential("task-worktree integration", () => {
 				}
 
 				expect(restored.baseCommit).toBe(createdCommit);
+				expect(runGit(restored.path, ["symbolic-ref", "--short", "HEAD"])).toBe(branchName);
 				expect(runGit(restored.path, ["rev-parse", "HEAD"])).toBe(createdCommit);
 				expect(readFileSync(join(restored.path, "tracked.txt"), "utf8")).toBe("base\nlocal change\n");
 				expect(readFileSync(join(restored.path, "notes.txt"), "utf8")).toBe("untracked\n");

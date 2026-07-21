@@ -22,6 +22,7 @@ import {
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation";
+import { deriveTaskBranchName } from "../core/task-ref";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { readFileWithinTaskWorktree, readTaskDesignDoc } from "../workspace/design-doc";
@@ -359,11 +360,20 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 		},
 		ensureWorktree: async (workspaceScope, input) => {
 			const body = parseWorktreeEnsureRequest(input);
+			const card = await findBoardCard(deps, workspaceScope, body.taskId);
 			return await ensureTaskWorktreeIfDoesntExist({
 				cwd: workspaceScope.workspacePath,
 				taskId: body.taskId,
 				workspaceId: workspaceScope.workspaceId,
 				baseRef: body.baseRef,
+				branchName: card
+					? deriveTaskBranchName({
+							taskId: card.id,
+							externalIssueKey: card.externalIssue?.key,
+							title: card.title,
+							prompt: card.prompt,
+						})
+					: undefined,
 			});
 		},
 		deleteWorktree: async (workspaceScope, input) => {

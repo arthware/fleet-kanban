@@ -502,6 +502,74 @@ function appendWorktreeWarning(current: string | undefined, next: string): strin
 	return current ? `${current}\n\n${next}` : next;
 }
 
+async function branchExists(repoPath: string, branchName: string): Promise<boolean> {
+	const result = await runGit(repoPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branchName}`]);
+	return result.ok;
+}
+
+async function isValidGitBranchName(repoPath: string, branchName: string): Promise<boolean> {
+	const result = await runGit(repoPath, ["check-ref-format", "--branch", branchName]);
+	return result.ok;
+}
+
+function isBranchCheckedOutCollision(result: { stderr: string; output: string }): boolean {
+	const output = `${result.stderr}\n${result.output}`.toLowerCase();
+	return output.includes("already checked out") || output.includes("already used by worktree");
+}
+
+function createCollisionBranchName(branchName: string, taskId: string): string {
+	const suffix = `-${taskId.slice(0, 8)}`;
+	if (branchName.endsWith(suffix)) {
+		return branchName;
+	}
+	const maxLength = 60;
+	const prefix = branchName.slice(0, maxLength - suffix.length).replace(/-+$/u, "");
+	return `${prefix || branchName}${suffix}`;
+}
+
+async function addTaskWorktree(options: {
+	repoPath: string;
+	worktreePath: string;
+	baseCommit: string;
+	taskId: string;
+	branchName?: string;
+	resetExistingBranch: boolean;
+}): Promise<Awaited<ReturnType<typeof runGit>>> {
+	const branchName = options.branchName?.trim();
+	if (!branchName || !(await isValidGitBranchName(options.repoPath, branchName))) {
+		return await runGit(options.repoPath, ["worktree", "add", "--detach", options.worktreePath, options.baseCommit]);
+	}
+
+	const exists = await branchExists(options.repoPath, branchName);
+	const args = exists
+		? options.resetExistingBranch
+			? ["worktree", "add", "-B", branchName, options.worktreePath, options.baseCommit]
+			: ["worktree", "add", options.worktreePath, branchName]
+		: ["worktree", "add", "-b", branchName, options.worktreePath, options.baseCommit];
+	const result = await runGit(options.repoPath, args);
+	if (result.ok || !isBranchCheckedOutCollision(result)) {
+		return result;
+	}
+
+	const collisionBranchName = createCollisionBranchName(branchName, options.taskId);
+	if (collisionBranchName === branchName || !(await isValidGitBranchName(options.repoPath, collisionBranchName))) {
+		return result;
+	}
+	LOGGER.log("Task branch is already checked out elsewhere; retrying with a disambiguated name.", {
+		severity: "warn",
+		taskId: options.taskId,
+		branchName,
+		collisionBranchName,
+	});
+	const collisionExists = await branchExists(options.repoPath, collisionBranchName);
+	return await runGit(
+		options.repoPath,
+		collisionExists
+			? ["worktree", "add", "-B", collisionBranchName, options.worktreePath, options.baseCommit]
+			: ["worktree", "add", "-b", collisionBranchName, options.worktreePath, options.baseCommit],
+	);
+}
+
 async function prepareNewTaskWorktree(options: {
 	repoPath: string;
 	worktreePath: string;
@@ -583,6 +651,7 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 	taskId: string;
 	workspaceId?: string;
 	baseRef: string;
+	branchName?: string;
 }): Promise<RuntimeWorktreeEnsureResponse> {
 	try {
 		const context = await loadWorkspaceContext(options.cwd);
@@ -659,7 +728,14 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 			await runGit(context.repoPath, ["worktree", "prune"]);
 
 			await mkdir(dirname(worktreePath), { recursive: true });
-			const addResult = await runGit(context.repoPath, ["worktree", "add", "--detach", worktreePath, baseCommit]);
+			const addResult = await addTaskWorktree({
+				repoPath: context.repoPath,
+				worktreePath,
+				baseCommit,
+				taskId,
+				branchName: options.branchName,
+				resetExistingBranch: storedPatch !== null,
+			});
 			if (!addResult.ok) {
 				if (!storedPatch) {
 					return {
@@ -674,7 +750,17 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 				baseCommit = requestedBaseCommit;
 				warning =
 					"Could not restore the saved task patch onto its original commit. Started from the task base ref instead.";
-				await getGitStdout(["worktree", "add", "--detach", worktreePath, baseCommit], context.repoPath);
+				const fallbackAddResult = await addTaskWorktree({
+					repoPath: context.repoPath,
+					worktreePath,
+					baseCommit,
+					taskId,
+					branchName: options.branchName,
+					resetExistingBranch: false,
+				});
+				if (!fallbackAddResult.ok) {
+					throw new Error(fallbackAddResult.stderr || fallbackAddResult.output);
+				}
 			}
 			const prepareResult = await prepareNewTaskWorktree({
 				repoPath: context.repoPath,

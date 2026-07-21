@@ -3,12 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-	readFileWithinRoot,
-	readTaskDesignDoc,
-	resolveDesignDocRefCandidates,
-	sanitizeDesignDocRef,
-} from "../../../src/workspace/design-doc";
+import { resolveDesignDocRefCandidates, sanitizeDesignDocRef } from "../../../src/core/task-ref";
+import { readFileWithinRoot, readTaskDesignDoc } from "../../../src/workspace/design-doc";
 
 let tempDirs: string[] = [];
 
@@ -25,7 +21,7 @@ describe("design doc resolution", () => {
 	});
 
 	it.each([
-		["ENG-123", "ENG-123"],
+		["ENG-123", "eng-123"],
 		["owner/repo#12", "owner-repo-12"],
 		["#12", "12"],
 	])("sanitizes %s as %s", (input, expected) => {
@@ -70,6 +66,25 @@ describe("design doc resolution", () => {
 			exists: true,
 			path: join(designDir, "05506-fallback.md"),
 			content: "fallback doc",
+		});
+	});
+
+	it("can still read legacy design docs that used uppercase issue refs", async () => {
+		const projectRoot = await makeProjectRoot();
+		const designDir = join(projectRoot, "docs", "design");
+		await mkdir(designDir, { recursive: true });
+		await writeFile(join(designDir, "ENG-123-legacy.md"), "legacy doc");
+
+		const result = await readTaskDesignDoc({
+			projectRoot,
+			taskId: "05506",
+			externalIssueKey: "ENG-123",
+		});
+
+		expect(result).toEqual({
+			exists: true,
+			path: join(designDir, "ENG-123-legacy.md"),
+			content: "legacy doc",
 		});
 	});
 
