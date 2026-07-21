@@ -63,6 +63,11 @@ const MERGED_PR: CardPrRef = {
 	...PR,
 	state: "merged",
 };
+const TASK_BRANCH = "task-1-ship-a-feature";
+
+function prMap(entries: Array<[string, CardPrRef]> = [[TASK_BRANCH, PR]]): Map<string, CardPrRef> {
+	return new Map(entries);
+}
 
 function boardWith(columnId: RuntimeBoardColumnId, cardOverrides?: Record<string, unknown>): RuntimeBoardData {
 	return {
@@ -88,21 +93,20 @@ function boardWith(columnId: RuntimeBoardColumnId, cardOverrides?: Record<string
 }
 
 describe("workspace metadata monitor PR capture", () => {
-	let resolveCardPr: ReturnType<typeof vi.fn>;
+	let resolveRepoCardPrs: ReturnType<typeof vi.fn>;
 	let persistCardPr: ReturnType<typeof vi.fn>;
 	let monitor: ReturnType<typeof createWorkspaceMetadataMonitor>;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-07-13T12:00:00.000Z"));
-		resolveCardPr = vi.fn(async () => PR);
+		resolveRepoCardPrs = vi.fn(async () => prMap());
 		persistCardPr = vi.fn(async () => {});
 		monitor = createWorkspaceMetadataMonitor({
 			onMetadataUpdated: () => {},
-			resolveCardPr: resolveCardPr as unknown as (input: {
-				branch: string;
+			resolveRepoCardPrs: resolveRepoCardPrs as unknown as (input: {
 				cwd: string;
-			}) => Promise<CardPrRef | null>,
+			}) => Promise<Map<string, CardPrRef>>,
 			persistCardPr: persistCardPr as unknown as (capture: {
 				workspaceId: string;
 				workspacePath: string;
@@ -118,13 +122,16 @@ describe("workspace metadata monitor PR capture", () => {
 		vi.clearAllMocks();
 	});
 
-	it("given a card is moved Review to Done before any capture ran, when the transition is processed, then its PR is captured idempotently", async () => {
+	it("given a card is moved Review to Done after its PR was captured, when the refresh runs, then capture stays idempotent", async () => {
 		// given
-		await monitor.updateWorkspaceState({
+		await monitor.connectWorkspace({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
 			board: boardWith("review"),
 		});
+		await settleConnectRefresh();
+		resolveRepoCardPrs.mockClear();
+		persistCardPr.mockClear();
 
 		// when
 		await monitor.updateWorkspaceState({
@@ -134,14 +141,8 @@ describe("workspace metadata monitor PR capture", () => {
 		});
 
 		// then
-		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
-		expect(persistCardPr).toHaveBeenCalledTimes(1);
-		expect(persistCardPr).toHaveBeenCalledWith({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			taskId: "task-1",
-			pr: PR,
-		});
+		expect(resolveRepoCardPrs).not.toHaveBeenCalled();
+		expect(persistCardPr).not.toHaveBeenCalled();
 	});
 
 	const worktreeProbeCount = () =>
@@ -205,71 +206,108 @@ describe("workspace metadata monitor PR capture", () => {
 		await Promise.resolve();
 
 		// then
-		expect(resolveCardPr).not.toHaveBeenCalled();
+		expect(resolveRepoCardPrs).not.toHaveBeenCalled();
 		expect(persistCardPr).not.toHaveBeenCalled();
 	});
 
-	it("given a subscribed Review card whose branch led to one, when the metadata refresh runs, then it captures and persists the PR", async () => {
+	it.each(["in_progress", "review", "done"] as const)(
+		"given a subscribed %s card whose deterministic branch led to one, when the metadata refresh runs, then it captures and persists the PR",
+		async (columnId) => {
+			// given
+			await monitor.connectWorkspace({
+				workspaceId: "ws-1",
+				workspacePath: "/repo",
+				board: boardWith(columnId),
+			});
+
+			// when
+			await settleConnectRefresh();
+
+			// then
+			expect(resolveRepoCardPrs).toHaveBeenCalledTimes(1);
+			expect(resolveRepoCardPrs).toHaveBeenCalledWith({ cwd: "/repo" });
+			expect(persistCardPr).toHaveBeenCalledTimes(1);
+			expect(persistCardPr).toHaveBeenCalledWith({
+				workspaceId: "ws-1",
+				workspacePath: "/repo",
+				taskId: "task-1",
+				pr: PR,
+			});
+		},
+	);
+
+	it("given multiple cards whose branches led to PRs, when the metadata refresh runs, then it queries the repo once and matches locally", async () => {
 		// given
+		resolveRepoCardPrs.mockResolvedValue(
+			prMap([
+				[TASK_BRANCH, PR],
+				[
+					"task-2-ship-another-feature",
+					{
+						url: "https://github.com/cline/kanban/pull/43",
+						state: "open",
+						number: 43,
+					},
+				],
+			]),
+		);
 		await monitor.connectWorkspace({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
-			board: boardWith("review"),
+			board: {
+				columns: [
+					{
+						id: "in_progress",
+						title: "in_progress",
+						cards: [
+							runtimeBoardCardSchema.parse({
+								id: "task-1",
+								prompt: "Ship a feature",
+								startInPlanMode: false,
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							}),
+							runtimeBoardCardSchema.parse({
+								id: "task-2",
+								prompt: "Ship another feature",
+								startInPlanMode: false,
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							}),
+						],
+					},
+				],
+				dependencies: [],
+			},
 		});
 
 		// when
 		await settleConnectRefresh();
 
 		// then
-		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
-		expect(persistCardPr).toHaveBeenCalledTimes(1);
-		expect(persistCardPr).toHaveBeenCalledWith({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			taskId: "task-1",
-			pr: PR,
-		});
-	});
-
-	it("given a subscribed Done card without a stored PR whose branch led to one, when the metadata refresh runs, then it captures and persists the PR", async () => {
-		// given
-		await monitor.connectWorkspace({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			board: boardWith("done"),
-		});
-
-		// when
-		await settleConnectRefresh();
-
-		// then
-		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
-		expect(persistCardPr).toHaveBeenCalledTimes(1);
-		expect(persistCardPr).toHaveBeenCalledWith({
-			workspaceId: "ws-1",
-			workspacePath: "/repo",
-			taskId: "task-1",
-			pr: PR,
-		});
+		expect(resolveRepoCardPrs).toHaveBeenCalledTimes(1);
+		expect(persistCardPr).toHaveBeenCalledTimes(2);
 	});
 
 	it("given a stored open PR that has since merged, when the monitor re-polls past the refresh interval, then the card's prState becomes merged", async () => {
 		// given
-		resolveCardPr.mockResolvedValue(PR);
+		resolveRepoCardPrs.mockResolvedValue(prMap([[TASK_BRANCH, PR]]));
 		await monitor.connectWorkspace({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
 			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
 		});
-		resolveCardPr.mockClear();
+		resolveRepoCardPrs.mockClear();
 		persistCardPr.mockClear();
-		resolveCardPr.mockResolvedValue(MERGED_PR);
+		resolveRepoCardPrs.mockResolvedValue(prMap([[TASK_BRANCH, MERGED_PR]]));
 
 		// when
 		await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS);
 
 		// then
-		expect(resolveCardPr).toHaveBeenCalledWith({ branch: "feature/task-1", cwd: "/worktrees/task-1" });
+		expect(resolveRepoCardPrs).toHaveBeenCalledWith({ cwd: "/repo" });
 		expect(persistCardPr).toHaveBeenCalledWith({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
@@ -292,7 +330,7 @@ describe("workspace metadata monitor PR capture", () => {
 			await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS);
 
 			// then
-			expect(resolveCardPr).not.toHaveBeenCalled();
+			expect(resolveRepoCardPrs).not.toHaveBeenCalled();
 			expect(persistCardPr).not.toHaveBeenCalled();
 		},
 	);
@@ -305,20 +343,20 @@ describe("workspace metadata monitor PR capture", () => {
 			board: boardWith("review", { prUrl: PR.url, prState: "open", prNumber: 42 }),
 		});
 		await settleConnectRefresh();
-		resolveCardPr.mockClear();
+		resolveRepoCardPrs.mockClear();
 		persistCardPr.mockClear();
 
 		// when
 		await vi.advanceTimersByTimeAsync(PR_STATE_REFRESH_MIN_MS - 1);
 
 		// then
-		expect(resolveCardPr).not.toHaveBeenCalled();
+		expect(resolveRepoCardPrs).not.toHaveBeenCalled();
 		expect(persistCardPr).not.toHaveBeenCalled();
 	});
 
 	it("given no PR exists yet, when the metadata refresh runs, then the card is left unset", async () => {
 		// given
-		resolveCardPr.mockResolvedValue(null);
+		resolveRepoCardPrs.mockResolvedValue(new Map());
 
 		// when
 		await monitor.connectWorkspace({
@@ -329,12 +367,13 @@ describe("workspace metadata monitor PR capture", () => {
 		await settleConnectRefresh();
 
 		// then
-		expect(resolveCardPr).toHaveBeenCalledTimes(1);
+		expect(resolveRepoCardPrs).toHaveBeenCalledTimes(1);
 		expect(persistCardPr).not.toHaveBeenCalled();
 	});
 
-	it("given an in-progress card, when the metadata refresh runs, then no PR is resolved", async () => {
+	it("given an in-progress card whose branch has no PR, when the metadata refresh runs, then it is left unset", async () => {
 		// given
+		resolveRepoCardPrs.mockResolvedValue(new Map());
 		await monitor.connectWorkspace({
 			workspaceId: "ws-1",
 			workspacePath: "/repo",
@@ -342,10 +381,10 @@ describe("workspace metadata monitor PR capture", () => {
 		});
 
 		// when
-		await Promise.resolve();
+		await settleConnectRefresh();
 
 		// then
-		expect(resolveCardPr).not.toHaveBeenCalled();
+		expect(resolveRepoCardPrs).toHaveBeenCalledTimes(1);
 		expect(persistCardPr).not.toHaveBeenCalled();
 	});
 });

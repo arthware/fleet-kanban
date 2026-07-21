@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { runGit } from "./git-utils";
 
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
@@ -7,8 +8,18 @@ const GH_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 // (slow network, auth prompt, rate-limit) can't hang PR capture — and, through
 // captureTrackedCardPrs, the whole metadata refresh — indefinitely.
 const GH_COMMAND_TIMEOUT_MS = 5_000;
-const GH_PR_LIST_ARGS_PREFIX = ["pr", "list", "--head"] as const;
-const GH_PR_LIST_ARGS_SUFFIX = ["--state", "all", "--json", "url,state,number,title"] as const;
+const GIT_REMOTE_TIMEOUT_MS = 5_000;
+const GH_PR_LIST_LIMIT = 200;
+const GH_REPO_PR_LIST_ARGS = [
+	"pr",
+	"list",
+	"--state",
+	"all",
+	"--limit",
+	String(GH_PR_LIST_LIMIT),
+	"--json",
+	"headRefName,url,state,number",
+] as const;
 
 export type CardPrState = "open" | "merged" | "closed";
 
@@ -19,11 +30,16 @@ export interface CardPrRef {
 }
 
 export type GhRunner = (args: string[], cwd: string) => Promise<string>;
+export type GitRemoteChecker = (cwd: string) => Promise<boolean>;
 
 interface GhPrListItem {
 	url: string;
 	state: CardPrState;
 	number: number;
+}
+
+interface GhRepoPrListItem extends GhPrListItem {
+	headRefName: string;
 }
 
 function normalizePrState(value: unknown): CardPrState | null {
@@ -59,6 +75,23 @@ function parseGhPrListItem(value: unknown): GhPrListItem | null {
 	};
 }
 
+function parseGhRepoPrListItem(value: unknown): GhRepoPrListItem | null {
+	const item = parseGhPrListItem(value);
+	if (item === null || value === null || typeof value !== "object") {
+		return null;
+	}
+
+	const candidate = value as { headRefName?: unknown };
+	if (typeof candidate.headRefName !== "string" || !candidate.headRefName.trim()) {
+		return null;
+	}
+
+	return {
+		...item,
+		headRefName: candidate.headRefName,
+	};
+}
+
 function newestByNumber(prs: GhPrListItem[]): GhPrListItem | null {
 	return prs.reduce<GhPrListItem | null>((best, candidate) => {
 		if (best === null || candidate.number > best.number) {
@@ -68,33 +101,41 @@ function newestByNumber(prs: GhPrListItem[]): GhPrListItem | null {
 	}, null);
 }
 
-export function selectCardPrUrl(prListJson: string): CardPrRef | null {
+export function selectRepoCardPrsByHead(prListJson: string): Map<string, CardPrRef> {
 	try {
 		const parsed = JSON.parse(prListJson);
 		if (!Array.isArray(parsed)) {
-			return null;
+			return new Map();
 		}
 
-		const prItems = parsed.map(parseGhPrListItem);
+		const prItems = parsed.map(parseGhRepoPrListItem);
 		if (prItems.some((item) => item === null)) {
-			return null;
+			return new Map();
 		}
 
-		const validPrs = prItems.filter((item): item is GhPrListItem => item !== null);
-		const openPr = newestByNumber(validPrs.filter((pr) => pr.state === "open"));
-		const terminalPr = newestByNumber(validPrs.filter((pr) => pr.state === "merged" || pr.state === "closed"));
-		const selected = openPr ?? terminalPr;
-		if (selected === null) {
-			return null;
+		const prsByHead = new Map<string, GhRepoPrListItem[]>();
+		for (const pr of prItems.filter((item): item is GhRepoPrListItem => item !== null)) {
+			const headPrs = prsByHead.get(pr.headRefName) ?? [];
+			headPrs.push(pr);
+			prsByHead.set(pr.headRefName, headPrs);
 		}
 
-		return {
-			url: selected.url,
-			state: selected.state,
-			number: selected.number,
-		};
+		const selectedByHead = new Map<string, CardPrRef>();
+		for (const [headRefName, prs] of prsByHead) {
+			const openPr = newestByNumber(prs.filter((pr) => pr.state === "open"));
+			const terminalPr = newestByNumber(prs.filter((pr) => pr.state === "merged" || pr.state === "closed"));
+			const selected = openPr ?? terminalPr;
+			if (selected) {
+				selectedByHead.set(headRefName, {
+					url: selected.url,
+					state: selected.state,
+					number: selected.number,
+				});
+			}
+		}
+		return selectedByHead;
 	} catch {
-		return null;
+		return new Map();
 	}
 }
 
@@ -108,16 +149,32 @@ async function runGh(args: string[], cwd: string): Promise<string> {
 	return stdout;
 }
 
-export async function resolveCardPrUrl(opts: {
-	branch: string;
+async function hasGitRemote(cwd: string): Promise<boolean> {
+	const result = await runGit(cwd, ["remote"], { timeoutMs: GIT_REMOTE_TIMEOUT_MS });
+	return result.ok && result.stdout.split(/\r?\n/u).some((remote) => remote.trim().length > 0);
+}
+
+export async function listRepoCardPrsByHead(opts: {
 	cwd: string;
 	run?: GhRunner;
-}): Promise<CardPrRef | null> {
+	hasRemote?: GitRemoteChecker;
+}): Promise<Map<string, CardPrRef>> {
+	const hasRemote = opts.hasRemote ?? hasGitRemote;
+	let remoteExists = false;
+	try {
+		remoteExists = await hasRemote(opts.cwd);
+	} catch {
+		remoteExists = false;
+	}
+	if (!remoteExists) {
+		return new Map();
+	}
+
 	const run = opts.run ?? runGh;
 	try {
-		const output = await run([...GH_PR_LIST_ARGS_PREFIX, opts.branch, ...GH_PR_LIST_ARGS_SUFFIX], opts.cwd);
-		return selectCardPrUrl(output);
+		const output = await run([...GH_REPO_PR_LIST_ARGS], opts.cwd);
+		return selectRepoCardPrsByHead(output);
 	} catch {
-		return null;
+		return new Map();
 	}
 }
