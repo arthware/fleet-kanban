@@ -268,8 +268,14 @@ p = {
 with open(sys.argv[1], "wb") as f: plistlib.dump(p, f)
 print("→ wrote", sys.argv[1])
 PY
-      launchctl unload "$plist" 2>/dev/null || true
-      launchctl load -w "$plist" 2>/dev/null || { dim "launchctl load failed"; return 1; }
+      # Modern bootout/bootstrap. Legacy `launchctl load -w` silently no-ops after a
+      # re-point and leaves the board DOWN (the failure this replaces); bootstrap reliably
+      # starts it. bootout is idempotent — `|| true` covers a first install with nothing loaded.
+      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+      # The board can outlive SIGTERM (--skip-shutdown-cleanup); free the port before
+      # bootstrap so a re-point can't collide with the old process and fail to bind.
+      _kanban_free_port
+      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || { dim "launchctl bootstrap failed"; return 1; }
       say "daemon '$label' loaded (port $KANBAN_PORT, dir $dir)"
       local i; for i in $(seq 1 30); do kanban_running && { say "✓ up"; kanban_sync_projects; _kanban_url_banner; return 0; }; sleep 1; done
       dim "loaded but not up in 30s — see $KANBAN_LOG"; return 1;;
@@ -292,23 +298,45 @@ PY
 # are separately covered by the daemon's KeepAlive auto-revive.
 _kanban_daemon_loaded() { launchctl list 2>/dev/null | grep -q "$(_kanban_label)"; }
 
-# Hard-restart the loaded launchd board *in place*: kickstart -k sends SIGTERM then
-# escalates to SIGKILL and immediately relaunches, so a fresh process (fresh in-memory
-# state) is guaranteed. This is why plain `launchctl unload && load` isn't enough — the
-# board runs with --skip-shutdown-cleanup and can ignore/outlive SIGTERM, leaving the
-# old, wedged process (and its stale state — e.g. a dead board stream after `fleet
-# update`) still serving. Re-execs the same dist/cli.js path, so a preceding --build
-# (new bytes already on disk) goes live too. Falls back to a full (re)install when the
-# service isn't loaded yet.
+# Binary the loaded plist actually launches (ProgramArguments[1]), or empty if no plist.
+_kanban_plist_bin() { plutil -extract 'ProgramArguments.1' raw -o - "$(_kanban_plist)" 2>/dev/null || true; }
+
+# Free the board's TCP port. After a bootout the KeepAlive supervisor is gone, so a
+# lingering process (a board that ignored/outlived SIGTERM under --skip-shutdown-cleanup)
+# can be hard-killed without auto-revive. Strictly scoped to KANBAN_PORT so a reinstall /
+# re-point can't collide with the dying old process and fail to bind.
+_kanban_free_port() {
+  local pid; pid="$(lsof -nP -iTCP:"$KANBAN_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+  [ -n "$pid" ] && { kill -9 "$pid" 2>/dev/null || true; sleep 1; }
+}
+
+# Restart the launchd board. When the loaded daemon already launches the binary fleet
+# resolves *now* (kanban_bin), do an in-place `kickstart -k`: SIGTERM→SIGKILL→relaunch,
+# guaranteeing a fresh process (fresh in-memory state) on the same binary. Plain
+# `unload && load` isn't enough — the board runs with --skip-shutdown-cleanup and can
+# outlive SIGTERM, leaving the old wedged process serving.
+#
+# But `kickstart -k` re-execs whatever the *existing* plist points at. If that no longer
+# matches kanban_bin — a `--build` rebuilt a different dist, or a cross-project `fleet
+# update` repointed the plist — a bare kickstart would silently relaunch the WRONG binary
+# and the build you just made would never go live (the class of error this guards). So
+# reconcile first: if the plist target differs (or nothing is loaded), rewrite the plist
+# to kanban_bin and reload via `kanban_daemon install` (which frees the port first).
 _kanban_hard_restart() {
-  if _kanban_daemon_loaded; then
-    local label; label="$(_kanban_label)"
+  local label bin have; label="$(_kanban_label)"
+  bin="$(kanban_bin)" || { dim "no board binary resolved — run 'fleet service start' (or 'fleet init')"; return 1; }
+  have="$(_kanban_plist_bin)"
+  if _kanban_daemon_loaded && [ -n "$have" ] && [ "$have" = "$bin" ]; then
     say "hard-restarting board '$label' (kickstart -k) …"
     if launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null; then
       local i; for i in $(seq 1 30); do kanban_running && { say "✓ up"; _kanban_url_banner; return 0; }; sleep 1; done
       dim "restarted but not up in 30s — see $KANBAN_LOG"; return 1
     fi
     dim "kickstart failed — falling back to reload"
+  elif [ -n "$have" ] && [ "$have" != "$bin" ]; then
+    say "board binary changed — re-pointing the daemon so it runs the current build:"
+    dim "  was: $have"
+    dim "  now: $bin"
   fi
   kanban_daemon install
 }
