@@ -43,14 +43,12 @@ export function KanbanBoard({
 	inlineTaskEditor,
 	onEditTask,
 	onSaveTaskTitle,
-	onCommitTask,
 	onOpenPrTask,
 	onImplementHereTask,
 	onCancelAutomaticTaskAction,
 	onMoveToTrashTask,
 	onMoveDoneTaskToTrash,
 	onRestoreFromTrashTask,
-	commitTaskLoadingById,
 	openPrTaskLoadingById,
 	moveToTrashLoadingById,
 	dependencies,
@@ -76,14 +74,12 @@ export function KanbanBoard({
 	inlineTaskEditor?: ReactNode;
 	onEditTask?: (card: BoardCard) => void;
 	onSaveTaskTitle?: (taskId: string, title: string) => void;
-	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onImplementHereTask?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onMoveDoneTaskToTrash?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
-	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
 	moveToTrashLoadingById?: Record<string, boolean>;
 	dependencies: BoardDependency[];
@@ -416,7 +412,6 @@ export function KanbanBoard({
 						inlineTaskEditor={column.id === "backlog" ? inlineTaskEditor : undefined}
 						onEditTask={column.id === "backlog" ? onEditTask : undefined}
 						onSaveTitle={column.id !== "trash" ? onSaveTaskTitle : undefined}
-						onCommitTask={column.id === "review" ? onCommitTask : undefined}
 						onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
 						onImplementHereTask={column.id === "review" ? onImplementHereTask : undefined}
 						onCancelAutomaticTaskAction={onCancelAutomaticTaskAction}
@@ -428,7 +423,6 @@ export function KanbanBoard({
 									: undefined
 						}
 						onRestoreFromTrashTask={column.id === "trash" ? onRestoreFromTrashTask : undefined}
-						commitTaskLoadingById={column.id === "review" ? commitTaskLoadingById : undefined}
 						openPrTaskLoadingById={column.id === "review" ? openPrTaskLoadingById : undefined}
 						moveToTrashLoadingById={
 							column.id === "review" || column.id === "done" ? moveToTrashLoadingById : undefined

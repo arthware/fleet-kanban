@@ -344,7 +344,6 @@ export function CardDetailView({
 	inlineTaskEditor,
 	onEditTask,
 	onSaveTaskTitle,
-	onCommitTask,
 	onOpenPrTask,
 	onAgentCommitTask,
 	onAgentOpenPrTask,
@@ -352,7 +351,6 @@ export function CardDetailView({
 	onMoveDoneCardToTrash,
 	onRestoreTaskFromTrash,
 	onCancelAutomaticTaskAction,
-	commitTaskLoadingById,
 	openPrTaskLoadingById,
 	agentCommitTaskLoadingById,
 	agentOpenPrTaskLoadingById,
@@ -405,7 +403,6 @@ export function CardDetailView({
 	inlineTaskEditor?: ReactNode;
 	onEditTask?: (card: BoardCard) => void;
 	onSaveTaskTitle?: (taskId: string, title: string) => void;
-	onCommitTask?: (taskId: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
 	onAgentCommitTask?: (taskId: string) => void;
 	onAgentOpenPrTask?: (taskId: string) => void;
@@ -413,7 +410,6 @@ export function CardDetailView({
 	onMoveDoneCardToTrash?: (taskId: string) => void;
 	onRestoreTaskFromTrash?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
-	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
 	agentCommitTaskLoadingById?: Record<string, boolean>;
 	agentOpenPrTaskLoadingById?: Record<string, boolean>;
@@ -862,12 +858,10 @@ export function CardDetailView({
 							inlineTaskEditor={inlineTaskEditor}
 							onEditTask={onEditTask}
 							onSaveTaskTitle={onSaveTaskTitle}
-							onCommitTask={onCommitTask}
 							onOpenPrTask={onOpenPrTask}
 							onMoveToTrashTask={onMoveReviewCardToTrash}
 							onMoveDoneTaskToTrash={onMoveDoneCardToTrash}
 							onRestoreFromTrashTask={onRestoreTaskFromTrash}
-							commitTaskLoadingById={commitTaskLoadingById}
 							openPrTaskLoadingById={openPrTaskLoadingById}
 							moveToTrashLoadingById={moveToTrashLoadingById}
 							panelWidth="100%"
