@@ -14,6 +14,12 @@ export const TASK_GIT_BASE_REF_PROMPT_VARIABLE: TaskGitPromptVariable = {
 	description: "the branch this task worktree was created from",
 };
 
+export const TASK_GIT_BRANCH_PROMPT_VARIABLE: TaskGitPromptVariable = {
+	key: "branch",
+	token: "{{branch}}",
+	description: "the current task worktree branch",
+};
+
 export interface TaskGitPromptTemplates {
 	commitPromptTemplate?: string | null;
 	openPrPromptTemplate?: string | null;
@@ -61,6 +67,7 @@ function interpolateTemplate(template: string, variables: Record<string, string>
 export function buildTaskGitActionPrompt(input: BuildTaskGitActionPromptInput): string {
 	const variables: Record<string, string> = {
 		[TASK_GIT_BASE_REF_PROMPT_VARIABLE.key]: input.workspaceInfo.baseRef,
+		[TASK_GIT_BRANCH_PROMPT_VARIABLE.key]: input.workspaceInfo.branch ?? "the current branch",
 	};
 	const template = resolveTemplate(input.action, input.templates);
 	return interpolateTemplate(template, variables);

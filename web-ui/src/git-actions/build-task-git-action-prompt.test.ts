@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildTaskGitActionPrompt,
 	TASK_GIT_BASE_REF_PROMPT_VARIABLE,
+	TASK_GIT_BRANCH_PROMPT_VARIABLE,
 } from "@/git-actions/build-task-git-action-prompt";
 
 describe("buildTaskGitActionPrompt", () => {
@@ -41,5 +42,45 @@ describe("buildTaskGitActionPrompt", () => {
 				},
 			}),
 		).toBe("Handle this pull request action using the provided git context.");
+	});
+
+	it("interpolates the current branch into custom templates", () => {
+		expect(
+			buildTaskGitActionPrompt({
+				action: "pr",
+				workspaceInfo: {
+					taskId: "task-123",
+					path: "/tmp/task-123",
+					exists: true,
+					baseRef: "main",
+					branch: "36ab1-create-branch",
+					isDetached: false,
+					headCommit: "abc123",
+				},
+				templates: {
+					openPrPromptTemplate: `Push ${TASK_GIT_BRANCH_PROMPT_VARIABLE.token} to ${TASK_GIT_BASE_REF_PROMPT_VARIABLE.token}.`,
+				},
+			}),
+		).toBe("Push 36ab1-create-branch to main.");
+	});
+
+	it("uses a neutral branch fallback for legacy detached worktrees", () => {
+		expect(
+			buildTaskGitActionPrompt({
+				action: "pr",
+				workspaceInfo: {
+					taskId: "task-123",
+					path: "/tmp/task-123",
+					exists: true,
+					baseRef: "main",
+					branch: null,
+					isDetached: true,
+					headCommit: "abc123",
+				},
+				templates: {
+					openPrPromptTemplate: `Push ${TASK_GIT_BRANCH_PROMPT_VARIABLE.token}.`,
+				},
+			}),
+		).toBe("Push the current branch.");
 	});
 });

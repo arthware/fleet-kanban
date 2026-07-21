@@ -67,7 +67,7 @@ const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS = 300_000;
 const DEFAULT_WORKTREE_POST_CREATE_FAILURE_MODE: RuntimeWorktreePostCreateFailureMode = "warn";
-const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
+const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a task worktree on branch {{branch}}. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
 - Do not edit files outside git workflows unless required for conflict resolution.
@@ -91,7 +91,7 @@ Steps:
    - Whether stash was used
    - Whether conflicts were resolved
    - Any remaining manual follow-up needed`;
-const DEFAULT_OPEN_PR_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, open a pull request against {{base_ref}}.
+const DEFAULT_OPEN_PR_PROMPT_TEMPLATE = `You are in a task worktree on branch {{branch}}. When you are finished with the task, push {{branch}} and open a pull request against {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
 - Do not modify the base worktree.
@@ -99,12 +99,11 @@ const DEFAULT_OPEN_PR_PROMPT_TEMPLATE = `You are in a worktree on a detached HEA
 
 Steps:
 1. Ensure all intended changes are committed in the current task worktree.
-2. If currently on detached HEAD, create a branch at the current commit in this worktree.
-3. Push the branch to origin and set upstream.
-4. Create a pull request with base {{base_ref}} and head as the pushed branch (use gh CLI if available).
-5. If a pull request already exists for the same head and base, return that existing PR URL instead of creating a duplicate.
-6. If PR creation is blocked, explain exactly why and provide the exact commands to complete it manually.
-7. Report:
+2. Push {{branch}} to origin and set upstream.
+3. Create a pull request with base {{base_ref}} and head {{branch}} (use gh CLI if available).
+4. If a pull request already exists for the same head and base, return that existing PR URL instead of creating a duplicate.
+5. If PR creation is blocked, explain exactly why and provide the exact commands to complete it manually.
+6. Report:
    - PR title: PR URL
    - Base branch
    - Head branch

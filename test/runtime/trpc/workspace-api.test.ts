@@ -449,8 +449,8 @@ describe("createWorkspaceApi loadDesignDoc", () => {
 		const projectRoot = await createTempProjectRoot();
 		const designDir = join(projectRoot, "docs", "design");
 		await mkdir(designDir, { recursive: true });
-		await writeFile(join(designDir, "ENG-123-z-later.md"), "later");
-		await writeFile(join(designDir, "ENG-123-a-first.md"), "# First");
+		await writeFile(join(designDir, "eng-123-z-later.md"), "later");
+		await writeFile(join(designDir, "eng-123-a-first.md"), "# First");
 		const api = createWorkspaceApiForTests();
 
 		const result = await api.loadDesignDoc(
@@ -466,7 +466,7 @@ describe("createWorkspaceApi loadDesignDoc", () => {
 
 		expect(result).toEqual({
 			exists: true,
-			path: join(designDir, "ENG-123-a-first.md"),
+			path: join(designDir, "eng-123-a-first.md"),
 			content: "# First",
 		});
 	});
