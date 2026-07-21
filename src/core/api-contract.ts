@@ -166,7 +166,7 @@ function normalizeRuntimeTaskClineSettings(input: {
 }
 
 // The lifecycle state of the GitHub PR a card's branch led to. Mirrors the
-// CardPrState union produced by `resolveCardPrUrl` (src/workspace/card-pr-url).
+// CardPrState union produced by PR lookup helpers in src/workspace/card-pr-url.
 export const runtimeCardPrStateSchema = z.enum(["open", "merged", "closed"]);
 export type RuntimeCardPrState = z.infer<typeof runtimeCardPrStateSchema>;
 

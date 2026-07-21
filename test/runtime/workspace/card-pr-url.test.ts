@@ -1,185 +1,161 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { type GhRunner, resolveCardPrUrl, selectCardPrUrl } from "../../../src/workspace/card-pr-url";
+import { type GhRunner, listRepoCardPrsByHead, selectRepoCardPrsByHead } from "../../../src/workspace/card-pr-url";
 
 const openPrJson = JSON.stringify([
 	{
 		url: "https://github.com/cline/kanban/pull/42",
 		state: "OPEN",
 		number: 42,
-		title: "Add card PR lookup",
+		headRefName: "task-1-ship-a-feature",
 	},
 ]);
 
-describe("selectCardPrUrl", () => {
-	it("prefers an open PR over a merged PR", () => {
-		const result = selectCardPrUrl(
+describe("selectRepoCardPrsByHead", () => {
+	it("groups PRs by head branch and prefers an open PR over terminal PRs", () => {
+		const result = selectRepoCardPrsByHead(
 			JSON.stringify([
 				{
+					headRefName: "task-1-ship-a-feature",
 					url: "https://github.com/cline/kanban/pull/41",
 					state: "MERGED",
 					number: 41,
-					title: "Earlier merged work",
 				},
 				{
+					headRefName: "task-1-ship-a-feature",
 					url: "https://github.com/cline/kanban/pull/42",
 					state: "OPEN",
 					number: 42,
-					title: "Current open work",
-				},
-			]),
-		);
-
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/42",
-			state: "open",
-			number: 42,
-		});
-	});
-
-	it("returns the merged PR when only merged PRs are present", () => {
-		const result = selectCardPrUrl(
-			JSON.stringify([
-				{
-					url: "https://github.com/cline/kanban/pull/40",
-					state: "MERGED",
-					number: 40,
-					title: "Saved card work",
-				},
-			]),
-		);
-
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/40",
-			state: "merged",
-			number: 40,
-		});
-	});
-
-	it("selects the highest-numbered merged PR when multiple merged PRs are present", () => {
-		const result = selectCardPrUrl(
-			JSON.stringify([
-				{
-					url: "https://github.com/cline/kanban/pull/39",
-					state: "MERGED",
-					number: 39,
-					title: "First merged work",
 				},
 				{
-					url: "https://github.com/cline/kanban/pull/44",
-					state: "MERGED",
-					number: 44,
-					title: "Most recent merged work",
-				},
-			]),
-		);
-
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/44",
-			state: "merged",
-			number: 44,
-		});
-	});
-
-	it("given a PR list with only a closed-unmerged PR, when selectCardPrUrl runs, then it returns that PR with state closed", () => {
-		const result = selectCardPrUrl(
-			JSON.stringify([
-				{
+					headRefName: "task-2-ship-another-feature",
 					url: "https://github.com/cline/kanban/pull/43",
 					state: "CLOSED",
 					number: 43,
-					title: "Closed without merge",
 				},
 			]),
 		);
 
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/43",
-			state: "closed",
-			number: 43,
+		expect(Object.fromEntries(result)).toEqual({
+			"task-1-ship-a-feature": {
+				url: "https://github.com/cline/kanban/pull/42",
+				state: "open",
+				number: 42,
+			},
+			"task-2-ship-another-feature": {
+				url: "https://github.com/cline/kanban/pull/43",
+				state: "closed",
+				number: 43,
+			},
 		});
 	});
 
 	it("selects the highest-numbered terminal PR across merged and closed PRs", () => {
-		const result = selectCardPrUrl(
+		const result = selectRepoCardPrsByHead(
 			JSON.stringify([
 				{
+					headRefName: "task-1-ship-a-feature",
 					url: "https://github.com/cline/kanban/pull/40",
 					state: "MERGED",
 					number: 40,
-					title: "Merged work",
 				},
 				{
+					headRefName: "task-1-ship-a-feature",
 					url: "https://github.com/cline/kanban/pull/45",
 					state: "CLOSED",
 					number: 45,
-					title: "Later closed work",
 				},
 			]),
 		);
 
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/45",
-			state: "closed",
-			number: 45,
+		expect(Object.fromEntries(result)).toEqual({
+			"task-1-ship-a-feature": {
+				url: "https://github.com/cline/kanban/pull/45",
+				state: "closed",
+				number: 45,
+			},
 		});
 	});
 
-	it("returns null for an empty array", () => {
-		expect(selectCardPrUrl("[]")).toBeNull();
-	});
-
-	it("returns null for malformed JSON", () => {
-		expect(selectCardPrUrl("{not json")).toBeNull();
-	});
-
-	it("returns null when a selected PR is missing its url", () => {
-		const result = selectCardPrUrl(
+	it("returns an empty map when a PR item is missing its head branch", () => {
+		const result = selectRepoCardPrsByHead(
 			JSON.stringify([
 				{
+					url: "https://github.com/cline/kanban/pull/42",
 					state: "OPEN",
-					number: 45,
-					title: "Missing URL",
+					number: 42,
 				},
 			]),
 		);
 
-		expect(result).toBeNull();
+		expect(result.size).toBe(0);
+	});
+
+	it("returns an empty map for malformed repo PR JSON", () => {
+		expect(selectRepoCardPrsByHead("{not json").size).toBe(0);
 	});
 });
 
-describe("resolveCardPrUrl", () => {
-	it("runs gh for the branch and returns the parsed PR ref", async () => {
+describe("listRepoCardPrsByHead", () => {
+	it("runs one repo-wide gh list and returns PRs keyed by head branch", async () => {
 		const calls: Array<{ args: string[]; cwd: string }> = [];
 		const run: GhRunner = async (args, cwd) => {
 			calls.push({ args, cwd });
-			return openPrJson;
+			return JSON.stringify([
+				{
+					headRefName: "task-1-ship-a-feature",
+					url: "https://github.com/cline/kanban/pull/42",
+					state: "OPEN",
+					number: 42,
+				},
+			]);
 		};
 
-		const result = await resolveCardPrUrl({
-			branch: "task/card-pr-url",
+		const result = await listRepoCardPrsByHead({
 			cwd: "/repo",
 			run,
+			hasRemote: async () => true,
 		});
 
-		expect(result).toEqual({
-			url: "https://github.com/cline/kanban/pull/42",
-			state: "open",
-			number: 42,
+		expect(Object.fromEntries(result)).toEqual({
+			"task-1-ship-a-feature": {
+				url: "https://github.com/cline/kanban/pull/42",
+				state: "open",
+				number: 42,
+			},
 		});
 		expect(calls).toEqual([
 			{
-				args: ["pr", "list", "--head", "task/card-pr-url", "--state", "all", "--json", "url,state,number,title"],
+				args: ["pr", "list", "--state", "all", "--limit", "200", "--json", "headRefName,url,state,number"],
 				cwd: "/repo",
 			},
 		]);
 	});
 
-	it("resolves null when gh fails", async () => {
+	it("given no git remote exists, when listing repo PRs, then it does not invoke gh", async () => {
+		const run = vi.fn<GhRunner>(async () => openPrJson);
+
+		const result = await listRepoCardPrsByHead({
+			cwd: "/repo",
+			run,
+			hasRemote: async () => false,
+		});
+
+		expect(result.size).toBe(0);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("resolves an empty map when gh is unavailable or unauthenticated", async () => {
 		const run: GhRunner = async () => {
-			throw new Error("gh not found");
+			throw new Error("gh auth required");
 		};
 
-		await expect(resolveCardPrUrl({ branch: "task/card-pr-url", cwd: "/repo", run })).resolves.toBeNull();
+		await expect(
+			listRepoCardPrsByHead({
+				cwd: "/repo",
+				run,
+				hasRemote: async () => true,
+			}),
+		).resolves.toEqual(new Map());
 	});
 });
