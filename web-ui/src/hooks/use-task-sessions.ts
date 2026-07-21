@@ -172,6 +172,9 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 					images: options?.resumeFromTrash || isExistingTranscriptResume ? undefined : task.images,
 					startInPlanMode:
 						options?.resumeFromTrash || isExistingTranscriptResume ? undefined : task.startInPlanMode,
+					autoReviewEnabled:
+						options?.resumeFromTrash || isExistingTranscriptResume ? undefined : task.autoReviewEnabled,
+					autoReviewMode: options?.resumeFromTrash || isExistingTranscriptResume ? undefined : task.autoReviewMode,
 					resumeFromTrash: options?.resumeFromTrash,
 					resumeMode: options?.resumeMode,
 					baseRef: task.baseRef,

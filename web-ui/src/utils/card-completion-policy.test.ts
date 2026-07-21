@@ -15,7 +15,6 @@ function createCard(overrides?: Partial<BoardCard>): BoardCard {
 		prompt: "Review API changes",
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		autoReviewMode: "commit",
 		baseRef: "main",
 		createdAt: 1,
 		updatedAt: 1,
@@ -41,13 +40,6 @@ describe("cardCompletionPolicy", () => {
 		});
 	});
 
-	it("maps build auto-review commit cards to auto-commit", () => {
-		expect(cardCompletionPolicy(createCard({ autoReviewEnabled: true, autoReviewMode: "commit" }))).toEqual({
-			kind: "build",
-			policy: "auto-commit",
-		});
-	});
-
 	it("maps build auto-review PR cards to auto-pr", () => {
 		expect(cardCompletionPolicy(createCard({ autoReviewEnabled: true, autoReviewMode: "pr" }))).toEqual({
 			kind: "build",
@@ -55,10 +47,10 @@ describe("cardCompletionPolicy", () => {
 		});
 	});
 
-	it("falls back to auto-commit when build auto-review mode is absent", () => {
+	it("falls back to manual review when build auto-review mode is absent", () => {
 		expect(cardCompletionPolicy(createCard({ autoReviewEnabled: true, autoReviewMode: undefined }))).toEqual({
 			kind: "build",
-			policy: "auto-commit",
+			policy: "manual",
 		});
 	});
 
@@ -72,7 +64,6 @@ describe("cardCompletionPolicy", () => {
 
 describe("completion-policy badge labels", () => {
 	it("labels auto-review build policies", () => {
-		expect(getCardCompletionPolicyBadgeLabel({ kind: "build", policy: "auto-commit" })).toBe("Auto-commit");
 		expect(getCardCompletionPolicyBadgeLabel({ kind: "build", policy: "auto-pr" })).toBe("Auto-PR");
 	});
 

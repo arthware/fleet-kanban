@@ -216,15 +216,18 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 
 	const now = Date.now();
 
+	const autoReviewMode = resolveTaskAutoReviewMode(
+		typeof card.autoReviewMode === "string" ? card.autoReviewMode : undefined,
+	);
+	const autoReviewEnabled = card.autoReviewEnabled === true && autoReviewMode === "pr";
+
 	return {
 		id: typeof card.id === "string" && card.id ? card.id : createShortTaskId(createBrowserUuid),
 		title,
 		prompt,
 		startInPlanMode: typeof card.startInPlanMode === "boolean" ? card.startInPlanMode : false,
-		autoReviewEnabled: typeof card.autoReviewEnabled === "boolean" ? card.autoReviewEnabled : false,
-		autoReviewMode: resolveTaskAutoReviewMode(
-			typeof card.autoReviewMode === "string" ? (card.autoReviewMode as TaskAutoReviewMode) : undefined,
-		),
+		autoReviewEnabled,
+		...(autoReviewEnabled ? { autoReviewMode } : {}),
 		images: normalizeTaskImages(card.images),
 		baseRef,
 		...(typeof card.agentId === "string" && card.agentId ? { agentId: card.agentId as RuntimeAgentId } : {}),
@@ -599,7 +602,9 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 				prompt,
 				startInPlanMode: Boolean(draft.startInPlanMode),
 				autoReviewEnabled: Boolean(draft.autoReviewEnabled),
-				autoReviewMode: resolveTaskAutoReviewMode(draft.autoReviewMode ?? DEFAULT_TASK_AUTO_REVIEW_MODE),
+				autoReviewMode: draft.autoReviewEnabled
+					? (resolveTaskAutoReviewMode(draft.autoReviewMode) ?? "pr")
+					: undefined,
 				images:
 					draft.images === undefined
 						? card.images

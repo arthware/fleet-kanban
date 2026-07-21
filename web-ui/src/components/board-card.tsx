@@ -478,7 +478,8 @@ export function BoardCard({
 					deletions: reviewWorkspaceSnapshot.deletions ?? 0,
 				}
 		: null;
-	const showReviewGitActions = columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0;
+	const showReviewGitActions =
+		columnId === "review" && (reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0 && Boolean(onCommit || onOpenPr);
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
 	// A plan card whose committed design doc exists can flip from plan → build in
 	// this same live session. Reuse the exact signal the Design badge shows: the

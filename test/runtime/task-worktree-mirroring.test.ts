@@ -122,7 +122,7 @@ describe("worktree skills directory placement", () => {
 			});
 
 			expect(result).toBe("linked");
-			for (const skillName of ["fleet-smoke", "fleet-plan"]) {
+			for (const skillName of ["fleet-smoke", "fleet-plan", "fleet-pr"]) {
 				const skill = matter(readFileSync(join(worktreePath, ".agents", "skills", skillName, "SKILL.md"), "utf8"));
 				expect(skill.data.name).toBe(skillName);
 				expect(typeof skill.data.description).toBe("string");

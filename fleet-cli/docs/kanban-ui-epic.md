@@ -246,7 +246,7 @@ candidate.
 - **Script Shortcuts** (settings) — one-click `npm run dev`; pair with `fleet`'s `port-for` so each
   worktree runs on its own port (kanban itself doesn't assign ports).
 - **Checkpointing** — diff since your last message; use during design iteration.
-- **Auto-commit / Auto-PR** — for the autonomous drilldown chains (combined with links).
+- **Auto-PR** — for the autonomous drilldown chains (combined with links).
 - **Git interface** (navbar branch) — browse/switch/fetch/PR without leaving the board.
 
 ---

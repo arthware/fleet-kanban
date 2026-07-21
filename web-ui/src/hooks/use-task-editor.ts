@@ -12,7 +12,7 @@ import type { RuntimeAgentId, RuntimeTaskClineSettings } from "@/runtime/types";
 import { addTaskToColumnWithResult, findCardSelection, updateTask, updateTaskTitle } from "@/state/board-state";
 import { toTelemetrySelectedAgentId, trackTaskCreated } from "@/telemetry/events";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
-import { resolveTaskAutoReviewMode } from "@/types";
+import { DEFAULT_TASK_AUTO_REVIEW_MODE, resolveTaskAutoReviewMode } from "@/types";
 import { useBooleanLocalStorageValue, useRawLocalStorageValue } from "@/utils/react-use";
 
 interface UseTaskEditorInput {
@@ -110,7 +110,7 @@ export function useTaskEditor({
 	);
 	const [newTaskAutoReviewMode, setNewTaskAutoReviewMode] = useRawLocalStorageValue<TaskAutoReviewMode>(
 		TASK_AUTO_REVIEW_MODE_STORAGE_KEY,
-		"commit",
+		DEFAULT_TASK_AUTO_REVIEW_MODE,
 		normalizeStoredTaskAutoReviewMode,
 	);
 	const isNewTaskStartInPlanModeDisabled = false;
@@ -121,7 +121,8 @@ export function useTaskEditor({
 	const [editTaskImages, setEditTaskImages] = useState<TaskImage[]>([]);
 	const [editTaskStartInPlanMode, setEditTaskStartInPlanMode] = useState(false);
 	const [editTaskAutoReviewEnabled, setEditTaskAutoReviewEnabled] = useState(false);
-	const [editTaskAutoReviewMode, setEditTaskAutoReviewMode] = useState<TaskAutoReviewMode>("commit");
+	const [editTaskAutoReviewMode, setEditTaskAutoReviewMode] =
+		useState<TaskAutoReviewMode>(DEFAULT_TASK_AUTO_REVIEW_MODE);
 	const isEditTaskStartInPlanModeDisabled = false;
 	const [editTaskBranchRef, setEditTaskBranchRef] = useState("");
 
@@ -202,7 +203,7 @@ export function useTaskEditor({
 			setEditTaskPrompt("");
 			setEditTaskStartInPlanMode(false);
 			setEditTaskAutoReviewEnabled(false);
-			setEditTaskAutoReviewMode("commit");
+			setEditTaskAutoReviewMode(DEFAULT_TASK_AUTO_REVIEW_MODE);
 			setEditTaskImages([]);
 			setEditTaskBranchRef("");
 		}
@@ -246,7 +247,7 @@ export function useTaskEditor({
 			setEditTaskImages(task.images ? task.images.map((image) => ({ ...image })) : []);
 			setEditTaskStartInPlanMode(task.startInPlanMode);
 			setEditTaskAutoReviewEnabled(task.autoReviewEnabled === true);
-			setEditTaskAutoReviewMode(resolveTaskAutoReviewMode(task.autoReviewMode));
+			setEditTaskAutoReviewMode(resolveTaskAutoReviewMode(task.autoReviewMode) ?? DEFAULT_TASK_AUTO_REVIEW_MODE);
 			const fallbackBranch = task.baseRef || resolvedDefaultTaskBranchRef;
 			setEditTaskBranchRef(fallbackBranch);
 			setEditTaskAgentId(task.agentId);
@@ -262,7 +263,7 @@ export function useTaskEditor({
 		setEditTaskPrompt("");
 		setEditTaskStartInPlanMode(false);
 		setEditTaskAutoReviewEnabled(false);
-		setEditTaskAutoReviewMode("commit");
+		setEditTaskAutoReviewMode(DEFAULT_TASK_AUTO_REVIEW_MODE);
 		setEditTaskImages([]);
 		setEditTaskBranchRef("");
 	}, []);
@@ -304,7 +305,7 @@ export function useTaskEditor({
 		setEditTaskPrompt("");
 		setEditTaskStartInPlanMode(false);
 		setEditTaskAutoReviewEnabled(false);
-		setEditTaskAutoReviewMode("commit");
+		setEditTaskAutoReviewMode(DEFAULT_TASK_AUTO_REVIEW_MODE);
 		setEditTaskImages([]);
 		setEditTaskBranchRef("");
 		setEditTaskAgentId(undefined);
@@ -496,7 +497,7 @@ export function useTaskEditor({
 		setEditTaskPrompt("");
 		setEditTaskStartInPlanMode(false);
 		setEditTaskAutoReviewEnabled(false);
-		setEditTaskAutoReviewMode("commit");
+		setEditTaskAutoReviewMode(DEFAULT_TASK_AUTO_REVIEW_MODE);
 		setEditTaskImages([]);
 		setEditTaskBranchRef("");
 		setEditTaskAgentId(undefined);

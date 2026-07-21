@@ -13,7 +13,6 @@ function createTask(taskId: string, prompt: string, createdAt: number, overrides
 		prompt,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		autoReviewMode: "commit",
 		baseRef: "main",
 		createdAt,
 		updatedAt: createdAt,
@@ -246,7 +245,7 @@ describe("useTaskEditor", () => {
 
 		await act(async () => {
 			latestSnapshot?.setEditTaskAutoReviewEnabled(true);
-			latestSnapshot?.setEditTaskAutoReviewMode("commit");
+			latestSnapshot?.setEditTaskAutoReviewMode("pr");
 		});
 
 		expect(requireSnapshot(latestSnapshot).isEditTaskStartInPlanModeDisabled).toBe(false);

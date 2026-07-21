@@ -51,6 +51,7 @@ function createCard(taskId: string) {
 		title: `Task ${taskId}`,
 		prompt: `Task ${taskId}`,
 		startInPlanMode: false,
+		autoReviewEnabled: false,
 		baseRef: "main",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),

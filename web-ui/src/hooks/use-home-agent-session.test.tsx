@@ -114,10 +114,6 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 			oauthAccountId: null,
 			oauthExpiresAt: null,
 		},
-		commitPromptTemplate: "commit",
-		openPrPromptTemplate: "pr",
-		commitPromptTemplateDefault: "commit",
-		openPrPromptTemplateDefault: "pr",
 		...overrides,
 	};
 }

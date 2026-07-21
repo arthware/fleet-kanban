@@ -2,10 +2,8 @@ import type { DropResult } from "@hello-pangea/dnd";
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { notifyError, showAppToast } from "@/components/app-toaster";
-import type { TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
 import { useLinkedBacklogTaskActions } from "@/hooks/use-linked-backlog-task-actions";
 import { useProgrammaticCardMoves } from "@/hooks/use-programmatic-card-moves";
-import { useReviewAutoActions } from "@/hooks/use-review-auto-actions";
 import type { UseTaskSessionsResult } from "@/hooks/use-task-sessions";
 import type { RuntimeTaskSessionSummary, RuntimeTaskWorkspaceInfoResponse } from "@/runtime/types";
 import {
@@ -21,18 +19,12 @@ import {
 import { clearTaskWorkspaceInfo, setTaskWorkspaceInfo } from "@/stores/workspace-metadata-store";
 import type { SendTerminalInputOptions } from "@/terminal/terminal-input";
 import type { BoardCard, BoardColumnId, BoardData } from "@/types";
-import { resolveTaskAutoReviewMode } from "@/types";
 import { getNextDetailTaskIdAfterTrashMove } from "@/utils/detail-view-task-order";
 import {
 	getBrowserNotificationPermission,
 	hasPromptedForBrowserNotificationPermission,
 	requestBrowserNotificationPermission,
 } from "@/utils/notification-permission";
-
-interface TaskGitActionLoadingStateLike {
-	commitSource: string | null;
-	prSource: string | null;
-}
 
 interface SelectedBoardCard {
 	card: BoardCard;
@@ -68,8 +60,6 @@ interface UseBoardInteractionsInput {
 		options?: SendTerminalInputOptions,
 	) => Promise<{ ok: boolean; message?: string }>;
 	readyForReviewNotificationsEnabled: boolean;
-	taskGitActionLoadingByTaskId: Record<string, TaskGitActionLoadingStateLike>;
-	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
 	runImplementHereAction: (taskId: string) => Promise<boolean>;
 }
 
@@ -115,8 +105,6 @@ export function useBoardInteractions({
 	fetchTaskWorkspaceInfo,
 	sendTaskSessionInput,
 	readyForReviewNotificationsEnabled,
-	taskGitActionLoadingByTaskId,
-	runAutoReviewGitAction,
 	runImplementHereAction,
 }: UseBoardInteractionsInput): UseBoardInteractionsResult {
 	const previousSessionsRef = useRef<Record<string, RuntimeTaskSessionSummary>>({});
@@ -548,32 +536,6 @@ export function useBoardInteractions({
 		],
 	);
 
-	const completeReviewTask = useCallback(
-		async (taskId: string): Promise<void> => {
-			const completed = completeTaskAndGetReadyLinkedTaskIds(board, taskId);
-			if (!completed.moved) {
-				return;
-			}
-			setBoard(completed.board);
-			const readyTasks = completed.readyTaskIds
-				.map((readyTaskId) => findCardSelection(completed.board, readyTaskId)?.card ?? null)
-				.filter((readyTask): readyTask is BoardCard => readyTask !== null);
-			await startReadyBacklogTasks(readyTasks);
-		},
-		[board, setBoard, startReadyBacklogTasks],
-	);
-
-	useReviewAutoActions({
-		board,
-		sessionsByTaskId: sessions,
-		taskGitActionLoadingByTaskId,
-		runAutoReviewGitAction,
-		requestMoveTaskToTrash: async (taskId) => {
-			await completeReviewTask(taskId);
-		},
-		resetKey: currentProjectId,
-	});
-
 	const resumeTaskFromTrash = useCallback(
 		async (task: BoardCard, taskId: string, options?: { optimisticMoveApplied?: boolean }): Promise<void> => {
 			const ensured = await ensureTaskWorkspace(task);
@@ -900,7 +862,7 @@ export function useBoardInteractions({
 					prompt: selection.card.prompt,
 					startInPlanMode: selection.card.startInPlanMode,
 					autoReviewEnabled: false,
-					autoReviewMode: resolveTaskAutoReviewMode(selection.card.autoReviewMode),
+					autoReviewMode: "pr",
 					images: selection.card.images,
 					agentId: selection.card.agentId,
 					clineSettings: selection.card.clineSettings,

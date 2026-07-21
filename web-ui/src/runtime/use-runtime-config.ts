@@ -21,8 +21,6 @@ export interface UseRuntimeConfigResult {
 		shortcuts?: RuntimeProjectShortcut[];
 		worktree?: RuntimeWorktreeConfig;
 		readyForReviewNotificationsEnabled?: boolean;
-		commitPromptTemplate?: string;
-		openPrPromptTemplate?: string;
 	}) => Promise<RuntimeConfigResponse | null>;
 }
 
@@ -89,8 +87,6 @@ export function useRuntimeConfig(
 			shortcuts?: RuntimeProjectShortcut[];
 			worktree?: RuntimeWorktreeConfig;
 			readyForReviewNotificationsEnabled?: boolean;
-			commitPromptTemplate?: string;
-			openPrPromptTemplate?: string;
 		}): Promise<RuntimeConfigResponse | null> => {
 			setIsSaving(true);
 			try {

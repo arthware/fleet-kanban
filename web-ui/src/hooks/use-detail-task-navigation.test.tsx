@@ -19,7 +19,6 @@ function createBoard(): BoardData {
 						prompt: "Task 1",
 						startInPlanMode: false,
 						autoReviewEnabled: false,
-						autoReviewMode: "commit",
 						baseRef: "main",
 						createdAt: 1,
 						updatedAt: 1,

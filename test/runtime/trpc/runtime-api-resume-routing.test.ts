@@ -89,10 +89,6 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		worktree: {},
-		commitPromptTemplate: "commit",
-		openPrPromptTemplate: "pr",
-		commitPromptTemplateDefault: "commit",
-		openPrPromptTemplateDefault: "pr",
 		globalConfigPath: "/tmp/global-config.json",
 		projectConfigPath: "/tmp/project-config.json",
 	};

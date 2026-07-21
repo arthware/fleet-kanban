@@ -25,10 +25,6 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		worktree: {},
-		commitPromptTemplate: "commit",
-		openPrPromptTemplate: "pr",
-		commitPromptTemplateDefault: "commit",
-		openPrPromptTemplateDefault: "pr",
 		...overrides,
 	};
 }

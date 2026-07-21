@@ -48,8 +48,6 @@ export async function saveRuntimeConfig(
 		shortcuts?: RuntimeProjectShortcut[];
 		worktree?: RuntimeWorktreeConfig;
 		readyForReviewNotificationsEnabled?: boolean;
-		commitPromptTemplate?: string;
-		openPrPromptTemplate?: string;
 	},
 ): Promise<RuntimeConfigResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);

@@ -56,10 +56,6 @@ function createRuntimeConfigResponse(
 			oauthAccountId: "acct_123",
 			oauthExpiresAt: 123,
 		},
-		commitPromptTemplate: "",
-		openPrPromptTemplate: "",
-		commitPromptTemplateDefault: "",
-		openPrPromptTemplateDefault: "",
 	};
 	return {
 		...nextConfig,

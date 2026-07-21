@@ -18,7 +18,7 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 				"model: claude-haiku-4-5",
 				"skill: fleet-smoke",
 				"base-ref: feature/x",
-				"auto-review: commit",
+				"auto-review: pr",
 				"plan: true",
 				"issue: ENG-123",
 				"---",
@@ -32,7 +32,7 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		expect(card.skill).toBe("fleet-smoke");
 		expect(card.baseRef).toBe("feature/x");
 		expect(card.autoReviewEnabled).toBe(true);
-		expect(card.autoReviewMode).toBe("commit");
+		expect(card.autoReviewMode).toBe("pr");
 		expect(card.startInPlanMode).toBe(true);
 		expect(card.externalIssueRef).toBe("ENG-123");
 		expect(card.prompt).toBe("Build the widget end to end.");
@@ -58,6 +58,12 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		const off = parseTaskCardDocument(["---", "auto-review: off", "---", "body"].join("\n"));
 		expect(off.autoReviewEnabled).toBe(false);
 		expect(off.autoReviewMode).toBeUndefined();
+	});
+
+	it("migrates legacy auto-review commit cards to off", () => {
+		const card = parseTaskCardDocument(["---", "auto-review: commit", "---", "body"].join("\n"));
+		expect(card.autoReviewEnabled).toBe(false);
+		expect(card.autoReviewMode).toBeUndefined();
 	});
 
 	it("maps agent: default to a null (cleared) override", () => {
@@ -147,7 +153,7 @@ describe("invalid frontmatter", () => {
 
 	it("rejects a bad auto-review value", () => {
 		expect(() => parseTaskCardDocument(["---", "auto-review: sometimes", "---", "body"].join("\n"))).toThrow(
-			/"auto-review" must be one of: pr, commit, off/,
+			/"auto-review" must be one of: pr, off/,
 		);
 	});
 

@@ -154,7 +154,7 @@ If the user asks you to write code, fix a bug, implement a feature, refactor, or
 - If the user asks to add tasks to kb, ask kb, kanban, or says add tasks without other context, they likely want to add tasks in Kanban. This includes phrases like "create tasks", "make 3 tasks", "add a task", "break down into tasks", "split into tasks", "decompose into tasks", and "turn into tasks".
 - Kanban also supports linking tasks. Linking is useful both for parallelization and for dependencies: when work is easy to decompose into multiple pieces that can be done in parallel, link multiple backlog tasks to the same dependency so they all become ready to start once that dependency finishes; when one piece of work depends on another, use links to represent that follow-on dependency. If both linked tasks are in backlog, Kanban preserves the order you pass to the command: \`--task-id\` waits on \`--linked-task-id\`, and on the board the arrow points into \`--linked-task-id\`. Once only one linked task remains in backlog, Kanban reorients the saved dependency so the backlog task is the waiting dependent task and the other task is the prerequisite. The board arrow points into the prerequisite task so the user can see what must finish first. A link requires at least one backlog task, and when the linked review task is moved to done, that backlog task becomes ready to start.
 - How linking works: when a task in the review column is moved to done, any linked backlog tasks automatically start. This is how you chain work so tasks kick off autonomously without manual intervention.
-- Tasks can also enable automatic review actions: auto-commit or auto-open-pr once completed, which then moves the task to done and kicks off any linked tasks. Combining auto-review with linking is how you can set up fully autonomous pipelines when the user wants it. For example, enabling auto-commit on each task in a chain: task A finishes, auto-commits and is moved to done, task B auto-starts from backlog, auto-commits and is moved to done, task C auto-starts, and so on.
+- Tasks can also enable automatic PR review. PR-mode cards receive the \`fleet-pr\` skill when their agent starts, so the agent commits as it works and opens one idempotent PR before leaving the card in Review. Linked backlog tasks still start only when a human moves the reviewed task to done.
 - If your current working directory is inside \`.cline/worktrees/\`, you are inside a Kanban task worktree. In that case, create or manage tasks against the main workspace path, not the task worktree path. Pass the main workspace with \`--project-path\`.
 - If a task command fails because the runtime is unavailable, tell the user to start Kanban in that workspace first with \`${kanbanCommand}\`, then retry the task command.
 
@@ -203,7 +203,7 @@ Parameters:
 Purpose: create a new task in \`backlog\`, with optional plan mode and auto-review behavior.
 
 Command:
-\`${kanbanCommand} task create [--title "<text>"] --prompt "<text>" [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr] [--external-issue <ref>]\`
+\`${kanbanCommand} task create [--title "<text>"] --prompt "<text>" [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode pr] [--external-issue <ref>]\`
 
 Parameters:
 - \`--title "<text>"\` optional task title. If omitted, Kanban derives one from the prompt.
@@ -211,8 +211,8 @@ Parameters:
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 - \`--base-ref <branch>\` optional base branch/worktree ref. Defaults to current branch, then default branch, then first known branch.
 - \`--start-in-plan-mode <true|false>\` optional. Default false. Set true only when explicitly requested.
-- \`--auto-review-enabled <true|false>\` optional. Default false. Enables automatic action once task reaches review.
-- \`--auto-review-mode commit|pr\` optional auto-review action. Default \`commit\`.
+- \`--auto-review-enabled <true|false>\` optional. Default false. Enables automatic PR guidance for the task agent.
+- \`--auto-review-mode pr\` optional auto-review action. The only active mode is PR; omit or disable auto-review for manual review.
 - \`--external-issue <ref>\` optional external issue correlation. Alias: \`--issue <ref>\`. Accepted forms: Linear \`ENG-123\` or full Linear URL; GitHub \`#123\`, \`123\`, \`owner/repo#123\`, or full GitHub issue URL. Bare Linear keys link only when \`KANBAN_LINEAR_WORKSPACE\` is set to the Linear workspace URL slug.
 
 ## task update
@@ -220,7 +220,7 @@ Parameters:
 Purpose: update an existing task, including prompt, base ref, plan mode, and auto-review behavior.
 
 Command:
-\`${kanbanCommand} task update --task-id <task_id> [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode commit|pr] [--external-issue <ref>|default]\`
+\`${kanbanCommand} task update --task-id <task_id> [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode pr] [--external-issue <ref>|default]\`
 
 Parameters:
 - \`--task-id <task_id>\` required task ID.
@@ -229,8 +229,8 @@ Parameters:
 - \`--prompt "<text>"\` optional replacement prompt text.
 - \`--base-ref <branch>\` optional replacement base ref.
 - \`--start-in-plan-mode <true|false>\` optional replacement of plan-mode behavior.
-- \`--auto-review-enabled <true|false>\` optional replacement of auto-review toggle. Set false to cancel pending automatic review actions.
-- \`--auto-review-mode commit|pr\` optional replacement auto-review action.
+- \`--auto-review-enabled <true|false>\` optional replacement of auto-review toggle. Set false to disable automatic PR guidance.
+- \`--auto-review-mode pr\` optional replacement auto-review action.
 - \`--external-issue <ref>\` optional external issue correlation. Alias: \`--issue <ref>\`. Use \`default\` to clear it. This is editable in any column. Accepted forms: Linear \`ENG-123\` or full Linear URL; GitHub \`#123\`, \`123\`, \`owner/repo#123\`, or full GitHub issue URL. Bare Linear keys link only when \`KANBAN_LINEAR_WORKSPACE\` is set to the Linear workspace URL slug.
 
 Notes:

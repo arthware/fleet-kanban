@@ -158,14 +158,10 @@ describe.sequential("runtime-config auto agent selection", () => {
 						selectedAgentId?: string;
 						agentAutonomousModeEnabled?: boolean;
 						readyForReviewNotificationsEnabled?: boolean;
-						commitPromptTemplate?: string;
-						openPrPromptTemplate?: string;
 					};
 					expect(persisted.selectedAgentId).toBe("cursor");
 					expect(persisted.agentAutonomousModeEnabled).toBeUndefined();
 					expect(persisted.readyForReviewNotificationsEnabled).toBeUndefined();
-					expect(persisted.commitPromptTemplate).toBeUndefined();
-					expect(persisted.openPrPromptTemplate).toBeUndefined();
 
 					const reloadedState = await loadRuntimeConfig(tempProject);
 					expect(reloadedState.selectedAgentId).toBe("cursor");
@@ -341,15 +337,12 @@ describe.sequential("runtime-config auto agent selection", () => {
 			writeFileSync(join(runtimeConfigDir, "config.json"), "{}", "utf8");
 
 			await withTemporaryEnv({ home: tempHome }, async () => {
-				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "cline",
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [],
-					commitPromptTemplate: current.commitPromptTemplateDefault,
-					openPrPromptTemplate: current.openPrPromptTemplateDefault,
 				});
 
 				const globalPayload = JSON.parse(
@@ -358,14 +351,10 @@ describe.sequential("runtime-config auto agent selection", () => {
 					selectedAgentId?: string;
 					agentAutonomousModeEnabled?: boolean;
 					readyForReviewNotificationsEnabled?: boolean;
-					commitPromptTemplate?: string;
-					openPrPromptTemplate?: string;
 				};
 				expect(globalPayload.selectedAgentId).toBeUndefined();
 				expect(globalPayload.agentAutonomousModeEnabled).toBeUndefined();
 				expect(globalPayload.readyForReviewNotificationsEnabled).toBeUndefined();
-				expect(globalPayload.commitPromptTemplate).toBeUndefined();
-				expect(globalPayload.openPrPromptTemplate).toBeUndefined();
 				expect(existsSync(join(tempProject, ".cline", "kanban", "config.json"))).toBe(false);
 			});
 		} finally {
@@ -386,15 +375,12 @@ describe.sequential("runtime-config auto agent selection", () => {
 			writeFileSync(join(runtimeProjectConfigDir, "config.json"), "{}", "utf8");
 
 			await withTemporaryEnv({ home: tempHome }, async () => {
-				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "cline",
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [],
-					commitPromptTemplate: current.commitPromptTemplateDefault,
-					openPrPromptTemplate: current.openPrPromptTemplateDefault,
 				});
 
 				expect(existsSync(join(tempProject, ".cline", "kanban", "config.json"))).toBe(false);
@@ -413,15 +399,12 @@ describe.sequential("runtime-config auto agent selection", () => {
 
 		try {
 			await withTemporaryEnv({ home: tempHome }, async () => {
-				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "cline",
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [{ label: "Ship", command: "npm run ship", icon: "rocket" }],
-					commitPromptTemplate: current.commitPromptTemplateDefault,
-					openPrPromptTemplate: current.openPrPromptTemplateDefault,
 				});
 				expect(existsSync(join(tempProject, ".cline", "kanban", "config.json"))).toBe(true);
 

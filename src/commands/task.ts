@@ -83,14 +83,21 @@ function parseListColumn(value: string | undefined): ListTaskColumn | undefined 
 	throw new Error(`Invalid column "${value}". Expected one of: ${LIST_TASK_COLUMNS.join(", ")}.`);
 }
 
-function parseAutoReviewMode(value: string | undefined): "commit" | "pr" | undefined {
+function parseAutoReviewMode(value: string | undefined): "pr" | undefined {
 	if (value === undefined) {
 		return undefined;
 	}
-	if (value === "commit" || value === "pr") {
+	if (value === "pr") {
 		return value;
 	}
-	throw new Error(`Invalid auto review mode "${value}". Expected: commit, pr.`);
+	throw new Error(`Invalid auto review mode "${value}". Expected: pr.`);
+}
+
+function resolveAutoReviewModeForEnabled(enabled: boolean | undefined, mode: "pr" | undefined): "pr" | undefined {
+	if (enabled === true) {
+		return mode ?? "pr";
+	}
+	return mode;
 }
 
 const VALID_AGENT_IDS = runtimeAgentIdSchema.options;
@@ -429,7 +436,7 @@ export function formatTaskRecord(
 		baseRef: task.baseRef,
 		startInPlanMode: task.startInPlanMode,
 		autoReviewEnabled: task.autoReviewEnabled === true,
-		autoReviewMode: task.autoReviewMode ?? "commit",
+		...(task.autoReviewMode ? { autoReviewMode: task.autoReviewMode } : {}),
 		...(task.agentId ? { agentId: task.agentId } : {}),
 		...(task.agentModel ? { agentModel: task.agentModel } : {}),
 		...(task.skill ? { skill: task.skill } : {}),
@@ -462,7 +469,7 @@ export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepo
 		baseRef: created.baseRef,
 		startInPlanMode: created.startInPlanMode,
 		autoReviewEnabled: created.autoReviewEnabled === true,
-		autoReviewMode: created.autoReviewMode ?? "commit",
+		...(created.autoReviewMode ? { autoReviewMode: created.autoReviewMode } : {}),
 		...(created.agentId ? { agentId: created.agentId } : {}),
 		...(created.agentModel ? { agentModel: created.agentModel } : {}),
 		...(created.skill ? { skill: created.skill } : {}),
@@ -641,7 +648,7 @@ async function createTask(input: {
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
-	autoReviewMode?: "commit" | "pr";
+	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
@@ -672,7 +679,7 @@ async function createTask(input: {
 				prompt: input.prompt,
 				startInPlanMode: input.startInPlanMode,
 				autoReviewEnabled: input.autoReviewEnabled,
-				autoReviewMode: input.autoReviewMode,
+				autoReviewMode: resolveAutoReviewModeForEnabled(input.autoReviewEnabled, input.autoReviewMode),
 				agentId: input.agentId,
 				agentModel: input.agentModel,
 				skill: input.skill,
@@ -703,7 +710,7 @@ async function updateTaskCommand(input: {
 	baseRef?: string;
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
-	autoReviewMode?: "commit" | "pr";
+	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
 	skill?: string | null;
@@ -773,7 +780,10 @@ async function updateTaskCommand(input: {
 			baseRef: input.baseRef ?? taskRecord.task.baseRef,
 			startInPlanMode: input.startInPlanMode ?? taskRecord.task.startInPlanMode,
 			autoReviewEnabled: input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
-			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
+			autoReviewMode: resolveAutoReviewModeForEnabled(
+				input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
+				input.autoReviewMode ?? taskRecord.task.autoReviewMode,
+			),
 			agentId: input.agentId,
 			agentModel: input.agentModel,
 			skill: input.skill,
@@ -1619,7 +1629,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--base-ref <branch>", "Task base branch/ref.")
 		.option("--start-in-plan-mode [value]", "Set plan mode (true|false). Flag-only implies true.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
-		.option("--auto-review-mode <mode>", "Auto-review mode: commit | pr.", parseAutoReviewMode)
+		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
 		.option("--agent-id <id>", "Agent override: cline | claude | codex | droid | gemini | opencode | default.")
 		.option(
 			"--agent-model <id>",
@@ -1655,7 +1665,7 @@ export function registerTaskCommand(program: Command): void {
 				baseRef?: string;
 				startInPlanMode?: unknown;
 				autoReviewEnabled?: unknown;
-				autoReviewMode?: "commit" | "pr";
+				autoReviewMode?: "pr";
 				agentId?: string;
 				agentModel?: string;
 				skill?: string;
@@ -1722,7 +1732,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--base-ref <branch>", "Replacement base branch/ref.")
 		.option("--start-in-plan-mode [value]", "Set plan mode (true|false). Flag-only implies true.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
-		.option("--auto-review-mode <mode>", "Auto-review mode: commit | pr.", parseAutoReviewMode)
+		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
 		.option(
 			"--agent-id <id>",
 			'Agent override: cline | claude | codex | droid | gemini | opencode. Use "default" to clear.',
@@ -1755,7 +1765,7 @@ export function registerTaskCommand(program: Command): void {
 				baseRef?: string;
 				startInPlanMode?: unknown;
 				autoReviewEnabled?: unknown;
-				autoReviewMode?: "commit" | "pr";
+				autoReviewMode?: "pr";
 				agentId?: string;
 				agentModel?: string;
 				skill?: string;

@@ -97,7 +97,6 @@ function createCard(overrides?: Partial<Parameters<typeof BoardCard>[0]["card"]>
 		prompt: "Review API changes",
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		autoReviewMode: "commit" as const,
 		baseRef: "main",
 		createdAt: 1,
 		updatedAt: 1,
@@ -592,20 +591,6 @@ describe("BoardCard", () => {
 		});
 
 		expect(findSpanByExactText(container, "Auto-PR")).toBeDefined();
-	});
-
-	it("shows an Auto-commit completion-policy badge for build cards configured to self-commit", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({ autoReviewEnabled: true, autoReviewMode: "commit" })}
-					index={0}
-					columnId="backlog"
-				/>,
-			);
-		});
-
-		expect(findSpanByExactText(container, "Auto-commit")).toBeDefined();
 	});
 
 	it("does not show a completion-policy badge for manual build cards", async () => {

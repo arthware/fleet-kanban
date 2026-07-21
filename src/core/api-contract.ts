@@ -117,11 +117,14 @@ const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "do
 export const runtimeBoardColumnIdSchema = runtimeBoardColumnIdEnum;
 export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdEnum>;
 
-const runtimeTaskAutoReviewModeEnum = z.enum(["commit", "pr"]);
-export const runtimeTaskAutoReviewModeSchema = z.preprocess(
-	(val) => (val === "move_to_trash" || val === "move_to_done" ? "commit" : val),
+const runtimeTaskAutoReviewModeEnum = z.enum(["pr"]);
+const runtimeLegacyTaskAutoReviewModeSchema = z
+	.enum(["commit", "move_to_trash", "move_to_done"])
+	.transform(() => undefined);
+export const runtimeTaskAutoReviewModeSchema = z.union([
 	runtimeTaskAutoReviewModeEnum,
-);
+	runtimeLegacyTaskAutoReviewModeSchema,
+]);
 export type RuntimeTaskAutoReviewMode = z.infer<typeof runtimeTaskAutoReviewModeEnum>;
 
 export const runtimeClineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
@@ -231,6 +234,7 @@ export const runtimeBoardCardSchema = z
 			clineProviderId: _legacyProviderId,
 			clineModelId: _legacyModelId,
 			clineReasoningEffort: _legacyReasoningEffort,
+			autoReviewMode: rawAutoReviewMode,
 			...card
 		}) => {
 			const clineSettings = normalizeRuntimeTaskClineSettings({
@@ -239,8 +243,11 @@ export const runtimeBoardCardSchema = z
 				clineModelId: _legacyModelId,
 				clineReasoningEffort: _legacyReasoningEffort,
 			});
+			const autoReviewEnabled = card.autoReviewEnabled === true && rawAutoReviewMode === "pr";
 			return {
 				...card,
+				autoReviewEnabled,
+				...(autoReviewEnabled ? { autoReviewMode: rawAutoReviewMode } : {}),
 				...(clineSettings !== undefined ? { clineSettings } : {}),
 				title: resolveTaskTitle(card.title, card.prompt),
 			};
@@ -1115,10 +1122,6 @@ export const runtimeConfigResponseSchema = z.object({
 	shortcuts: z.array(runtimeProjectShortcutSchema),
 	worktree: runtimeWorktreeConfigSchema,
 	clineProviderSettings: runtimeClineProviderSettingsSchema,
-	commitPromptTemplate: z.string(),
-	openPrPromptTemplate: z.string(),
-	commitPromptTemplateDefault: z.string(),
-	openPrPromptTemplateDefault: z.string(),
 });
 export type RuntimeConfigResponse = z.infer<typeof runtimeConfigResponseSchema>;
 
@@ -1129,8 +1132,6 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
 	worktree: runtimeWorktreeConfigSchema.optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
-	commitPromptTemplate: z.string().optional(),
-	openPrPromptTemplate: z.string().optional(),
 });
 export type RuntimeConfigSaveRequest = z.infer<typeof runtimeConfigSaveRequestSchema>;
 
@@ -1141,6 +1142,8 @@ export const runtimeTaskSessionStartRequestSchema = z.object({
 	taskTitle: z.string().optional(),
 	images: z.array(runtimeTaskImageSchema).optional(),
 	startInPlanMode: z.boolean().optional(),
+	autoReviewEnabled: z.boolean().optional(),
+	autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
 	mode: runtimeTaskSessionModeSchema.optional(),
 	resumeFromTrash: z.boolean().optional(),
 	resumeMode: z.enum(["resume", "fresh"]).optional(),
