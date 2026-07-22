@@ -96,6 +96,7 @@ export interface ClineTaskSessionService {
 	clearTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	rebindPersistedTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null;
+	hasActiveTaskSession(taskId: string): boolean;
 	listSummaries(): RuntimeTaskSessionSummary[];
 	listMessages(taskId: string): ClineTaskMessage[];
 	listSlashCommands(workspacePath: string): Promise<ClineSdkSlashCommand[]>;
@@ -757,6 +758,10 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null {
 		return this.messageRepository.getSummary(taskId);
+	}
+
+	hasActiveTaskSession(taskId: string): boolean {
+		return this.sessionRuntime.getTaskSessionId(taskId) !== null;
 	}
 
 	listSummaries(): RuntimeTaskSessionSummary[] {

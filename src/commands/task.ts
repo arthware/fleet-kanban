@@ -1007,6 +1007,25 @@ async function sendTaskInput(input: {
 	};
 }
 
+export async function reviewTask(input: { cwd: string; taskId: string; projectPath?: string }): Promise<JsonRecord> {
+	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd, {
+		autoCreateIfMissing: false,
+	});
+	const runtimeClient = createRuntimeTrpcClient(workspace.workspaceId);
+	const result = await runtimeClient.runtime.notifyTaskReadyForReview.mutate({
+		taskId: input.taskId,
+	});
+
+	if (!result.ok) {
+		throw new Error(result.error ?? `Task "${input.taskId}" could not be notified for review.`);
+	}
+
+	return {
+		...result,
+		workspacePath: workspace.repoPath,
+	};
+}
+
 async function tailTask(input: {
 	cwd: string;
 	taskId: string;
@@ -1947,6 +1966,22 @@ export function registerTaskCommand(program: Command): void {
 						text: options.text,
 						projectPath: options.projectPath,
 						submit: options.submit !== false,
+					}),
+			);
+		});
+
+	task
+		.command("review")
+		.description("Notify the workspace home-agent that a task is ready for review.")
+		.argument("<id>", "Task ID.")
+		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
+		.action(async (id: string, options: { projectPath?: string }) => {
+			await runTaskCommand(
+				async () =>
+					await reviewTask({
+						cwd: process.cwd(),
+						taskId: id,
+						projectPath: options.projectPath,
 					}),
 			);
 		});

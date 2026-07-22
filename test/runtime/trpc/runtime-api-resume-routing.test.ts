@@ -106,6 +106,7 @@ function createClineTaskSessionServiceMock() {
 		reloadTaskSession: vi.fn(async () => null),
 		rebindPersistedTaskSession: vi.fn(async () => null),
 		getSummary: vi.fn(() => null),
+		hasActiveTaskSession: vi.fn(() => false),
 		listSummaries: vi.fn(() => []),
 		listMessages: vi.fn(() => []),
 		loadTaskSessionMessages: vi.fn(async () => []),
