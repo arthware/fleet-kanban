@@ -1,4 +1,10 @@
 **Architecture docs — read before grepping:**
+- `docs/architecture/constitution.md` — the **non-negotiable core** (the law). Reuse-before-rebuild,
+  root-cause-not-duct-tape, module-tests, verification-before-completion. This file holds the working
+  knowledge; the constitution holds the principles — defer to it, don't restate it here.
+- `docs/architecture/concepts/` — the **concept map**: core domain concepts, each with its one
+  canonical home. Consult it before introducing anything (Constitution Article 1) so you extend what
+  exists instead of re-inventing a near-duplicate.
 - `docs/architecture/component-overview.md` — *which file to edit* for a given task (component map +
   "to change X, edit Y" index + gotchas). Start here instead of searching the whole tree.
 - `docs/architecture.md` — the *conceptual* map (mental model, ownership, design rules, main flows).
