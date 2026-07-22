@@ -14,7 +14,7 @@ const GIT_TOKEN_FILES = ["HEAD", "index", "logs/HEAD", "ORIG_HEAD"] as const;
  * `gitdir: <path>`, pointing at `…/.git/worktrees/<name>` — where that worktree's own
  * HEAD/index/logs live. Returns `null` when there is no resolvable git dir.
  */
-async function resolveGitDir(worktreePath: string): Promise<string | null> {
+export async function resolveGitDir(worktreePath: string): Promise<string | null> {
 	const dotGit = join(worktreePath, ".git");
 	let info: Awaited<ReturnType<typeof stat>>;
 	try {
