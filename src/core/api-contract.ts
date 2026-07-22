@@ -291,6 +291,20 @@ export const runtimeBoardDataSchema = z
 	});
 export type RuntimeBoardData = z.infer<typeof runtimeBoardDataSchema>;
 
+export const runtimeArchivedCardsResponseSchema = z.object({
+	board: z.object({
+		columns: z.array(runtimeBoardColumnSchema),
+		dependencies: z.array(runtimeBoardDependencySchema).default([]),
+	}),
+});
+export type RuntimeArchivedCardsResponse = z.infer<typeof runtimeArchivedCardsResponseSchema>;
+
+export const runtimeArchivedTaskRestoreRequestSchema = z.object({
+	taskId: z.string(),
+	targetColumnId: runtimeBoardColumnIdSchema.default("review"),
+});
+export type RuntimeArchivedTaskRestoreRequest = z.infer<typeof runtimeArchivedTaskRestoreRequestSchema>;
+
 export const runtimeGitRepositoryInfoSchema = z.object({
 	currentBranch: z.string().nullable(),
 	defaultBranch: z.string().nullable(),

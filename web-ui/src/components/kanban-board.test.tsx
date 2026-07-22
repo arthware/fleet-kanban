@@ -343,4 +343,71 @@ describe("KanbanBoard", () => {
 
 		expect(onClearTrash).toHaveBeenCalledTimes(1);
 	});
+
+	it("loads archived cards on demand and renders archivedData when opened", async () => {
+		const onLoadArchivedCards = vi.fn();
+		const board: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "done", title: "Done", cards: [] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		};
+		const archivedData: BoardData = {
+			columns: [
+				{ id: "backlog", title: "Backlog", cards: [] },
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "done", title: "Done", cards: [] },
+				{
+					id: "trash",
+					title: "Archived",
+					cards: [
+						{
+							id: "archived-task-1",
+							title: "Archived task 1",
+							prompt: "Archived task 1",
+							startInPlanMode: false,
+							autoReviewEnabled: false,
+							baseRef: "main",
+							createdAt: 1,
+							updatedAt: 1,
+						},
+					],
+				},
+			],
+			dependencies: [],
+		};
+
+		await act(async () => {
+			root.render(
+				<KanbanBoard
+					data={board}
+					archivedData={archivedData}
+					taskSessions={{}}
+					onCardSelect={() => {}}
+					onCreateTask={() => {}}
+					onLoadArchivedCards={onLoadArchivedCards}
+					dependencies={[]}
+					onDragEnd={() => {}}
+				/>,
+			);
+		});
+
+		const toggle = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent === "Archived (0)",
+		);
+		expect(toggle).toBeDefined();
+		expect(container.querySelector('[data-task-id="archived-task-1"]')).toBeNull();
+
+		await act(async () => {
+			toggle?.click();
+		});
+
+		expect(onLoadArchivedCards).toHaveBeenCalledTimes(1);
+		expect(container.querySelector('[data-task-id="archived-task-1"]')).not.toBeNull();
+	});
 });
