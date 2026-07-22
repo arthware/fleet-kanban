@@ -25,6 +25,7 @@ const KANBAN_MANAGED_EXCLUDE_BLOCK_END = "# kanban-managed-symlinked-ignored-pat
 const KANBAN_TRASHED_TASK_PATCHES_DIR_NAME = "trashed-task-patches";
 const KANBAN_TASK_WORKTREE_SETUP_LOCKFILE_NAME = "kanban-task-worktree-setup.lock";
 const TASK_PATCH_FILE_SUFFIX = ".patch";
+const WORKTREE_SKILLS_RELATIVE_PATH = ".agents/skills";
 const LOGGER = createKanbanClineLogger({ component: "worktree-post-create" });
 
 const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
@@ -124,7 +125,7 @@ export async function ensureWorktreeSkillsDirectory(options: {
 	fs?: WorktreeSkillsFs;
 }): Promise<WorktreeSkillsPlacementStatus> {
 	const fs = options.fs ?? DEFAULT_WORKTREE_SKILLS_FS;
-	const targetPath = join(options.worktreePath, ".agents", "skills");
+	const targetPath = join(options.worktreePath, WORKTREE_SKILLS_RELATIVE_PATH);
 	if (await lstatExists(targetPath, fs)) {
 		return "existing";
 	}
@@ -451,8 +452,9 @@ async function syncIgnoredPathsIntoWorktree(repoPath: string, worktreePath: stri
 	);
 	const turbopackNodeModulesSkipPaths = new Set(await listTurbopackNodeModulesSymlinkSkipPaths(repoPath));
 	const mirroredIgnoredPaths = ignoredPaths.filter((relativePath) => !turbopackNodeModulesSkipPaths.has(relativePath));
+	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, WORKTREE_SKILLS_RELATIVE_PATH]);
 
-	await syncManagedIgnoredPathExcludes(repoPath, mirroredIgnoredPaths);
+	await syncManagedIgnoredPathExcludes(repoPath, managedExcludePaths);
 	for (const relativePath of mirroredIgnoredPaths) {
 		if (shouldSkipSymlink(relativePath)) {
 			continue;
