@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFile, realpath, rm } from "node:fs/promises";
+import { readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { clineHomeDir } from "../config/cline-home";
@@ -62,10 +62,18 @@ interface WorkspaceStateMeta {
 	updatedAt: number;
 }
 
+interface WorkspaceBoardCacheEntry {
+	board: RuntimeBoardData;
+	fileToken: string | null;
+}
+
 const workspaceStateMetaSchema = z.object({
 	revision: z.number().int().nonnegative(),
 	updatedAt: z.number(),
 });
+
+const workspaceBoardCacheByPath = new Map<string, WorkspaceBoardCacheEntry>();
+let workspaceBoardParseCountForTests = 0;
 
 const workspaceIndexEntrySchema = z.object({
 	workspaceId: z.string().min(1, "Workspace ID cannot be empty."),
@@ -242,6 +250,18 @@ async function readJsonFile(path: string): Promise<unknown | null> {
 	}
 }
 
+async function getFileToken(path: string): Promise<string | null> {
+	try {
+		const stats = await stat(path, { bigint: true });
+		return `${stats.mtimeNs.toString()}:${stats.size.toString()}`;
+	} catch (error) {
+		if (isNodeErrorWithCode(error, "ENOENT")) {
+			return null;
+		}
+		throw error;
+	}
+}
+
 function formatSchemaIssuePath(pathSegments: PropertyKey[]): string {
 	if (pathSegments.length === 0) {
 		return "root";
@@ -302,13 +322,55 @@ function parseWorkspaceStateSavePayload(payload: RuntimeWorkspaceStateSaveReques
 async function readWorkspaceBoard(workspaceId: string): Promise<RuntimeBoardData> {
 	const boardPath = getWorkspaceBoardPath(workspaceId);
 	const rawBoard = await readJsonFile(boardPath);
+	workspaceBoardParseCountForTests += 1;
 	return updateTaskDependencies(
 		parsePersistedStateFile(boardPath, BOARD_FILENAME, rawBoard, runtimeBoardDataSchema, createEmptyBoard()),
 	);
 }
 
+export function getWorkspaceBoardParseCountForTests(): number {
+	return workspaceBoardParseCountForTests;
+}
+
+export function resetWorkspaceBoardCacheForTests(): void {
+	workspaceBoardCacheByPath.clear();
+	workspaceBoardParseCountForTests = 0;
+}
+
+async function loadWorkspaceBoardCache(workspaceId: string): Promise<WorkspaceBoardCacheEntry> {
+	const boardPath = getWorkspaceBoardPath(workspaceId);
+	const fileToken = await getFileToken(boardPath);
+	const cached = workspaceBoardCacheByPath.get(boardPath);
+	if (cached && cached.fileToken === fileToken) {
+		return cached;
+	}
+	const board = await readWorkspaceBoard(workspaceId);
+	const nextFileToken = await getFileToken(boardPath);
+	const entry: WorkspaceBoardCacheEntry = {
+		board,
+		fileToken: nextFileToken,
+	};
+	workspaceBoardCacheByPath.set(boardPath, entry);
+	return entry;
+}
+
+async function getCachedWorkspaceBoard(workspaceId: string): Promise<RuntimeBoardData> {
+	return (await loadWorkspaceBoardCache(workspaceId)).board;
+}
+
+async function writeWorkspaceBoardAndUpdateCache(workspaceId: string, board: RuntimeBoardData): Promise<void> {
+	const boardPath = getWorkspaceBoardPath(workspaceId);
+	await lockedFileSystem.writeJsonFileAtomic(boardPath, board, {
+		lock: null,
+	});
+	workspaceBoardCacheByPath.set(boardPath, {
+		board,
+		fileToken: await getFileToken(boardPath),
+	});
+}
+
 export async function loadWorkspaceBoardById(workspaceId: string): Promise<RuntimeBoardData> {
-	return await readWorkspaceBoard(workspaceId);
+	return await getCachedWorkspaceBoard(workspaceId);
 }
 
 function createEmptyArchivedBoard(): RuntimeBoardData {
@@ -452,13 +514,11 @@ async function migrateWorkspaceTrashToArchiveLocked(
 	workspaceId: string,
 	options: { reconcileArchiveDuplicates?: boolean } = {},
 ): Promise<RuntimeBoardData> {
-	const board = await readWorkspaceBoard(workspaceId);
+	const board = await getCachedWorkspaceBoard(workspaceId);
 	const migration = await archiveTrashCardsAndTrimBoard(workspaceId, board);
 	const migratedBoard = migration.board;
 	if (migration.archived) {
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(workspaceId), migratedBoard, {
-			lock: null,
-		});
+		await writeWorkspaceBoardAndUpdateCache(workspaceId, migratedBoard);
 	}
 	if (options.reconcileArchiveDuplicates) {
 		return await reconcileArchivedCardsAlreadyOnBoard(workspaceId, migratedBoard);
@@ -874,9 +934,7 @@ export async function saveWorkspaceState(
 			updatedAt: Date.now(),
 		};
 
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), archivedBoard.board, {
-			lock: null,
-		});
+		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, archivedBoard.board);
 		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(context.workspaceId), sessions, {
 			lock: null,
 		});
@@ -907,7 +965,7 @@ export async function mutateWorkspaceState<T>(
 ): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
 	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
-		const currentBoard = await readWorkspaceBoard(context.workspaceId);
+		const currentBoard = await getCachedWorkspaceBoard(context.workspaceId);
 		const currentSessions = await readWorkspaceSessions(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
 		const currentState = toWorkspaceStateResponse(context, currentBoard, currentSessions, currentMeta.revision);
@@ -930,9 +988,7 @@ export async function mutateWorkspaceState<T>(
 			updatedAt: Date.now(),
 		};
 
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), nextBoard, {
-			lock: null,
-		});
+		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, nextBoard);
 		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(context.workspaceId), nextSessions, {
 			lock: null,
 		});
@@ -1008,10 +1064,8 @@ export async function restoreArchivedWorkspaceTask(
 			updatedAt: now,
 		};
 
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceBoardPath(context.workspaceId), nextBoard, {
-			lock: null,
-		});
-		const verifiedBoard = await readWorkspaceBoard(context.workspaceId);
+		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, nextBoard);
+		const verifiedBoard = await getCachedWorkspaceBoard(context.workspaceId);
 		if (!getColumnCards(verifiedBoard, targetColumnId).some((card) => card.id === normalizedTaskId)) {
 			throw new Error(`Board write did not restore task "${normalizedTaskId}".`);
 		}

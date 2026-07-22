@@ -8,11 +8,13 @@ import { createGitProcessEnv } from "../../../src/core/git-process-env";
 import { moveTaskToColumn } from "../../../src/core/task-board-mutations";
 import {
 	getWorkspaceArchivedCardsPath,
+	getWorkspaceBoardParseCountForTests,
 	loadWorkspaceArchivedBoardById,
 	loadWorkspaceContext,
 	loadWorkspaceState,
 	migrateWorkspaceTrashToArchive,
 	mutateWorkspaceState,
+	resetWorkspaceBoardCacheForTests,
 	restoreArchivedWorkspaceTask,
 	saveWorkspaceState,
 } from "../../../src/state/workspace-state";
@@ -76,6 +78,7 @@ async function writeArchiveJson(workspaceId: string, board: RuntimeBoardData): P
 }
 
 beforeEach(async () => {
+	resetWorkspaceBoardCacheForTests();
 	previousClineHome = process.env.CLINE_HOME;
 	tempRoot = await mkdtemp(join(tmpdir(), "kanban-workspace-state-"));
 	process.env.CLINE_HOME = join(tempRoot, "home");
@@ -89,12 +92,92 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+	resetWorkspaceBoardCacheForTests();
 	if (previousClineHome === undefined) {
 		delete process.env.CLINE_HOME;
 	} else {
 		process.env.CLINE_HOME = previousClineHome;
 	}
 	await rm(tempRoot, { recursive: true, force: true });
+});
+
+describe.sequential("workspace board cache", () => {
+	it("does not parse board.json for every in-runtime mutation", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		await writeBoardJson(context.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
+		resetWorkspaceBoardCacheForTests();
+
+		for (let index = 0; index < 5; index += 1) {
+			await mutateWorkspaceState(repoPath, (state) => ({
+				board: {
+					...state.board,
+					columns: state.board.columns.map((column) =>
+						column.id === "backlog"
+							? {
+									...column,
+									cards: column.cards.map((card) =>
+										card.id === "task-1" ? { ...card, title: `Renamed ${index}` } : card,
+									),
+								}
+							: column,
+					),
+				},
+				value: null,
+			}));
+		}
+
+		expect(getWorkspaceBoardParseCountForTests()).toBe(1);
+	});
+
+	it("serves repeated workspace snapshots from memory", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		await writeBoardJson(context.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
+		resetWorkspaceBoardCacheForTests();
+
+		await expect(loadWorkspaceState(repoPath)).resolves.toMatchObject({
+			board: expect.objectContaining({ columns: expect.any(Array) }),
+		});
+		await loadWorkspaceState(repoPath);
+		await loadWorkspaceState(repoPath);
+
+		expect(getWorkspaceBoardParseCountForTests()).toBe(1);
+	});
+
+	it("reloads once after an external board write and preserves it during the next mutation", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		await writeBoardJson(context.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
+		await loadWorkspaceState(repoPath);
+		expect(getWorkspaceBoardParseCountForTests()).toBe(1);
+
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({ backlog: [createCard("task-1"), createCard("cli-task")] }),
+		);
+
+		const mutation = await mutateWorkspaceState(repoPath, (state) => ({
+			board: {
+				...state.board,
+				columns: state.board.columns.map((column) =>
+					column.id === "backlog"
+						? {
+								...column,
+								cards: [...column.cards, createCard("runtime-task")],
+							}
+						: column,
+				),
+			},
+			value: null,
+		}));
+		const backlogIds = mutation.state.board.columns
+			.find((column) => column.id === "backlog")
+			?.cards.map((card) => card.id);
+
+		expect(getWorkspaceBoardParseCountForTests()).toBe(2);
+		expect(backlogIds).toEqual(["task-1", "cli-task", "runtime-task"]);
+
+		await loadWorkspaceState(repoPath);
+		expect(getWorkspaceBoardParseCountForTests()).toBe(2);
+	});
 });
 
 describe.sequential("workspace trash archive", () => {
