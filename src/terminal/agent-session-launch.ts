@@ -16,8 +16,8 @@ export interface ResolveLaunchSessionIdInput {
 	readonly agentId: RuntimeAgentId;
 	/** The session id already persisted for this task, if any. */
 	readonly storedSessionId: string | null;
-	/** Whether lifecycle routing says to resume the stored id or start clean. */
-	readonly resumeMode: "resume" | "fresh";
+	/** Whether this launch can resume, start for the first time, or has nothing to attach to. */
+	readonly resumeMode: "resume" | "fresh" | "unavailable";
 	/** Mints a fresh session id for agents that accept one at spawn time. */
 	readonly mintSessionId: () => string;
 }
@@ -36,6 +36,9 @@ export function resolveLaunchSessionId(input: ResolveLaunchSessionIdInput): Laun
 	const stored = input.storedSessionId?.trim() || null;
 	if (stored && input.resumeMode === "resume") {
 		return { agentSessionId: stored, resumeSession: true };
+	}
+	if (input.resumeMode === "unavailable") {
+		return { agentSessionId: stored, resumeSession: false };
 	}
 	if (input.agentId === "claude") {
 		return { agentSessionId: input.mintSessionId(), resumeSession: false };

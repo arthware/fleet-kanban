@@ -1060,7 +1060,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		);
 	});
 
-	it("passes fresh intent when a stored terminal session is gone", async () => {
+	it("does not synthesize fresh intent when a stored terminal session is gone", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
 			agentId: "claude",
@@ -1114,7 +1114,7 @@ describe("createRuntimeApi startTaskSession", () => {
 			expect.objectContaining({
 				taskId: "task-1",
 				resumeFromTrash: true,
-				resumeMode: "fresh",
+				resumeMode: undefined,
 			}),
 		);
 	});
