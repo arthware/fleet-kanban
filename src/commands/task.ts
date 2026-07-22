@@ -364,7 +364,6 @@ export async function notifyRuntimeWorkspaceStateUpdated(
 	} catch (error) {
 		const message = toErrorMessage(error);
 		warn(`Kanban board realtime update failed: ${message}`);
-		throw error;
 	}
 }
 

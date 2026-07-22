@@ -210,7 +210,7 @@ describe("resolveCardIdFromRefOrIssue", () => {
 });
 
 describe("notifyRuntimeWorkspaceStateUpdated", () => {
-	it("surfaces and logs a failed runtime notify instead of swallowing it", async () => {
+	it("logs a failed runtime notify without making committed task mutations fail", async () => {
 		const warn = vi.fn();
 		const runtimeClient = {
 			workspace: {
@@ -222,7 +222,22 @@ describe("notifyRuntimeWorkspaceStateUpdated", () => {
 			},
 		} as unknown as Parameters<typeof notifyRuntimeWorkspaceStateUpdated>[0];
 
-		await expect(notifyRuntimeWorkspaceStateUpdated(runtimeClient, { warn })).rejects.toThrow("notify failed");
+		await expect(notifyRuntimeWorkspaceStateUpdated(runtimeClient, { warn })).resolves.toBeUndefined();
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("notify failed"));
+	});
+
+	it("still sends a happy-path runtime notify exactly once", async () => {
+		const mutate = vi.fn(async () => ({ ok: true }));
+		const runtimeClient = {
+			workspace: {
+				notifyStateUpdated: {
+					mutate,
+				},
+			},
+		} as unknown as Parameters<typeof notifyRuntimeWorkspaceStateUpdated>[0];
+
+		await expect(notifyRuntimeWorkspaceStateUpdated(runtimeClient, { warn: vi.fn() })).resolves.toBeUndefined();
+
+		expect(mutate).toHaveBeenCalledTimes(1);
 	});
 });
