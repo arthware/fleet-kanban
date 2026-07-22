@@ -600,6 +600,8 @@ describe("createRuntimeApi startTaskSession", () => {
 			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
+			// Flat/peer board: no architect, so doctrine resolves in-repo only.
+			listWorkspaces: vi.fn(async () => []),
 			// Doctrine seam: constitution present in-repo → injected ahead of everything else.
 			readDoctrineFile: vi.fn(async (p: string) =>
 				p.endsWith("docs/architecture/constitution.md") ? "# Constitution\nArticle 1…" : null,
@@ -622,6 +624,55 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				prompt: `${CONSTITUTION_DIRECTIVE_HEADER}\n\n# Constitution\nArticle 1…\n\n---\n\n${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
+			}),
+		);
+	});
+
+	it("given an overseen repo whose doctrine lives root-side, when a card starts, then the root-fallback constitution is injected", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+			applyTurnCheckpoint: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		// Architect `tools` oversees the child repo the card runs in; the child keeps no
+		// in-repo constitution, only architect-owned doctrine at the fleet root.
+		const rootFallbackPath = "/tmp/fleet-root/.fleet/doctrine/child/constitution.md";
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+			listWorkspaces: vi.fn(async () => [
+				{ workspaceId: "tools", repoPath: "/tmp/fleet-root" },
+				{ workspaceId: "child", repoPath: "/tmp/fleet-root/child" },
+			]),
+			// Only the root-side path resolves — the in-repo path returns null.
+			readDoctrineFile: vi.fn(async (p: string) =>
+				p === rootFallbackPath ? "# Constitution\nArticle 2 — root cause…" : null,
+			),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/fleet-root/child",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Implement the body.",
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: `${CONSTITUTION_DIRECTIVE_HEADER}\n\n# Constitution\nArticle 2 — root cause…\n\n---\n\n${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
 			}),
 		);
 	});
