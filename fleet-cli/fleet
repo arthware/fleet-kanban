@@ -453,35 +453,48 @@ _service_restart() {
     do_install=1; dim "node_modules missing — installing deps for this build"
   fi
 
-  # SAFE SEQUENCE: stop the board → build offline → start it again. With the board
-  # down there are no concurrent git writers to race the build, so even an install:all
-  # (husky `git config`) is safe.
-  say "stopping board for a clean build (source: $src) …"
-  _kanban_daemon_down
-
-  # `npm run build` runs `clean`, which wipes dist/. Stash the current build first so a
-  # failed build can never leave the board with no binary to boot.
+  # RELIABILITY MODEL — why this can't strand the board down.
+  # The board runs under launchd with KeepAlive, and its plist points at a STABLE path
+  # ($src/dist/cli.js). Two rules follow:
+  #   1. NEVER boot the job out for a plain --build. `bootout` removes KeepAlive, so from
+  #      then until a re-bootstrap the board can ONLY come back if THIS process survives —
+  #      the self-destruct that stranded the board when a restart ran from a board-hosted
+  #      shell, hung, or was Ctrl-C'd. Instead we build IN PLACE (the running board serves
+  #      from memory) and then `kickstart -k`, a relaunch launchd performs — so a killed
+  #      caller can never leave the board down, and KeepAlive is the backstop throughout.
+  #   2. A plain `npm run build` writes NO git config, so building while the board is live
+  #      cannot trigger the worktree/husky git-config race. Only install:all writes git
+  #      config — so ONLY --install stops the board first (rare, explicit, operator present).
   local dist="$src/dist" stash="$src/.dist.prev"
-  rm -rf "$stash"; [ -d "$dist" ] && mv "$dist" "$stash"
 
-  local build_ok=1
-  (
-    cd "$src" || exit 1
-    if [ -n "$do_install" ]; then say "installing deps (npm run install:all) …"; npm run install:all || exit 1; fi
-    say "building (npm run build) …"; npm run build || exit 1
-  ) || build_ok=""
-
-  if [ -n "$build_ok" ]; then
-    rm -rf "$stash"
-  else
-    dim "build failed — restoring the previous board build"
+  if [ -n "$do_install" ]; then
+    # Rare path: install:all writes .git/config; hold the board down so no worktree op races it.
+    say "installing deps — stopping the board first to avoid a git-config race (source: $src) …"
+    _kanban_daemon_down
+    rm -rf "$stash"; [ -d "$dist" ] && mv "$dist" "$stash"
+    if ( cd "$src" && npm run install:all && npm run build ) && [ -x "$dist/cli.js" ]; then
+      rm -rf "$stash"; say "install + build ok — starting the board …"; kanban_daemon install; return
+    fi
+    dim "install/build failed — restoring the previous build and starting the board …"
     rm -rf "$dist"; [ -d "$stash" ] && mv "$stash" "$dist"
+    kanban_daemon install; return 1
   fi
 
-  say "starting board …"
-  kanban_daemon install || return 1
-
-  [ -n "$build_ok" ] || { dim "board restarted on the PREVIOUS build (new build failed — see output above)"; return 1; }
+  # Plain --build: build in place while the board keeps serving, then swap via kickstart.
+  # Keep a copy of the live build so a failed/partial rebuild can never leave launchd with
+  # no bootable binary at the plist path.
+  say "building the board in place (source: $src) — it keeps serving until the swap …"
+  rm -rf "$stash"; cp -R "$dist" "$stash" 2>/dev/null || true
+  if ( cd "$src" && npm run build ) && [ -x "$dist/cli.js" ]; then
+    rm -rf "$stash"
+    say "build ok — restarting the board onto the new build …"
+    _kanban_hard_restart
+  else
+    dim "build failed — restoring the previous build so launchd always has a bootable binary."
+    rm -rf "$dist"; [ -d "$stash" ] && mv "$stash" "$dist"
+    dim "the board was left on the previous build; nothing was swapped."
+    return 1
+  fi
 }
 
 # --- shared fork build: one checkout every consumer project runs from --------
