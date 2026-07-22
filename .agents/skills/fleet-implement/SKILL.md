@@ -1,12 +1,13 @@
 ---
 name: fleet-implement
-description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch, do not open a PR
+description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch (the land/fleet-pr phase owns any PR)
 ---
 
 You are working a build card: take it from pickup to a verified, committed build — intake →
-tests-first → implement → verify → commit. This is the build half; it stops at a committed branch and
-deliberately does NOT run a review pass or open a PR (the fleet-pr / land phase owns those), so build
-and review never overlap.
+tests-first → implement → verify → commit. This is the build half; it ends at a
+committed branch and doesn't itself run a review pass — the fleet-pr / land phase owns the PR and
+review, so build and review never overlap. If a fleet-pr / auto-PR flow is also active, defer PR
+creation to it rather than block it (see Commit).
 
 Read the repo's implement profile for the concrete details — how to run tests, build, and lint; the
 house style; and how to spin up a throwaway instance to verify a UI: `.claude/implement-profile.md`
@@ -46,9 +47,14 @@ behavior/UI changes, verify on a **throwaway, ISOLATED** instance — never a sh
 exercise the real flow, check the console/logs for errors, capture evidence, then tear it down. If
 verification fails, fix the root cause and re-verify before continuing.
 
-## Commit — stop here
+## Commit
 
 Commit on the feature branch with a semantic-commit subject (`feat:`, `fix:`, `refactor:`, …),
-following the repo's commit convention; let the diff show the how. Do NOT open a PR and do NOT run a
-review pass — the fleet-pr / land phase owns that. Leave the work committed on the branch, ready for
-review.
+following the repo's commit convention; let the diff show the how. The build phase ends at a
+**verified, committed branch**, and you don't run a review pass yourself.
+
+Opening the PR is the land phase's job, not part of the build — but don't treat "no PR" as absolute.
+If this card also runs in **auto-PR mode** (the **fleet-pr** skill is active alongside this one), the
+two compose: build with the tests-first discipline here, and follow **fleet-pr** for its
+commit-as-you-go cadence and for opening the single idempotent PR. **Defer** PR creation to fleet-pr
+rather than contradict it. If no PR/land phase applies, stop at the committed branch, ready for review.
