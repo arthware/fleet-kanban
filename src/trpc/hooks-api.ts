@@ -16,6 +16,7 @@ export interface CreateHooksApiDependencies {
 	ensureTerminalManagerForWorkspace: (workspaceId: string, repoPath: string) => Promise<TerminalSessionManager>;
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void> | void;
 	broadcastTaskReadyForReview: (workspaceId: string, taskId: string) => void;
+	notifyTaskReadyForReview?: (input: { workspaceId: string; workspacePath: string; taskId: string }) => Promise<void>;
 	captureTaskTurnCheckpoint?: (input: {
 		cwd: string;
 		taskId: string;
@@ -125,6 +126,15 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
 				if (event === "to_review") {
 					deps.broadcastTaskReadyForReview(workspaceId, taskId);
+					void deps
+						.notifyTaskReadyForReview?.({
+							workspaceId,
+							workspacePath,
+							taskId,
+						})
+						.catch(() => {
+							// Best effort only: a missing/stopped architect session is a clean no-op.
+						});
 				}
 
 				return { ok: true } satisfies RuntimeHookIngestResponse;

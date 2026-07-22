@@ -83,6 +83,8 @@ import type {
 	RuntimeTaskDurabilityResponse,
 	RuntimeTaskFileRequest,
 	RuntimeTaskFileResponse,
+	RuntimeTaskReviewNotificationRequest,
+	RuntimeTaskReviewNotificationResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
@@ -186,6 +188,8 @@ import {
 	runtimeTaskDurabilityResponseSchema,
 	runtimeTaskFileRequestSchema,
 	runtimeTaskFileResponseSchema,
+	runtimeTaskReviewNotificationRequestSchema,
+	runtimeTaskReviewNotificationResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -250,6 +254,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionInputRequest,
 		) => Promise<RuntimeTaskSessionInputResponse>;
+		notifyTaskReadyForReview: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeTaskReviewNotificationRequest,
+		) => Promise<RuntimeTaskReviewNotificationResponse>;
 		getTaskChatMessages: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatMessagesRequest,
@@ -521,6 +529,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeTaskSessionInputResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.sendTaskSessionInput(ctx.workspaceScope, input);
+			}),
+		notifyTaskReadyForReview: workspaceProcedure
+			.input(runtimeTaskReviewNotificationRequestSchema)
+			.output(runtimeTaskReviewNotificationResponseSchema)
+			.mutation(async ({ ctx, input }) => {
+				return await ctx.runtimeApi.notifyTaskReadyForReview(ctx.workspaceScope, input);
 			}),
 		getTaskChatMessages: workspaceProcedure
 			.input(runtimeTaskChatMessagesRequestSchema)

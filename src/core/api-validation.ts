@@ -26,6 +26,7 @@ import {
 	type RuntimeTaskChatSendRequest,
 	type RuntimeTaskDurabilityRequest,
 	type RuntimeTaskFileRequest,
+	type RuntimeTaskReviewNotificationRequest,
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
 	type RuntimeTaskSessionStopRequest,
@@ -63,6 +64,7 @@ import {
 	runtimeTaskChatSendRequestSchema,
 	runtimeTaskDurabilityRequestSchema,
 	runtimeTaskFileRequestSchema,
+	runtimeTaskReviewNotificationRequestSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
 	runtimeTaskSessionStopRequestSchema,
@@ -299,6 +301,17 @@ export function parseTaskSessionInputRequest(value: unknown): RuntimeTaskSession
 	}
 	return {
 		...parsed,
+		taskId,
+	};
+}
+
+export function parseTaskReviewNotificationRequest(value: unknown): RuntimeTaskReviewNotificationRequest {
+	const parsed = parseWithSchema(runtimeTaskReviewNotificationRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Task ID cannot be empty.");
+	}
+	return {
 		taskId,
 	};
 }

@@ -160,6 +160,7 @@ describe("createHooksApi", () => {
 	});
 
 	it("keeps an end-of-turn stop hook on the ordinary 'hook' review reason", async () => {
+		const notifyTaskReadyForReview = vi.fn(async () => undefined);
 		const manager = {
 			getSummary: vi.fn(() => createSummary({ state: "running" })),
 			transitionToReview: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
@@ -173,6 +174,7 @@ describe("createHooksApi", () => {
 			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastTaskReadyForReview: vi.fn(),
+			notifyTaskReadyForReview,
 		});
 
 		const response = await api.ingest({
@@ -184,6 +186,11 @@ describe("createHooksApi", () => {
 
 		expect(response).toEqual({ ok: true });
 		expect(manager.transitionToReview).toHaveBeenCalledWith("task-1", "hook");
+		expect(notifyTaskReadyForReview).toHaveBeenCalledWith({
+			workspaceId: "workspace-1",
+			workspacePath: "/tmp/repo",
+			taskId: "task-1",
+		});
 	});
 
 	it("lets a needs_input card transition back to running on to_in_progress", async () => {

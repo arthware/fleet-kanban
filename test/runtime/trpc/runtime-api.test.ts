@@ -238,6 +238,7 @@ function createClineTaskSessionServiceMock() {
 			async () => null,
 		),
 		getSummary: vi.fn<(...args: unknown[]) => RuntimeTaskSessionSummary | null>(() => null),
+		hasActiveTaskSession: vi.fn<(...args: unknown[]) => boolean>(() => false),
 		listSummaries: vi.fn<(...args: unknown[]) => RuntimeTaskSessionSummary[]>(() => []),
 		listMessages: vi.fn<(...args: unknown[]) => unknown[]>(() => []),
 		loadTaskSessionMessages: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => []),

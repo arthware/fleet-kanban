@@ -1217,6 +1217,21 @@ export const runtimeTaskSessionInputResponseSchema = z.object({
 });
 export type RuntimeTaskSessionInputResponse = z.infer<typeof runtimeTaskSessionInputResponseSchema>;
 
+export const runtimeTaskReviewNotificationRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeTaskReviewNotificationRequest = z.infer<typeof runtimeTaskReviewNotificationRequestSchema>;
+
+export const runtimeTaskReviewNotificationResponseSchema = z.object({
+	ok: z.boolean(),
+	taskId: z.string(),
+	homeAgentTaskId: z.string().nullable(),
+	notified: z.boolean(),
+	message: z.string().nullable(),
+	error: z.string().optional(),
+});
+export type RuntimeTaskReviewNotificationResponse = z.infer<typeof runtimeTaskReviewNotificationResponseSchema>;
+
 export const runtimeTaskChatMessageSchema = z.object({
 	id: z.string(),
 	role: z.enum(["user", "assistant", "system", "tool", "reasoning", "status"]),

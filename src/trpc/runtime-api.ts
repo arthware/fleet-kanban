@@ -18,6 +18,7 @@ import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtim
 import type {
 	RuntimeCommandRunResponse,
 	RuntimeRunUpdateResponse,
+	RuntimeTaskReviewNotificationResponse,
 	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
 } from "../core/api-contract";
@@ -39,6 +40,7 @@ import {
 	parseTaskChatMessagesRequest,
 	parseTaskChatReloadRequest,
 	parseTaskChatSendRequest,
+	parseTaskReviewNotificationRequest,
 	parseTaskSessionInputRequest,
 	parseTaskSessionStartRequest,
 	parseTaskSessionStopRequest,
@@ -46,11 +48,12 @@ import {
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
 import { resolveTaskTitle } from "../core/task-title.js";
 import { prependPrCardDirective } from "../prompts/pr-card-directive";
 import { resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
-import { listWorkspaceIndexEntries } from "../state/workspace-state";
+import { listWorkspaceIndexEntries, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
@@ -117,6 +120,143 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 
 	const buildConfigResponse = (runtimeConfig: RuntimeConfigState) =>
 		buildRuntimeConfigResponse(runtimeConfig, clineProviderService.getProviderSettingsSummary());
+
+	const sendTaskSessionInput: RuntimeTrpcContext["runtimeApi"]["sendTaskSessionInput"] = async (
+		workspaceScope,
+		input,
+	) => {
+		try {
+			const body = parseTaskSessionInputRequest(input);
+			// Cline sessions accept input as a discrete message, so bracketed-paste
+			// framing (a PTY concern) doesn't apply — send the plain text.
+			const clineText = body.appendNewline ? `${body.text}\n` : body.text;
+			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
+			const clineSummary = await clineTaskSessionService.sendTaskSessionInput(body.taskId, clineText);
+			if (clineSummary) {
+				return {
+					ok: true,
+					summary: clineSummary,
+				};
+			}
+			// PTY path: `fleet task say` wraps steering in a bracketed paste so a
+			// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
+			const wantsSubmit = body.submit ?? true;
+			// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
+			// treats a carriage return fused onto the paste-end marker (…[201~\r)
+			// as buffered text, not a submit — so the steer text lands but never sends.
+			const ptyPayload = body.bracketedPaste
+				? toBracketedPasteSubmission(body.text, false)
+				: body.appendNewline
+					? `${body.text}\n`
+					: body.text;
+			const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+			let summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
+			if (!summary) {
+				return {
+					ok: false,
+					summary: null,
+					error: "Task session is not running.",
+				};
+			}
+			// Send the Enter as a SEPARATE write so paste-mode has closed and the
+			// carriage return registers as a submit keypress. `--no-submit` skips this,
+			// leaving the text staged in the prompt.
+			if (body.bracketedPaste && wantsSubmit) {
+				const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
+				if (afterSubmit) {
+					summary = afterSubmit;
+				}
+			}
+			return {
+				ok: true,
+				summary,
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				ok: false,
+				summary: null,
+				error: message,
+			};
+		}
+	};
+
+	const notifyTaskReadyForReview: RuntimeTrpcContext["runtimeApi"]["notifyTaskReadyForReview"] = async (
+		workspaceScope,
+		input,
+	): Promise<RuntimeTaskReviewNotificationResponse> => {
+		try {
+			const body = parseTaskReviewNotificationRequest(input);
+			const state = await loadWorkspaceState(workspaceScope.workspacePath);
+			const task =
+				state.board.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === body.taskId) ??
+				null;
+			if (!task) {
+				return {
+					ok: false,
+					taskId: body.taskId,
+					homeAgentTaskId: null,
+					notified: false,
+					message: null,
+					error: `Task "${body.taskId}" was not found in workspace ${workspaceScope.workspacePath}.`,
+				};
+			}
+
+			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
+			const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+			const homeAgentTaskId = resolveRunningHomeAgentTaskId({
+				workspaceId: workspaceScope.workspaceId,
+				taskId: body.taskId,
+				summaries: [...clineTaskSessionService.listSummaries(), ...terminalManager.listSummaries()],
+				isActive: (taskId) =>
+					clineTaskSessionService.hasActiveTaskSession(taskId) || terminalManager.getSummary(taskId)?.pid != null,
+			});
+
+			if (!homeAgentTaskId) {
+				return {
+					ok: true,
+					taskId: body.taskId,
+					homeAgentTaskId: null,
+					notified: false,
+					message: null,
+				};
+			}
+
+			const message = buildTaskReadyForReviewMessage(task);
+			const response = await sendTaskSessionInput(workspaceScope, {
+				taskId: homeAgentTaskId,
+				text: message,
+				bracketedPaste: true,
+				submit: true,
+			});
+			if (!response.ok) {
+				return {
+					ok: true,
+					taskId: body.taskId,
+					homeAgentTaskId,
+					notified: false,
+					message,
+				};
+			}
+			return {
+				ok: true,
+				taskId: body.taskId,
+				homeAgentTaskId,
+				notified: true,
+				message,
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				ok: false,
+				taskId: typeof input === "object" && input !== null && "taskId" in input ? String(input.taskId) : "",
+				homeAgentTaskId: null,
+				notified: false,
+				message: null,
+				error: message,
+			};
+		}
+	};
 
 	return {
 		loadConfig: async (workspaceScope) => {
@@ -397,62 +537,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 		},
-		sendTaskSessionInput: async (workspaceScope, input) => {
-			try {
-				const body = parseTaskSessionInputRequest(input);
-				// Cline sessions accept input as a discrete message, so bracketed-paste
-				// framing (a PTY concern) doesn't apply — send the plain text.
-				const clineText = body.appendNewline ? `${body.text}\n` : body.text;
-				const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
-				const clineSummary = await clineTaskSessionService.sendTaskSessionInput(body.taskId, clineText);
-				if (clineSummary) {
-					return {
-						ok: true,
-						summary: clineSummary,
-					};
-				}
-				// PTY path: `fleet task say` wraps steering in a bracketed paste so a
-				// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
-				const wantsSubmit = body.submit ?? true;
-				// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
-				// treats a carriage return fused onto the paste-end marker (…[201~\r)
-				// as buffered text, not a submit — so the steer text lands but never sends.
-				const ptyPayload = body.bracketedPaste
-					? toBracketedPasteSubmission(body.text, false)
-					: body.appendNewline
-						? `${body.text}\n`
-						: body.text;
-				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
-				let summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
-				if (!summary) {
-					return {
-						ok: false,
-						summary: null,
-						error: "Task session is not running.",
-					};
-				}
-				// Send the Enter as a SEPARATE write so paste-mode has closed and the
-				// carriage return registers as a submit keypress. `--no-submit` skips this,
-				// leaving the text staged in the prompt.
-				if (body.bracketedPaste && wantsSubmit) {
-					const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
-					if (afterSubmit) {
-						summary = afterSubmit;
-					}
-				}
-				return {
-					ok: true,
-					summary,
-				};
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				return {
-					ok: false,
-					summary: null,
-					error: message,
-				};
-			}
-		},
+		sendTaskSessionInput,
+		notifyTaskReadyForReview,
 		getTaskChatMessages: async (workspaceScope, input) => {
 			try {
 				const body = parseTaskChatMessagesRequest(input);
