@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -35,6 +35,12 @@ function runGit(cwd: string, args: string[]): string {
 		);
 	}
 	return result.stdout.trim();
+}
+
+function readGitPath(cwd: string, pathName: string): string {
+	const gitPath = runGit(cwd, ["rev-parse", "--git-path", pathName]);
+	const absoluteGitPath = isAbsolute(gitPath) ? gitPath : join(cwd, gitPath);
+	return readFileSync(absoluteGitPath, "utf8");
 }
 
 function gitSucceeds(cwd: string, args: string[]): boolean {
@@ -359,6 +365,51 @@ describe.sequential("task-worktree integration", () => {
 				expect(ensuredAgain.ok).toBe(true);
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".husky/_"])).toBe("");
 				expectMirroredPathBehavior(huskyIgnoredPath);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("given worktree skills are linked, when setup runs twice, then the managed exclude block hides .agents/skills once", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-skills-exclude-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-skills-exclude",
+					baseRef: "HEAD",
+				});
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+
+				expect(lstatSync(join(ensured.path, ".agents", "skills")).isSymbolicLink()).toBe(true);
+				expect(readGitPath(ensured.path, "info/exclude")).toContain("/.agents/skills\n");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".agents/skills"])).toBe("");
+				expect(runGit(ensured.path, ["check-ignore", "-v", ".agents/skills"])).toContain("info/exclude");
+
+				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-skills-exclude",
+					baseRef: "HEAD",
+				});
+				expect(ensuredAgain.ok).toBe(true);
+				const skillsExcludeLines = readGitPath(ensured.path, "info/exclude")
+					.split("\n")
+					.filter((line) => line === "/.agents/skills");
+				expect(skillsExcludeLines).toHaveLength(1);
 			} finally {
 				cleanup();
 			}
