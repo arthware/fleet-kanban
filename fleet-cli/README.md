@@ -117,6 +117,49 @@ place to *start* managed agent sessions (live status, diff review, commit/PR).
 
 ---
 
+## Updating the board
+
+The board runs under launchd (it survives closing your terminal and auto-revives on a crash).
+How you update depends on which board you run:
+
+**Consumer projects** (you run the shared fleet-kanban build) — from the project dir:
+
+```bash
+fleet update            # refresh the shared build to the latest main
+fleet service restart   # reload THIS board onto the new build
+```
+
+**Dogfood** (you develop fleet-kanban itself; the board runs your local checkout):
+
+```bash
+fleet service restart --build   # stop the board, build your checkout offline, start it again
+```
+
+`fleet service start` / `restart` handle the launchd bootout→bootstrap themselves, **retrying
+the bootstrap until the service is actually up** — you should not need any manual `launchctl`
+steps.
+
+### Board not responding after an update?
+
+If the page won't load and `fleet kanban status` shows it down, the launchd service failed to
+come up. In order:
+
+```bash
+fleet service start                        # idempotent; waits for the port and retries the bootstrap
+tail -30 <project>/.fleet/kanban.log       # if still down, look for a startup error (bad data file, port in use)
+```
+
+Last resort — reload the launchd service by hand (this is exactly what the CLI does, and what it
+prints if it gives up):
+
+```bash
+ls ~/Library/LaunchAgents/com.fleet.kanban.*.plist          # find your board's LABEL (filename without .plist)
+launchctl bootout   gui/$(id -u)/<LABEL> 2>/dev/null         # e.g. com.fleet.kanban.leapter
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<LABEL>.plist
+```
+
+---
+
 ## Config
 
 - `<project>/.fleet/config.json` — name, repos (auto-detected), linear_team, kanban_port

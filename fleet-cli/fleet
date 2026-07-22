@@ -269,14 +269,10 @@ p = {
 with open(sys.argv[1], "wb") as f: plistlib.dump(p, f)
 print("→ wrote", sys.argv[1])
 PY
-      # Modern bootout/bootstrap. Legacy `launchctl load -w` silently no-ops after a
-      # re-point and leaves the board DOWN (the failure this replaces); bootstrap reliably
-      # starts it. bootout is idempotent — `|| true` covers a first install with nothing loaded.
-      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-      # The board can outlive SIGTERM (--skip-shutdown-cleanup); free the port before
-      # bootstrap so a re-point can't collide with the old process and fail to bind.
-      _kanban_free_port
-      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || { dim "launchctl bootstrap failed"; return 1; }
+      # Reliable bootout→bootstrap (waits for launchd to release the label, then retries the
+      # bootstrap race and surfaces the real error). This is the manual recovery, made part
+      # of the procedure — see _kanban_bootstrap.
+      _kanban_bootstrap || return 1
       say "daemon '$label' loaded (port $KANBAN_PORT, dir $dir)"
       local i; for i in $(seq 1 30); do kanban_running && { say "✓ up"; kanban_sync_projects; _kanban_url_banner; return 0; }; sleep 1; done
       dim "loaded but not up in 30s — see $KANBAN_LOG"; return 1;;
@@ -320,6 +316,31 @@ _kanban_free_port() {
 _kanban_daemon_down() {
   launchctl bootout "gui/$(id -u)/$(_kanban_label)" 2>/dev/null || true
   _kanban_free_port
+}
+
+# Bring the launchd board UP reliably. `launchctl bootout` is ASYNCHRONOUS: launchd can keep
+# the label reserved for a moment after it returns, and a `bootstrap` that lands in that window
+# fails ("Bootstrap failed: 5: Input/output error" / "service already bootstrapped"). The old
+# path bootstrapped immediately and swallowed the error (`2>/dev/null`), so it left the board
+# silently DOWN — the "wrote the plist but it's not up / not responding after an update" failure
+# that had to be fixed by hand. This makes that recovery the procedure: wait until the label is
+# actually gone, free the port, then bootstrap with retries, keeping the real error and printing
+# the manual fallback if it genuinely can't come up.
+_kanban_bootstrap() {
+  local label plist i err; label="$(_kanban_label)"; plist="$(_kanban_plist)"
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  # Wait (up to ~6s) for launchd to release the label before re-bootstrapping.
+  for i in $(seq 1 20); do launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || break; sleep 0.3; done
+  _kanban_free_port
+  # Retry the transient bootstrap race; an already-loaded label counts as success.
+  for i in 1 2 3 4 5; do
+    err="$(launchctl bootstrap "gui/$(id -u)" "$plist" 2>&1)" && return 0
+    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 && return 0
+    dim "bootstrap attempt $i failed (${err:-unknown}) — retrying…"; sleep 1
+  done
+  dim "launchctl bootstrap failed after 5 attempts: ${err:-unknown}"
+  dim "  recover by hand: launchctl bootout gui/$(id -u)/$label 2>/dev/null; launchctl bootstrap gui/$(id -u) \"$plist\""
+  return 1
 }
 
 # Restart the launchd board. When the loaded daemon already launches the binary fleet
