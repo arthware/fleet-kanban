@@ -15,6 +15,7 @@ import {
 	loadWorkspaceBoardById,
 	loadWorkspaceContext,
 	loadWorkspaceState,
+	migrateAllWorkspaceAgentSessions,
 	migrateAllWorkspaceTrashToArchive,
 	type RuntimeWorkspaceIndexEntry,
 } from "../state/workspace-state";
@@ -197,6 +198,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 	const launchedFromGitRepo = probeGitRepository(deps.cwd) === "yes";
 	const initialWorkspace = launchedFromGitRepo ? await loadWorkspaceContext(deps.cwd) : null;
 	await migrateAllWorkspaceTrashToArchive();
+	await migrateAllWorkspaceAgentSessions();
 	let indexedWorkspace: RuntimeWorkspaceIndexEntry | null = null;
 	if (!initialWorkspace) {
 		const indexedWorkspaces = await listWorkspaceIndexEntries();

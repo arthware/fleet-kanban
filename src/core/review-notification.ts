@@ -11,7 +11,7 @@ export function resolveRunningHomeAgentTaskId(input: {
 	workspaceId: string;
 	taskId: string;
 	summaries: RuntimeTaskSessionSummary[];
-	isActive: (taskId: string) => boolean;
+	isActive: (taskId: string, summary: RuntimeTaskSessionSummary) => boolean;
 }): string | null {
 	if (isHomeAgentSessionIdForWorkspace(input.taskId, input.workspaceId)) {
 		return null;
@@ -20,7 +20,7 @@ export function resolveRunningHomeAgentTaskId(input: {
 		(summary) =>
 			summary.taskId !== input.taskId &&
 			isHomeAgentSessionIdForWorkspace(summary.taskId, input.workspaceId) &&
-			input.isActive(summary.taskId),
+			input.isActive(summary.taskId, summary),
 	);
 	return homeAgentSummary?.taskId ?? null;
 }

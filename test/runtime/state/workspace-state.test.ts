@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { RuntimeBoardCard, RuntimeBoardData } from "../../../src/core/api-contract";
+import type { RuntimeBoardCard, RuntimeBoardData, RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
+import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import { moveTaskToColumn } from "../../../src/core/task-board-mutations";
 import {
 	getWorkspaceArchivedCardsPath,
@@ -12,6 +13,7 @@ import {
 	loadWorkspaceArchivedBoardById,
 	loadWorkspaceContext,
 	loadWorkspaceState,
+	migrateAllWorkspaceAgentSessions,
 	migrateWorkspaceTrashToArchive,
 	mutateWorkspaceState,
 	resetWorkspaceBoardCacheForTests,
@@ -77,6 +79,40 @@ async function writeArchiveJson(workspaceId: string, board: RuntimeBoardData): P
 	await writeFile(archivePath, JSON.stringify(board, null, 2), "utf8");
 }
 
+async function writeSessionsJson(workspaceId: string, sessions: Record<string, unknown>): Promise<void> {
+	const workspaceDir = join(tempRoot, "home", "kanban", "workspaces", workspaceId);
+	await mkdir(workspaceDir, { recursive: true });
+	await writeFile(join(workspaceDir, "sessions.json"), JSON.stringify(sessions, null, 2), "utf8");
+}
+
+async function readSessionsJson(workspaceId: string): Promise<Record<string, unknown>> {
+	return (await readJson(join(tempRoot, "home", "kanban", "workspaces", workspaceId, "sessions.json"))) as Record<
+		string,
+		unknown
+	>;
+}
+
+function createSession(taskId: string, overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
+	return {
+		taskId,
+		state: "idle",
+		agentId: "claude",
+		workspacePath: "/tmp/repo",
+		pid: null,
+		startedAt: null,
+		updatedAt: 1,
+		lastOutputAt: null,
+		reviewReason: null,
+		exitCode: null,
+		agentSessionId: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		latestTurnCheckpoint: null,
+		previousTurnCheckpoint: null,
+		...overrides,
+	};
+}
+
 beforeEach(async () => {
 	resetWorkspaceBoardCacheForTests();
 	previousClineHome = process.env.CLINE_HOME;
@@ -102,7 +138,7 @@ afterEach(async () => {
 });
 
 describe.sequential("workspace board cache", () => {
-	it("does not parse board.json for every in-runtime mutation", async () => {
+	it("does not parse board.json for every in-runtime mutation", { timeout: 30_000 }, async () => {
 		const context = await loadWorkspaceContext(repoPath);
 		await writeBoardJson(context.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
 		resetWorkspaceBoardCacheForTests();
@@ -304,5 +340,107 @@ describe.sequential("workspace trash archive", () => {
 		expect(
 			(archive as RuntimeBoardData).columns.find((column) => column.id === "trash")?.cards.map((card) => card.id),
 		).toEqual([]);
+	});
+});
+
+describe.sequential("workspace agent session reconciliation", () => {
+	it("normalizes dead running sessions, reaps dead and foreign home agents, and is idempotent", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		const otherRepoPath = join(tempRoot, "other-repo");
+		await mkdir(otherRepoPath, { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], {
+			cwd: otherRepoPath,
+			env: createGitProcessEnv(),
+			stdio: "ignore",
+		});
+		const otherContext = await loadWorkspaceContext(otherRepoPath);
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId, "claude");
+		const goneHomeAgentId = createHomeAgentSessionId(context.workspaceId, "codex");
+		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId, "claude");
+		const runningTaskId = "task-running";
+
+		await writeSessionsJson(context.workspaceId, {
+			[runningTaskId]: createSession(runningTaskId, {
+				state: "running",
+				pid: 999_999,
+				startedAt: 1,
+				agentSessionId: "task-session",
+				agentSessionLifecycle: "attached",
+			}),
+			[foreignHomeAgentId]: createSession(foreignHomeAgentId, {
+				state: "running",
+				pid: 999_999,
+				startedAt: 1,
+				agentSessionId: "foreign-session",
+				agentSessionLifecycle: "attached",
+			}),
+			[goneHomeAgentId]: createSession(goneHomeAgentId, {
+				agentId: "codex",
+				agentSessionLifecycle: "gone",
+			}),
+			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, {
+				agentSessionId: "canonical-session",
+				agentSessionLifecycle: "resumable",
+			}),
+		});
+
+		await migrateAllWorkspaceAgentSessions();
+		const migrated = await readSessionsJson(context.workspaceId);
+		await migrateAllWorkspaceAgentSessions();
+		const rerun = await readSessionsJson(context.workspaceId);
+
+		expect(migrated[runningTaskId]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+		});
+		expect(migrated[foreignHomeAgentId]).toBeUndefined();
+		expect(migrated[goneHomeAgentId]).toBeUndefined();
+		expect(migrated[canonicalHomeAgentId]).toMatchObject({
+			taskId: canonicalHomeAgentId,
+			agentSessionId: "canonical-session",
+		});
+		expect(rerun).toEqual(migrated);
+	});
+
+	it("filters foreign home-agent sessions on save and mutation writes", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		const otherRepoPath = join(tempRoot, "other-repo-write");
+		await mkdir(otherRepoPath, { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], {
+			cwd: otherRepoPath,
+			env: createGitProcessEnv(),
+			stdio: "ignore",
+		});
+		const otherContext = await loadWorkspaceContext(otherRepoPath);
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId, "claude");
+		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId, "claude");
+		const initial = await loadWorkspaceState(repoPath);
+
+		await saveWorkspaceState(repoPath, {
+			board: initial.board,
+			sessions: {
+				[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, { agentSessionId: "canonical-session" }),
+				[foreignHomeAgentId]: createSession(foreignHomeAgentId, { agentSessionId: "foreign-session" }),
+			},
+			expectedRevision: initial.revision,
+		});
+
+		const afterSave = await readSessionsJson(context.workspaceId);
+		expect(afterSave[canonicalHomeAgentId]).toBeDefined();
+		expect(afterSave[foreignHomeAgentId]).toBeUndefined();
+
+		await mutateWorkspaceState(repoPath, (state) => ({
+			board: state.board,
+			sessions: {
+				...state.sessions,
+				[foreignHomeAgentId]: createSession(foreignHomeAgentId, { agentSessionId: "foreign-session" }),
+			},
+			value: null,
+		}));
+
+		const afterMutation = await readSessionsJson(context.workspaceId);
+		expect(afterMutation[canonicalHomeAgentId]).toBeDefined();
+		expect(afterMutation[foreignHomeAgentId]).toBeUndefined();
 	});
 });

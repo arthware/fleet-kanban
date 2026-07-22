@@ -72,6 +72,24 @@ describe("review notification helpers", () => {
 		).toBeNull();
 	});
 
+	it("does not resolve a home-agent summary with a stale pid when derived liveness is not attached", () => {
+		const homeAgentTaskId = createHomeAgentSessionId("workspace-1", "claude");
+
+		expect(
+			resolveRunningHomeAgentTaskId({
+				workspaceId: "workspace-1",
+				taskId: "card-1",
+				summaries: [
+					createSummary(homeAgentTaskId, {
+						pid: 1234,
+						agentSessionLifecycle: "resumable",
+					}),
+				],
+				isActive: (_taskId, summary) => summary.agentSessionLifecycle === "attached",
+			}),
+		).toBeNull();
+	});
+
 	it("does not notify when the moved card is itself the home-agent session", () => {
 		const homeAgentTaskId = createHomeAgentSessionId("workspace-1", "claude");
 
