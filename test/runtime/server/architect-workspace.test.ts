@@ -4,6 +4,7 @@ import {
 	buildArchitectContextPreamble,
 	classifyArchitectWorkspace,
 	resolveAgentConfigRoot,
+	resolveArchitectHomeAgentWorkspaceId,
 	resolveHomeAgentContext,
 	resolveHomeAgentCwd,
 	selectArchitectAwareProjects,
@@ -140,6 +141,32 @@ describe("selectArchitectAwareProjects", () => {
 		expect(selection.architectWorkspaceId).toBeNull();
 		expect(selection.selectableWorkspaceIds).toEqual(["tools"]);
 		expect(selection.currentProjectId).toBe("tools");
+	});
+});
+
+describe("resolveArchitectHomeAgentWorkspaceId", () => {
+	it("returns the architect workspace for a nested board", () => {
+		expect(
+			resolveArchitectHomeAgentWorkspaceId(
+				[
+					{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+					{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+				],
+				"fleet-kanban",
+			),
+		).toBe("tools");
+	});
+
+	it("returns the active workspace for a flat board", () => {
+		expect(
+			resolveArchitectHomeAgentWorkspaceId(
+				[
+					{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+					{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+				],
+				"repo2",
+			),
+		).toBe("repo2");
 	});
 });
 

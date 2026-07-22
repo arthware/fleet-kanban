@@ -354,9 +354,11 @@ describe.sequential("workspace agent session reconciliation", () => {
 			stdio: "ignore",
 		});
 		const otherContext = await loadWorkspaceContext(otherRepoPath);
-		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId, "claude");
-		const goneHomeAgentId = createHomeAgentSessionId(context.workspaceId, "codex");
-		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId, "claude");
+		// One architect identity per workspace now: the canonical id carries no agent
+		// suffix. A legacy `:<agentId>`-suffixed id still parses and is reaped when gone.
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId);
+		const legacyGoneHomeAgentId = `${createHomeAgentSessionId(context.workspaceId)}:codex`;
+		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId);
 		const runningTaskId = "task-running";
 		const liveLookingTaskId = "task-live-looking";
 
@@ -382,7 +384,7 @@ describe.sequential("workspace agent session reconciliation", () => {
 				agentSessionId: "foreign-session",
 				agentSessionLifecycle: "attached",
 			}),
-			[goneHomeAgentId]: createSession(goneHomeAgentId, {
+			[legacyGoneHomeAgentId]: createSession(legacyGoneHomeAgentId, {
 				agentId: "codex",
 				agentSessionLifecycle: "gone",
 			}),
@@ -409,7 +411,7 @@ describe.sequential("workspace agent session reconciliation", () => {
 			agentSessionLifecycle: "resumable",
 		});
 		expect(migrated[foreignHomeAgentId]).toBeUndefined();
-		expect(migrated[goneHomeAgentId]).toBeUndefined();
+		expect(migrated[legacyGoneHomeAgentId]).toBeUndefined();
 		expect(migrated[canonicalHomeAgentId]).toMatchObject({
 			taskId: canonicalHomeAgentId,
 			agentSessionId: "canonical-session",
