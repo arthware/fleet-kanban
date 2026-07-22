@@ -127,6 +127,7 @@ vi.mock("../../../src/server/browser.js", () => ({
 	openInBrowser: browserMocks.openInBrowser,
 }));
 
+import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
 import { PR_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/pr-card-directive";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
@@ -544,7 +545,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		);
 	});
 
-	it("given a card with no skill field, when it starts, then the prompt is the body verbatim", async () => {
+	it("given a build card with no skill, when it starts, then the launch prompt has the fleet-implement directive", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 
 		const terminalManager = {
@@ -577,12 +578,12 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(response.ok).toBe(true);
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				prompt: "Implement the body.",
+				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
 			}),
 		);
 	});
 
-	it("given a PR auto-review card, when it starts, then the launch prompt has the fleet-pr directive", async () => {
+	it("given a PR auto-review build card, when it starts, then the launch prompt has both the fleet-implement and fleet-pr directives", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 
 		const terminalManager = {
@@ -617,12 +618,12 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(response.ok).toBe(true);
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				prompt: `${PR_CARD_PROMPT_DIRECTIVE}Implement the body.`,
+				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}${PR_CARD_PROMPT_DIRECTIVE}Implement the body.`,
 			}),
 		);
 	});
 
-	it("given auto-review is disabled, when it starts, then the launch prompt does not get the fleet-pr directive", async () => {
+	it("given auto-review is disabled on a build card, when it starts, then the launch prompt has the fleet-implement directive but not the fleet-pr directive", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 
 		const terminalManager = {
@@ -656,7 +657,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(response.ok).toBe(true);
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				prompt: "Implement the body.",
+				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
 			}),
 		);
 	});
