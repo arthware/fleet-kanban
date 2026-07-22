@@ -127,6 +127,7 @@ vi.mock("../../../src/server/browser.js", () => ({
 	openInBrowser: browserMocks.openInBrowser,
 }));
 
+import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
 import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
 import { PR_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/pr-card-directive";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
@@ -579,6 +580,48 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
+			}),
+		);
+	});
+
+	it("given a repo with a constitution, when a card starts, then the launch prompt is prefixed with it", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+			applyTurnCheckpoint: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+			// Doctrine seam: constitution present in-repo → injected ahead of everything else.
+			readDoctrineFile: vi.fn(async (p: string) =>
+				p.endsWith("docs/architecture/constitution.md") ? "# Constitution\nArticle 1…" : null,
+			),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Implement the body.",
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: `${CONSTITUTION_DIRECTIVE_HEADER}\n\n# Constitution\nArticle 1…\n\n---\n\n${IMPLEMENT_CARD_PROMPT_DIRECTIVE}Implement the body.`,
 			}),
 		);
 	});

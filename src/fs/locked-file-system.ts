@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LockOptions } from "proper-lockfile";
 import * as lockfile from "proper-lockfile";
+import { readFileIfExists } from "./read-file-if-exists";
 
 const DEFAULT_LOCK_STALE_MS = 10_000;
 const DEFAULT_LOCK_RETRIES: NonNullable<LockOptions["retries"]> = {
@@ -55,17 +56,6 @@ function createLockOptions(request: LockRequest, lockfilePath: string): LockOpti
 		options.onCompromised = request.onCompromised;
 	}
 	return options;
-}
-
-async function readFileIfExists(path: string): Promise<string | null> {
-	try {
-		return await readFile(path, "utf8");
-	} catch (error) {
-		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
-			return null;
-		}
-		throw error;
-	}
 }
 
 export class LockedFileSystem {
