@@ -384,7 +384,12 @@ const archivedCardsBoardSchema = z.object({
 	columns: z.array(
 		z.object({
 			id: z.literal("trash"),
-			title: z.string(),
+			// Defaulted, not required: `archived-cards.json` files written before the trash
+			// column carried a title (pre-#73) have no `title`, and the reader must not throw
+			// on them — that would crash-loop the whole board on the first post-upgrade start
+			// (a live-migration landmine). The column id is a literal, so the title is fixed;
+			// the next write persists it canonically, so an old file self-heals.
+			title: z.string().default("Trash"),
 			cards: z.array(runtimeBoardCardSchema),
 		}),
 	),

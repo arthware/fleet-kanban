@@ -202,6 +202,37 @@ describe.sequential("workspace trash archive", () => {
 		]);
 	});
 
+	it("tolerates a pre-#73 archived-cards.json with no column title and self-heals it", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		const existingArchived = createCard("archived-old", "Archived before the column had a title");
+		const newlyTrashed = createCard("trash-new", "Freshly trashed");
+		await writeBoardJson(context.workspaceId, createBoard({ trash: [newlyTrashed] }));
+		// Pre-#73 file: the trash column has no `title`. A strict reader throws here and
+		// crash-loops the board on the first post-upgrade start; the schema default must
+		// absorb it (this is the live-migration landmine the default guards against). The
+		// board write above already created the workspace dir, so writeFile is enough.
+		await writeFile(
+			getWorkspaceArchivedCardsPath(context.workspaceId),
+			JSON.stringify({ columns: [{ id: "trash", cards: [existingArchived] }], dependencies: [] }, null, 2),
+			"utf8",
+		);
+
+		// Must not throw (the crash-loop this guards), and must preserve the archived card.
+		const migrated = await migrateWorkspaceTrashToArchive(context.workspaceId);
+		const archive = await loadWorkspaceArchivedBoardById(context.workspaceId);
+		const healed = (await readJson(getWorkspaceArchivedCardsPath(context.workspaceId))) as {
+			columns: Array<{ id: string; title?: string }>;
+		};
+
+		expect(migrated.columns.find((column) => column.id === "trash")?.cards).toEqual([]);
+		expect(archive.columns.find((column) => column.id === "trash")?.cards.map((card) => card.id)).toEqual([
+			"archived-old",
+			"trash-new",
+		]);
+		// The rewrite persists the canonical title, so the file stays valid on the next read.
+		expect(healed.columns[0]?.title).toBe("Trash");
+	});
+
 	it("archives trash written by a mutation while keeping board.json trash empty", async () => {
 		const context = await loadWorkspaceContext(repoPath);
 		const initial = await loadWorkspaceState(repoPath);
