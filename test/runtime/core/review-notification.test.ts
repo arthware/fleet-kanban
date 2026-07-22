@@ -72,7 +72,7 @@ describe("review notification helpers", () => {
 		).toBeNull();
 	});
 
-	it("does not resolve a home-agent summary with a stale pid when derived liveness is not attached", () => {
+	it("does not resolve a hydrated home-agent summary with a live-looking pid when derived liveness is not attached", () => {
 		const homeAgentTaskId = createHomeAgentSessionId("workspace-1", "claude");
 
 		expect(
@@ -81,7 +81,7 @@ describe("review notification helpers", () => {
 				taskId: "card-1",
 				summaries: [
 					createSummary(homeAgentTaskId, {
-						pid: 1234,
+						pid: process.pid,
 						agentSessionLifecycle: "resumable",
 					}),
 				],

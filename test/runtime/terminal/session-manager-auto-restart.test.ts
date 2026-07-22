@@ -246,7 +246,7 @@ describe("TerminalSessionManager auto-restart", () => {
 
 		const summary = await manager.refreshAgentSessionLifecycle("task-1");
 
-		expect(killSpy).toHaveBeenCalledWith(999_999, 0);
+		expect(killSpy).not.toHaveBeenCalled();
 		expect(locateAgentTranscriptMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				agentId: "claude",
@@ -262,9 +262,9 @@ describe("TerminalSessionManager auto-restart", () => {
 		killSpy.mockRestore();
 	});
 
-	it("keeps a hydrated running record attached when its persisted pid probes alive", async () => {
+	it("normalizes a hydrated running record to resumable when its persisted pid probes alive", async () => {
 		const killSpy = vi.spyOn(process, "kill").mockImplementation((() => true) as typeof process.kill);
-		locateAgentTranscriptMock.mockResolvedValue({ present: false });
+		locateAgentTranscriptMock.mockResolvedValue({ present: true, path: "/tmp/session.jsonl" });
 		const manager = new TerminalSessionManager();
 		manager.hydrateFromRecord({
 			"task-1": {
@@ -288,11 +288,12 @@ describe("TerminalSessionManager auto-restart", () => {
 
 		const summary = await manager.refreshAgentSessionLifecycle("task-1");
 
-		expect(killSpy).toHaveBeenCalledWith(process.pid, 0);
+		expect(killSpy).not.toHaveBeenCalled();
 		expect(summary).toMatchObject({
-			state: "running",
-			pid: process.pid,
-			agentSessionLifecycle: "attached",
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
 		});
 		killSpy.mockRestore();
 	});

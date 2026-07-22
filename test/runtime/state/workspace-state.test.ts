@@ -358,6 +358,7 @@ describe.sequential("workspace agent session reconciliation", () => {
 		const goneHomeAgentId = createHomeAgentSessionId(context.workspaceId, "codex");
 		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId, "claude");
 		const runningTaskId = "task-running";
+		const liveLookingTaskId = "task-live-looking";
 
 		await writeSessionsJson(context.workspaceId, {
 			[runningTaskId]: createSession(runningTaskId, {
@@ -365,6 +366,13 @@ describe.sequential("workspace agent session reconciliation", () => {
 				pid: 999_999,
 				startedAt: 1,
 				agentSessionId: "task-session",
+				agentSessionLifecycle: "attached",
+			}),
+			[liveLookingTaskId]: createSession(liveLookingTaskId, {
+				state: "running",
+				pid: process.pid,
+				startedAt: 1,
+				agentSessionId: "live-looking-session",
 				agentSessionLifecycle: "attached",
 			}),
 			[foreignHomeAgentId]: createSession(foreignHomeAgentId, {
@@ -393,6 +401,12 @@ describe.sequential("workspace agent session reconciliation", () => {
 			state: "interrupted",
 			pid: null,
 			reviewReason: "interrupted",
+		});
+		expect(migrated[liveLookingTaskId]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
 		});
 		expect(migrated[foreignHomeAgentId]).toBeUndefined();
 		expect(migrated[goneHomeAgentId]).toBeUndefined();

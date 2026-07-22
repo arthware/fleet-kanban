@@ -14,7 +14,7 @@ import type {
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
-import { probePersistedPid, reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
+import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -882,7 +882,6 @@ export class TerminalSessionManager implements TerminalSessionService {
 	): Promise<RuntimeAgentSessionLifecycle> {
 		const agentSessionId = entry.summary.agentSessionId;
 		const agentId = agentIdOverride ?? entry.summary.agentId;
-		const hasLiveProcess = Boolean(entry.active) || probePersistedPid(entry.summary.pid);
 		const transcript = agentSessionId
 			? await locateAgentTranscript({
 					agentId: agentId ?? "",
@@ -891,7 +890,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 				})
 			: { present: false as const };
 		return classifyAgentSessionLifecycle({
-			hasLiveProcess,
+			hasLiveProcess: Boolean(entry.active),
 			agentSessionId,
 			transcriptPresent: transcript.present,
 		});

@@ -21,7 +21,7 @@ import {
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
-import { probePersistedPid, reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
+import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 
@@ -566,9 +566,6 @@ async function readWorkspaceSessions(workspaceId: string): Promise<Record<string
 }
 
 function classifyPersistedSessionLifecycle(summary: RuntimeTaskSessionSummary): RuntimeAgentSessionLifecycle {
-	if (probePersistedPid(summary.pid)) {
-		return "attached";
-	}
 	return summary.agentSessionLifecycle === "resumable" || summary.agentSessionId ? "resumable" : "gone";
 }
 
