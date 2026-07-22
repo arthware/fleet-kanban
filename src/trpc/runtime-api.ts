@@ -209,12 +209,19 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 
 			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
 			const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+			const terminalSummaries = await Promise.all(
+				terminalManager.listSummaries().map(async (summary) => {
+					return (await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
+				}),
+			);
+			const terminalSummariesByTaskId = new Map(terminalSummaries.map((summary) => [summary.taskId, summary]));
 			const homeAgentTaskId = resolveRunningHomeAgentTaskId({
 				workspaceId: workspaceScope.workspaceId,
 				taskId: body.taskId,
-				summaries: [...clineTaskSessionService.listSummaries(), ...terminalManager.listSummaries()],
+				summaries: [...clineTaskSessionService.listSummaries(), ...terminalSummaries],
 				isActive: (taskId) =>
-					clineTaskSessionService.hasActiveTaskSession(taskId) || terminalManager.getSummary(taskId)?.pid != null,
+					clineTaskSessionService.hasActiveTaskSession(taskId) ||
+					terminalSummariesByTaskId.get(taskId)?.agentSessionLifecycle === "attached",
 			});
 
 			if (!homeAgentTaskId) {

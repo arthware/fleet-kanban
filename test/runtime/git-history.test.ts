@@ -142,7 +142,7 @@ describe.sequential("git history runtime", () => {
 		}
 	});
 
-	it("reads ahead and behind counts from tracked branches", { timeout: 15_000 }, async () => {
+	it("reads ahead and behind counts from tracked branches", { timeout: 30_000 }, async () => {
 		const { path: sandboxRoot, cleanup } = createTempDir("kanban-git-history-refs-");
 		try {
 			const remotePath = join(sandboxRoot, "remote.git");

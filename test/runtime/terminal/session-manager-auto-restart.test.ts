@@ -216,6 +216,88 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(manager.getSummary("task-1")?.agentSessionId).toBe("dead-session");
 	});
 
+	it("normalizes a hydrated running record with a dead pid before transcript classification", async () => {
+		const killSpy = vi.spyOn(process, "kill").mockImplementation((() => {
+			const error = new Error("No such process") as Error & { code: string };
+			error.code = "ESRCH";
+			throw error;
+		}) as typeof process.kill);
+		locateAgentTranscriptMock.mockResolvedValue({ present: true, path: "/tmp/session.jsonl" });
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "running",
+				agentId: "claude",
+				workspacePath: "/tmp/task-1",
+				pid: 999_999,
+				startedAt: 1,
+				updatedAt: 1,
+				lastOutputAt: null,
+				reviewReason: null,
+				exitCode: null,
+				agentSessionId: "stored-session",
+				lastHookAt: null,
+				latestHookActivity: null,
+				latestTurnCheckpoint: null,
+				previousTurnCheckpoint: null,
+			},
+		});
+
+		const summary = await manager.refreshAgentSessionLifecycle("task-1");
+
+		expect(killSpy).not.toHaveBeenCalled();
+		expect(locateAgentTranscriptMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: "claude",
+				sessionId: "stored-session",
+			}),
+		);
+		expect(summary).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+		killSpy.mockRestore();
+	});
+
+	it("normalizes a hydrated running record to resumable when its persisted pid probes alive", async () => {
+		const killSpy = vi.spyOn(process, "kill").mockImplementation((() => true) as typeof process.kill);
+		locateAgentTranscriptMock.mockResolvedValue({ present: true, path: "/tmp/session.jsonl" });
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "running",
+				agentId: "claude",
+				workspacePath: "/tmp/task-1",
+				pid: process.pid,
+				startedAt: 1,
+				updatedAt: 1,
+				lastOutputAt: null,
+				reviewReason: null,
+				exitCode: null,
+				agentSessionId: "stored-session",
+				lastHookAt: null,
+				latestHookActivity: null,
+				latestTurnCheckpoint: null,
+				previousTurnCheckpoint: null,
+			},
+		});
+
+		const summary = await manager.refreshAgentSessionLifecycle("task-1");
+
+		expect(killSpy).not.toHaveBeenCalled();
+		expect(summary).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+		killSpy.mockRestore();
+	});
+
 	it("does not restart an attached agent session after an explicit stop", async () => {
 		const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
 		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {

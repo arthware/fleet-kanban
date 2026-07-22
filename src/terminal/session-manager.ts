@@ -14,6 +14,7 @@ import type {
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -299,10 +300,16 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return null;
 		}
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry);
-		if (entry.summary.agentSessionLifecycle === lifecycle) {
+		const reconciled = reconcileTaskSessionSummaryLiveness({ summary: entry.summary, lifecycle });
+		if (
+			entry.summary.agentSessionLifecycle === reconciled.agentSessionLifecycle &&
+			entry.summary.state === reconciled.state &&
+			entry.summary.pid === reconciled.pid &&
+			entry.summary.reviewReason === reconciled.reviewReason
+		) {
 			return cloneSummary(entry.summary);
 		}
-		return cloneSummary(updateSummary(entry, { agentSessionLifecycle: lifecycle }));
+		return cloneSummary(updateSummary(entry, reconciled));
 	}
 
 	attach(taskId: string, listener: TerminalSessionListener): (() => void) | null {

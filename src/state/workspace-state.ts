@@ -6,6 +6,7 @@ import { z } from "zod";
 import { clineHomeDir } from "../config/cline-home";
 
 import {
+	type RuntimeAgentSessionLifecycle,
 	type RuntimeBoardCard,
 	type RuntimeBoardColumnId,
 	type RuntimeBoardData,
@@ -19,6 +20,8 @@ import {
 	runtimeWorkspaceStateSaveRequestSchema,
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
+import { parseHomeAgentSessionId } from "../core/home-agent-session";
+import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 
@@ -562,6 +565,87 @@ async function readWorkspaceSessions(workspaceId: string): Promise<Record<string
 	return parsePersistedStateFile(sessionsPath, SESSIONS_FILENAME, rawSessions, workspaceSessionsSchema, {});
 }
 
+function classifyPersistedSessionLifecycle(summary: RuntimeTaskSessionSummary): RuntimeAgentSessionLifecycle {
+	return summary.agentSessionLifecycle === "resumable" || summary.agentSessionId ? "resumable" : "gone";
+}
+
+function normalizePersistedSessionLiveness(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSummary {
+	return reconcileTaskSessionSummaryLiveness({
+		summary,
+		lifecycle: classifyPersistedSessionLifecycle(summary),
+	});
+}
+
+function partitionWorkspaceSessions(
+	workspaceId: string,
+	sessions: Record<string, RuntimeTaskSessionSummary>,
+): Record<string, RuntimeTaskSessionSummary> {
+	const nextSessions: Record<string, RuntimeTaskSessionSummary> = {};
+	for (const [taskId, summary] of Object.entries(sessions)) {
+		const parsedHomeAgentId = parseHomeAgentSessionId(taskId);
+		if (parsedHomeAgentId && parsedHomeAgentId.workspaceId !== workspaceId) {
+			continue;
+		}
+
+		const normalized = normalizePersistedSessionLiveness(summary);
+		if (parsedHomeAgentId && normalized.agentSessionLifecycle === "gone") {
+			continue;
+		}
+		nextSessions[taskId] = normalized;
+	}
+	return nextSessions;
+}
+
+function sessionsAreEqual(
+	left: Record<string, RuntimeTaskSessionSummary>,
+	right: Record<string, RuntimeTaskSessionSummary>,
+): boolean {
+	const leftKeys = Object.keys(left);
+	const rightKeys = Object.keys(right);
+	if (leftKeys.length !== rightKeys.length) {
+		return false;
+	}
+	for (const key of leftKeys) {
+		const leftSummary = left[key];
+		const rightSummary = right[key];
+		if (!rightSummary || JSON.stringify(leftSummary) !== JSON.stringify(rightSummary)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+async function writeWorkspaceSessions(
+	workspaceId: string,
+	sessions: Record<string, RuntimeTaskSessionSummary>,
+): Promise<void> {
+	await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(workspaceId), sessions, {
+		lock: null,
+	});
+}
+
+async function reconcileWorkspaceAgentSessionsLocked(
+	workspaceId: string,
+): Promise<Record<string, RuntimeTaskSessionSummary>> {
+	const currentSessions = await readWorkspaceSessions(workspaceId);
+	const nextSessions = partitionWorkspaceSessions(workspaceId, currentSessions);
+	if (!sessionsAreEqual(currentSessions, nextSessions)) {
+		await writeWorkspaceSessions(workspaceId, nextSessions);
+	}
+	return nextSessions;
+}
+
+export async function migrateAllWorkspaceAgentSessions(): Promise<void> {
+	const index = await readWorkspaceIndex();
+	await Promise.all(
+		Object.keys(index.entries).map(async (workspaceId) => {
+			await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(workspaceId), async () => {
+				await reconcileWorkspaceAgentSessionsLocked(workspaceId);
+			});
+		}),
+	);
+}
+
 async function readWorkspaceMeta(workspaceId: string): Promise<WorkspaceStateMeta> {
 	const metaPath = getWorkspaceMetaPath(workspaceId);
 	const rawMeta = await readJsonFile(metaPath);
@@ -906,7 +990,7 @@ export async function loadWorkspaceState(cwd: string): Promise<RuntimeWorkspaceS
 	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const board = await migrateWorkspaceTrashToArchiveLocked(context.workspaceId);
-		const sessions = await readWorkspaceSessions(context.workspaceId);
+		const sessions = await reconcileWorkspaceAgentSessionsLocked(context.workspaceId);
 		const meta = await readWorkspaceMeta(context.workspaceId);
 		return toWorkspaceStateResponse(context, board, sessions, meta.revision);
 	});
@@ -932,7 +1016,7 @@ export async function saveWorkspaceState(
 		}
 		const board = parsedPayload.board;
 		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, board);
-		const sessions = parsedPayload.sessions;
+		const sessions = partitionWorkspaceSessions(context.workspaceId, parsedPayload.sessions);
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
@@ -940,9 +1024,7 @@ export async function saveWorkspaceState(
 		};
 
 		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, archivedBoard.board);
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(context.workspaceId), sessions, {
-			lock: null,
-		});
+		await writeWorkspaceSessions(context.workspaceId, sessions);
 		await lockedFileSystem.writeJsonFileAtomic(metaPath, nextMeta, {
 			lock: null,
 		});
@@ -971,7 +1053,7 @@ export async function mutateWorkspaceState<T>(
 	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const currentBoard = await getCachedWorkspaceBoard(context.workspaceId);
-		const currentSessions = await readWorkspaceSessions(context.workspaceId);
+		const currentSessions = await reconcileWorkspaceAgentSessionsLocked(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
 		const currentState = toWorkspaceStateResponse(context, currentBoard, currentSessions, currentMeta.revision);
 
@@ -986,7 +1068,7 @@ export async function mutateWorkspaceState<T>(
 
 		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, mutation.board);
 		const nextBoard = archivedBoard.board;
-		const nextSessions = mutation.sessions ?? currentSessions;
+		const nextSessions = partitionWorkspaceSessions(context.workspaceId, mutation.sessions ?? currentSessions);
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
@@ -994,9 +1076,7 @@ export async function mutateWorkspaceState<T>(
 		};
 
 		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, nextBoard);
-		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionsPath(context.workspaceId), nextSessions, {
-			lock: null,
-		});
+		await writeWorkspaceSessions(context.workspaceId, nextSessions);
 		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceMetaPath(context.workspaceId), nextMeta, {
 			lock: null,
 		});
@@ -1061,7 +1141,7 @@ export async function restoreArchivedWorkspaceTask(
 			],
 			dependencies: [],
 		};
-		const currentSessions = await readWorkspaceSessions(context.workspaceId);
+		const currentSessions = await reconcileWorkspaceAgentSessionsLocked(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
