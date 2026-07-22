@@ -49,8 +49,11 @@ verification fails, fix the root cause and re-verify before continuing.
 
 ## Commit
 
-Commit on the feature branch with a semantic-commit subject (`feat:`, `fix:`, `refactor:`, …),
-following the repo's commit convention; let the diff show the how. The build phase ends at a
+Commit **as you go, not once at the end.** After each meaningful, self-consistent step — the tests,
+then the implementation that greens them, then a refactor — stage and commit with a semantic-commit
+subject (`feat:`, `fix:`, `refactor:`, …) following the repo's convention. Commit at **coherent
+boundaries** where the tree is self-consistent: not per line, not one giant commit — the history
+should read as the steps you took, and each diff shows its own how. The build phase ends at a
 **verified, committed branch**, and you don't run a review pass yourself.
 
 Opening the PR is the land phase's job, not part of the build — but don't treat "no PR" as absolute.
