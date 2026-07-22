@@ -491,9 +491,22 @@ fleet_update() {
     mkdir -p "$(dirname "$dst")"
     git clone --branch "$ref" "$repo" "$dst" || { dim "clone failed"; return 1; }
   fi
+  # Consumer boards may be live on $dst/dist/cli.js, and can't be stopped from here (several
+  # projects may share this build). `npm run build` runs `clean`, which wipes dist/ in place —
+  # so a failed rebuild would leave those boards with no binary and launchd would crash-loop
+  # them. Keep a copy of the current build and restore it if the rebuild fails. Copy (not move)
+  # so the live binary stays available through the slow install step. A full swap that also
+  # closes the wipe→rebuild window would need a staging-dir build; that's the follow-up.
+  local prev="$dst/.dist.prev"
+  rm -rf "$prev"; [ -d "$dst/dist" ] && cp -R "$dst/dist" "$prev"
   say "building (npm run install:all && npm run build) …"
-  ( cd "$dst" && npm run install:all && npm run build ) || { dim "build failed"; return 1; }
-  [ -x "$dst/dist/cli.js" ] || { dim "build produced no dist/cli.js"; return 1; }
+  if ( cd "$dst" && npm run install:all && npm run build ) && [ -x "$dst/dist/cli.js" ]; then
+    rm -rf "$prev"
+  else
+    dim "build failed — restoring the previous shared build"
+    rm -rf "$dst/dist"; [ -d "$prev" ] && mv "$prev" "$dst/dist"
+    return 1
+  fi
   say "✓ shared fleet-kanban ready at $dst"
   dim "  consumer projects use it on their next 'fleet kanban start' (dogfood keeps its own source override)"
 }
