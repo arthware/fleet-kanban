@@ -54,7 +54,7 @@ import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { prependImplementCardDirective } from "../prompts/implement-card-directive";
 import { prependPrCardDirective } from "../prompts/pr-card-directive";
-import { resolveHomeAgentContext } from "../server/architect-workspace";
+import { type RegisteredWorkspace, resolveDoctrineScope, resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
@@ -77,6 +77,8 @@ export interface CreateRuntimeApiDependencies {
 	runCommand: (command: string, cwd: string) => Promise<RuntimeCommandRunResponse>;
 	/** Reads a doctrine file (constitution) for prompt injection; defaults to the real filesystem. */
 	readDoctrineFile?: ReadFileIfExists;
+	/** Lists the registered workspace index; injected so tests control architect classification. Defaults to the real index. */
+	listWorkspaces?: () => Promise<RegisteredWorkspace[]>;
 	broadcastClineMcpAuthStatusesUpdated?: (
 		statuses: Awaited<ReturnType<ReturnType<typeof createClineMcpRuntimeService>["getAuthStatuses"]>>,
 	) => void;
@@ -343,12 +345,26 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				let architectContextPreamble = "";
 				let fleetToolsWarning: string | null = null;
 				let taskCwd: string;
+				// The registered index drives doctrine scoping for both roles, so read it
+				// once here (degrading to empty on failure) rather than in each branch.
+				const listWorkspaces = deps.listWorkspaces ?? listWorkspaceIndexEntries;
+				const readDoctrineFile = deps.readDoctrineFile ?? readFileIfExists;
+				let workspaceIndex: RegisteredWorkspace[];
+				try {
+					workspaceIndex = await listWorkspaces();
+				} catch {
+					workspaceIndex = [];
+				}
 				if (isHomeAgentSessionId(body.taskId)) {
-					const homeAgentContext = await resolveHomeAgentContext({
-						workspaceId: workspaceScope.workspaceId,
-						workspacePath: workspaceScope.workspacePath,
-						listWorkspaces: listWorkspaceIndexEntries,
-					});
+					const homeAgentContext = await resolveHomeAgentContext(
+						{
+							workspaceId: workspaceScope.workspaceId,
+							workspacePath: workspaceScope.workspacePath,
+							listWorkspaces: async () => workspaceIndex,
+						},
+						undefined,
+						readDoctrineFile,
+					);
 					taskCwd = homeAgentContext.cwd;
 					architectContextPreamble = homeAgentContext.architectContextPreamble;
 					fleetToolsWarning = homeAgentContext.fleetToolsWarning;
@@ -372,14 +388,18 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					? withPrDirective
 					: prependImplementCardDirective(withPrDirective, body.taskId, body.startInPlanMode);
 				// Prepend the repo's constitution to card prompts so it can't be skipped (Article 1/5).
-				// Resolved in-repo first, else from architect-owned doctrine at the fleet root; null when
-				// the repo has none, in which case the prompt is unchanged. The home/architect agent gets
-				// the constitution via its context preamble instead, not prepended to every message.
+				// Scoped via resolveDoctrineScope so an overseen repo resolves in-repo first, else
+				// architect-owned doctrine at the fleet root; null when the repo has none, leaving the
+				// prompt unchanged. The home/architect agent gets the constitution via its context
+				// preamble instead, not prepended to every message.
 				const doctrine = isHomeAgentSessionId(body.taskId)
 					? null
 					: await loadDoctrine(
-							{ repoPath: workspaceScope.workspacePath },
-							deps.readDoctrineFile ?? readFileIfExists,
+							{
+								repoPath: workspaceScope.workspacePath,
+								...resolveDoctrineScope(workspaceScope.workspacePath, workspaceIndex),
+							},
+							readDoctrineFile,
 						);
 				const finalPrompt = prependConstitution(withDirectives, doctrine?.constitution ?? null);
 

@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import type { ReadFileIfExists } from "../../../src/prompts/doctrine";
 import {
 	buildArchitectContextPreamble,
 	classifyArchitectWorkspace,
 	resolveAgentConfigRoot,
+	resolveDoctrineScope,
 	resolveHomeAgentContext,
 	resolveHomeAgentCwd,
 	selectArchitectAwareProjects,
 } from "../../../src/server/architect-workspace";
+
+/** Path→content fake for the injected doctrine-file seam — the only external dependency (Article 4). */
+function fakeReader(files: Record<string, string>): ReadFileIfExists {
+	return async (p: string) => (p in files ? files[p] : null);
+}
 
 describe("classifyArchitectWorkspace", () => {
 	it("reports no architect when every workspace is a flat peer", () => {
@@ -66,6 +73,64 @@ describe("classifyArchitectWorkspace", () => {
 			architectWorkspaceId: null,
 			implWorkspaceIds: [],
 		});
+	});
+});
+
+describe("resolveDoctrineScope", () => {
+	it("given an overseen repo, when scoped, then it yields the architect root and the fleet-root-relative repo name", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/tools/fleet-kanban", workspaces);
+
+		// then
+		expect(scope).toEqual({ fleetRoot: "/home/user/code/tools", repoName: "fleet-kanban" });
+	});
+
+	it("given a repo nested below a nested container, when scoped, then repoName keeps the fleet-root-relative path", () => {
+		// given — the outermost container is the architect, so the name preserves the intermediate segment
+		const workspaces = [
+			{ workspaceId: "top", repoPath: "/root/a" },
+			{ workspaceId: "leaf", repoPath: "/root/a/b/c" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/root/a/b/c", workspaces);
+
+		// then
+		expect(scope).toEqual({ fleetRoot: "/root/a", repoName: "b/c" });
+	});
+
+	it("given a flat/peer board, when scoped, then no scope is produced (in-repo resolution only)", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+			{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/repo1", workspaces);
+
+		// then
+		expect(scope).toEqual({});
+	});
+
+	it("given the architect's own path, when scoped, then no scope is produced (it is not an overseen repo)", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/tools", workspaces);
+
+		// then
+		expect(scope).toEqual({});
 	});
 });
 
@@ -287,6 +352,44 @@ describe("buildArchitectContextPreamble", () => {
 		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
 		expect(preamble).not.toContain("fleet task ls");
 	});
+
+	it("weaves the constitution into the preamble above the sub-repo list when one is provided", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		const preamble = buildArchitectContextPreamble(
+			classifyArchitectWorkspace(workspaces),
+			workspaces,
+			null,
+			"# Constitution\nArticle 1 — concepts first…",
+		);
+
+		expect(preamble).toContain("Article 1 — concepts first…");
+		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		// The law leads; the workspace awareness follows it.
+		expect(preamble.indexOf("Article 1 — concepts first…")).toBeLessThan(
+			preamble.indexOf("fleet-kanban (/home/user/code/tools/fleet-kanban)"),
+		);
+	});
+
+	it("leaves the preamble unchanged when no constitution resolves", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		const withConstitution = buildArchitectContextPreamble(
+			classifyArchitectWorkspace(workspaces),
+			workspaces,
+			null,
+			null,
+		);
+		const without = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces, null);
+
+		expect(withConstitution).toBe(without);
+	});
 });
 
 describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
@@ -381,5 +484,69 @@ describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
 		expect(context.cwd).toBe("/home/user/code/tools");
 		expect(context.architectContextPreamble).toBe("");
 		expect(context.fleetToolsWarning).toBeNull();
+	});
+
+	it("weaves the overseen repo's constitution into the architect's preamble", async () => {
+		// given — the harness repo carries its constitution in-repo
+		const read = fakeReader({
+			"/home/user/code/tools/fleet-kanban/docs/architecture/constitution.md":
+				"# Constitution\nArticle 1 — concepts first…",
+		});
+
+		// when
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "tools",
+				workspacePath: "/home/user/code/tools",
+				listWorkspaces: async () => registeredIndex,
+			},
+			provideFleetTools,
+			read,
+		);
+
+		// then — the architect is governed by the same doctrine as the cards it dispatches
+		expect(context.architectContextPreamble).toContain("Article 1 — concepts first…");
+		expect(context.architectContextPreamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+	});
+
+	it("seeds only the sub-repo awareness when no overseen repo has a constitution", async () => {
+		// given — no repo carries doctrine anywhere
+		const read = fakeReader({});
+
+		// when
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "tools",
+				workspacePath: "/home/user/code/tools",
+				listWorkspaces: async () => registeredIndex,
+			},
+			provideFleetTools,
+			read,
+		);
+
+		// then
+		expect(context.architectContextPreamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
+		expect(context.architectContextPreamble).not.toContain("Constitution");
+	});
+
+	it("injects no constitution for a non-architect (impl) workspace's home agent", async () => {
+		// given — even if a constitution is readable, an impl home agent gets no architect preamble
+		const read = fakeReader({
+			"/home/user/code/tools/fleet-kanban/docs/architecture/constitution.md": "# Constitution\nArticle 1…",
+		});
+
+		// when
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "fleet-kanban",
+				workspacePath: "/home/user/code/tools/fleet-kanban",
+				listWorkspaces: async () => registeredIndex,
+			},
+			provideFleetTools,
+			read,
+		);
+
+		// then
+		expect(context.architectContextPreamble).toBe("");
 	});
 });
