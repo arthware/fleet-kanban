@@ -15,7 +15,8 @@
 #   fleet rm   [dir]        remove a worktree + free its port (-> wt rm)
 #   fleet port [args]       stable per-worktree port (-> port-for)
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
-#   fleet service [start|stop|restart [--build]|status]   run the board under launchd (--build = rebuild source, then reload)
+#   fleet service [start|stop|restart [--build|--install]|status]   run the board under launchd
+#       (--build = stop, rebuild source offline, restart; --install = same but force `npm install` first)
 #   fleet kanban daemon [install|uninstall|status]          DEPRECATED synonym for `fleet service`
 #   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands in tracked <project>/fleet/xtools/ (legacy .fleet/xtools supported)
 set -euo pipefail
@@ -310,6 +311,17 @@ _kanban_free_port() {
   [ -n "$pid" ] && { kill -9 "$pid" 2>/dev/null || true; sleep 1; }
 }
 
+# Stop the launchd board WITHOUT removing its plist. After bootout the KeepAlive
+# supervisor is gone, so the process stays down (no auto-revive) until the next
+# bootstrap — giving a `--build` a quiet window with NO card-worktree git writes
+# racing it. That race (a build's `npm install`/husky `git config` write colliding
+# with the live board's worktree ops on the same repo) is what corrupted `.git`
+# into a bare repo and took the whole board down.
+_kanban_daemon_down() {
+  launchctl bootout "gui/$(id -u)/$(_kanban_label)" 2>/dev/null || true
+  _kanban_free_port
+}
+
 # Restart the launchd board. When the loaded daemon already launches the binary fleet
 # resolves *now* (kanban_bin), do an in-place `kickstart -k`: SIGTERM→SIGKILL→relaunch,
 # guaranteeing a fresh process (fresh in-memory state) on the same binary. Plain
@@ -384,7 +396,7 @@ fleet_service() {
     stop|down|off)   kanban_daemon uninstall;;
     restart|reload)  _service_restart "$@";;
     status|"")       kanban_daemon status;;
-    *) echo "usage: fleet service [start|stop|restart [--build]|status]" >&2; return 1;;
+    *) echo "usage: fleet service [start|stop|restart [--build|--install]|status]" >&2; return 1;;
   esac
 }
 
@@ -393,20 +405,62 @@ fleet_service() {
 # replacement for scripts/refresh.sh. Consumers on the SHARED build refresh it with
 # `fleet update` instead, then `fleet service restart` (no --build) to reload.
 _service_restart() {
-  if [ "${1:-}" = "--build" ]; then
-    local bin src
-    bin="$(kanban_bin)" || { dim "no board binary resolved — run 'fleet init' in the project first"; return 1; }
-    src="${bin%/dist/cli.js}"
-    if [ "$src" = "$bin" ] || [ ! -f "$src/package.json" ]; then
-      dim "the board runs a prebuilt binary ($bin) — nothing to rebuild here."
-      dim "  (shared-build consumers: refresh with 'fleet update', then 'fleet service restart')"; return 1
-    fi
-    say "rebuilding board source: $src"
-    # install:all before build so a pulled lockfile change (new dep) can't build
-    # against a stale node_modules — the "Could not resolve <pkg>" refresh break.
-    ( cd "$src" && npm run install:all && npm run build ) || { dim "build failed"; return 1; }
+  local do_build="" do_install=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --build)   do_build=1;;
+    --install) do_build=1; do_install=1;;   # force a dep (re)install as part of the build
+    *) dim "fleet service restart: ignoring unknown flag $1";;
+  esac; shift; done
+
+  # No build requested → just reload the running daemon in place (no downtime beyond
+  # the restart itself, no git writes).
+  [ -z "$do_build" ] && { _kanban_hard_restart; return; }
+
+  local bin src
+  bin="$(kanban_bin)" || { dim "no board binary resolved — run 'fleet init' in the project first"; return 1; }
+  src="${bin%/dist/cli.js}"
+  if [ "$src" = "$bin" ] || [ ! -f "$src/package.json" ]; then
+    dim "the board runs a prebuilt binary ($bin) — nothing to rebuild here."
+    dim "  (shared-build consumers: refresh with 'fleet update', then 'fleet service restart')"; return 1
   fi
-  _kanban_hard_restart
+
+  # First run (or a freshly cloned/reset checkout) has no node_modules — install then.
+  # Otherwise SKIP install: `npm install` runs husky's `prepare`, which writes
+  # `.git/config`; keeping that off the hot path is half of why this can't corrupt the
+  # repo any more. Force it with `--install` after a lockfile/dep change.
+  if [ -z "$do_install" ] && { [ ! -d "$src/node_modules" ] || [ ! -d "$src/web-ui/node_modules" ]; }; then
+    do_install=1; dim "node_modules missing — installing deps for this build"
+  fi
+
+  # SAFE SEQUENCE: stop the board → build offline → start it again. With the board
+  # down there are no concurrent git writers to race the build, so even an install:all
+  # (husky `git config`) is safe.
+  say "stopping board for a clean build (source: $src) …"
+  _kanban_daemon_down
+
+  # `npm run build` runs `clean`, which wipes dist/. Stash the current build first so a
+  # failed build can never leave the board with no binary to boot.
+  local dist="$src/dist" stash="$src/.dist.prev"
+  rm -rf "$stash"; [ -d "$dist" ] && mv "$dist" "$stash"
+
+  local build_ok=1
+  (
+    cd "$src" || exit 1
+    if [ -n "$do_install" ]; then say "installing deps (npm run install:all) …"; npm run install:all || exit 1; fi
+    say "building (npm run build) …"; npm run build || exit 1
+  ) || build_ok=""
+
+  if [ -n "$build_ok" ]; then
+    rm -rf "$stash"
+  else
+    dim "build failed — restoring the previous board build"
+    rm -rf "$dist"; [ -d "$stash" ] && mv "$stash" "$dist"
+  fi
+
+  say "starting board …"
+  kanban_daemon install || return 1
+
+  [ -n "$build_ok" ] || { dim "board restarted on the PREVIOUS build (new build failed — see output above)"; return 1; }
 }
 
 # --- shared fork build: one checkout every consumer project runs from --------
