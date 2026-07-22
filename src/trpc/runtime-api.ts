@@ -50,6 +50,8 @@ import {
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
 import { resolveTaskTitle } from "../core/task-title.js";
+import { readFileIfExists } from "../fs/read-file-if-exists";
+import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { prependImplementCardDirective } from "../prompts/implement-card-directive";
 import { prependPrCardDirective } from "../prompts/pr-card-directive";
 import { resolveHomeAgentContext } from "../server/architect-workspace";
@@ -73,6 +75,8 @@ export interface CreateRuntimeApiDependencies {
 	getScopedClineTaskSessionService: (scope: RuntimeTrpcWorkspaceScope) => Promise<ClineTaskSessionService>;
 	resolveInteractiveShellCommand: () => { binary: string; args: string[] };
 	runCommand: (command: string, cwd: string) => Promise<RuntimeCommandRunResponse>;
+	/** Reads a doctrine file (constitution) for prompt injection; defaults to the real filesystem. */
+	readDoctrineFile?: ReadFileIfExists;
 	broadcastClineMcpAuthStatusesUpdated?: (
 		statuses: Awaited<ReturnType<ReturnType<typeof createClineMcpRuntimeService>["getAuthStatuses"]>>,
 	) => void;
@@ -357,9 +361,20 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				// A build card with no explicit skill defaults to fleet-implement (skipped for plan
 				// cards and the home agent — see prependImplementCardDirective). An explicit `skill:`
 				// overrides that default rather than stacking on top of it.
-				const finalPrompt = skillName
+				const withDirectives = skillName
 					? withPrDirective
 					: prependImplementCardDirective(withPrDirective, body.taskId, body.startInPlanMode);
+				// Prepend the repo's constitution to card prompts so it can't be skipped (Article 1/5).
+				// Resolved in-repo first, else from architect-owned doctrine at the fleet root; null when
+				// the repo has none, in which case the prompt is unchanged. The home/architect agent gets
+				// the constitution via its context preamble instead, not prepended to every message.
+				const doctrine = isHomeAgentSessionId(body.taskId)
+					? null
+					: await loadDoctrine(
+							{ repoPath: workspaceScope.workspacePath },
+							deps.readDoctrineFile ?? readFileIfExists,
+						);
+				const finalPrompt = prependConstitution(withDirectives, doctrine?.constitution ?? null);
 
 				// Surface a fleet-tools resolution failure to the user without blocking the
 				// start: the architect still launches, but its board commands are unavailable.
