@@ -11,6 +11,9 @@ const trpcMocks = vi.hoisted(() => ({
 			},
 		},
 		runtime: {
+			notifyTaskReadyForReview: {
+				mutate: vi.fn(),
+			},
 			stopTaskSession: {
 				mutate: vi.fn(),
 			},
@@ -34,7 +37,7 @@ const workspaceStateMocks = vi.hoisted(() => ({
 }));
 
 const taskWorktreeContextMocks = vi.hoisted(() => ({
-	resolveTaskWorktreeContext: vi.fn().mockResolvedValue(null),
+	resolveTaskWorktreeContext: vi.fn(),
 }));
 
 vi.mock("@trpc/client", () => ({
@@ -53,13 +56,15 @@ vi.mock("../../../src/workspace/task-worktree-context.js", () => ({
 
 import { registerTaskCommand } from "../../../src/commands/task";
 
-const WORKSPACE_PATH = "/tmp/repo";
+const MAIN_REPO_PATH = "/main/repo";
+const WORKTREE_CWD = "/main/.cline/worktrees/card-42/repo";
+const WORKTREE_TASK_ID = "card-42";
 
 function createCard(overrides: Partial<RuntimeBoardCard> = {}): RuntimeBoardCard {
 	return {
-		id: "task-1",
-		title: "Task one",
-		prompt: "Task one prompt",
+		id: WORKTREE_TASK_ID,
+		title: "Task in worktree",
+		prompt: "Prompt",
 		startInPlanMode: false,
 		autoReviewEnabled: false,
 		baseRef: "main",
@@ -75,9 +80,9 @@ function createState(
 	> = {},
 ): RuntimeWorkspaceStateResponse {
 	return {
-		repoPath: WORKSPACE_PATH,
-		statePath: `${WORKSPACE_PATH}/.cline/kanban/board.json`,
-		taskWorktreesRoot: `${WORKSPACE_PATH}/.cline/worktrees`,
+		repoPath: MAIN_REPO_PATH,
+		statePath: `${MAIN_REPO_PATH}/.cline/kanban/board.json`,
+		taskWorktreesRoot: `${MAIN_REPO_PATH}/.cline/worktrees`,
 		git: {
 			currentBranch: "main",
 			defaultBranch: "main",
@@ -110,9 +115,10 @@ function parseStdoutJson(stdout: string): Record<string, unknown> {
 	return JSON.parse(stdout) as Record<string, unknown>;
 }
 
-describe("task mutation output when realtime notify fails", () => {
+describe("task commands resolve cwd inside a task worktree without --project-path", () => {
 	let state: RuntimeWorkspaceStateResponse;
 	let stdout = "";
+	let cwdSpy: ReturnType<typeof vi.spyOn>;
 
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -120,21 +126,32 @@ describe("task mutation output when realtime notify fails", () => {
 
 	beforeEach(() => {
 		stdout = "";
-		state = createState();
+		state = createState({ backlog: [createCard(), createCard({ id: "other-task" })] });
 		process.exitCode = undefined;
+
+		cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(WORKTREE_CWD);
+		taskWorktreeContextMocks.resolveTaskWorktreeContext.mockReset();
+		taskWorktreeContextMocks.resolveTaskWorktreeContext.mockImplementation(async (cwd: string) =>
+			cwd === WORKTREE_CWD ? { taskId: WORKTREE_TASK_ID, mainRepoPath: MAIN_REPO_PATH } : null,
+		);
+
 		trpcMocks.createTRPCProxyClient.mockReturnValue(trpcMocks.client);
 		trpcMocks.httpBatchLink.mockReturnValue({});
 		trpcMocks.client.projects.add.mutate.mockResolvedValue({
 			ok: true,
 			project: { id: "workspace-1" },
 		});
+		trpcMocks.client.runtime.notifyTaskReadyForReview.mutate.mockResolvedValue({
+			ok: true,
+			taskId: WORKTREE_TASK_ID,
+		});
 		trpcMocks.client.runtime.stopTaskSession.mutate.mockResolvedValue({ ok: true });
 		trpcMocks.client.workspace.getState.query.mockImplementation(async () => state);
-		trpcMocks.client.workspace.notifyStateUpdated.mutate.mockRejectedValue(new Error("notify timed out"));
+		trpcMocks.client.workspace.notifyStateUpdated.mutate.mockResolvedValue(undefined);
 		workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({
-			repoPath: WORKSPACE_PATH,
+			repoPath: MAIN_REPO_PATH,
 			workspaceId: "workspace-1",
-			statePath: `${WORKSPACE_PATH}/.cline/kanban/board.json`,
+			statePath: `${MAIN_REPO_PATH}/.cline/kanban/board.json`,
 			git: state.git,
 		});
 		workspaceStateMocks.mutateWorkspaceState.mockImplementation(async (_workspacePath, mutate) => {
@@ -154,51 +171,68 @@ describe("task mutation output when realtime notify fails", () => {
 			return true;
 		});
 		vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
 	});
 
-	it("prints created-card JSON including agentModel after the board write commits", async () => {
-		await createTaskProgram().parseAsync([
-			"node",
-			"kanban",
-			"task",
-			"create",
-			"--prompt",
-			"Create a design card",
-			"--agent-id",
-			"codex",
-			"--agent-model",
-			"claude-opus-4-8",
-		]);
+	it("resolves the registered workspace from the worktree's main repo path, not the raw worktree cwd, for task review", async () => {
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "review"]);
 
-		const payload = parseStdoutJson(stdout);
-
-		expect(process.exitCode).toBeUndefined();
-		expect(payload.ok).toBe(true);
-		expect(payload.task).toMatchObject({
-			id: expect.any(String),
-			prompt: "Create a design card",
-			agentId: "codex",
-			agentModel: "claude-opus-4-8",
-		});
-		expect(state.board.columns.find((column) => column.id === "backlog")?.cards[0]?.agentModel).toBe(
-			"claude-opus-4-8",
+		expect(cwdSpy).toHaveBeenCalled();
+		expect(taskWorktreeContextMocks.resolveTaskWorktreeContext).toHaveBeenCalledWith(WORKTREE_CWD);
+		expect(workspaceStateMocks.loadWorkspaceContext).toHaveBeenCalledWith(
+			MAIN_REPO_PATH,
+			expect.objectContaining({ autoCreateIfMissing: false }),
 		);
+		expect(trpcMocks.client.runtime.notifyTaskReadyForReview.mutate).toHaveBeenCalledWith({
+			taskId: WORKTREE_TASK_ID,
+		});
+		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("prints done-task JSON after the board write commits", async () => {
-		state = createState({ backlog: [createCard()] });
-
-		await createTaskProgram().parseAsync(["node", "kanban", "task", "done", "--task-id", "task-1"]);
+	it("defaults the task id to the current worktree's card for task review when no id is given", async () => {
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "review"]);
 
 		const payload = parseStdoutJson(stdout);
+		expect(payload.ok).toBe(true);
+		expect(trpcMocks.client.runtime.notifyTaskReadyForReview.mutate).toHaveBeenCalledWith({
+			taskId: WORKTREE_TASK_ID,
+		});
+	});
 
+	it("defaults the task id to the current worktree's card for task done when no --task-id or --column is given", async () => {
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "done"]);
+
+		const payload = parseStdoutJson(stdout);
 		expect(process.exitCode).toBeUndefined();
 		expect(payload.ok).toBe(true);
-		expect(payload.task).toMatchObject({
-			id: "task-1",
-			column: "done",
-		});
-		expect(state.board.columns.find((column) => column.id === "done")?.cards[0]?.id).toBe("task-1");
+		expect(payload.task).toMatchObject({ id: WORKTREE_TASK_ID, column: "done" });
+	});
+
+	it("defaults the task id to the current worktree's card for task update when no --task-id is given", async () => {
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "update", "--title", "New title"]);
+
+		const payload = parseStdoutJson(stdout);
+		expect(process.exitCode).toBeUndefined();
+		expect(payload.ok).toBe(true);
+		expect(payload.task).toMatchObject({ id: WORKTREE_TASK_ID, title: "New title" });
+	});
+
+	it("defaults the primary task id to the current worktree's card for task link when no --task-id is given", async () => {
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "link", "--linked-task-id", "other-task"]);
+
+		const payload = parseStdoutJson(stdout);
+		expect(process.exitCode).toBeUndefined();
+		expect(payload.ok).toBe(true);
+		expect(state.board.dependencies).toHaveLength(1);
+	});
+
+	it("still fails clearly when cwd is neither a worktree nor given --project-path/--task-id", async () => {
+		taskWorktreeContextMocks.resolveTaskWorktreeContext.mockResolvedValue(null);
+
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "done"]);
+
+		const payload = parseStdoutJson(stdout);
+		expect(process.exitCode).toBe(1);
+		expect(payload.ok).toBe(false);
+		expect(payload.error).toContain("task done requires either --task-id or --column.");
 	});
 });

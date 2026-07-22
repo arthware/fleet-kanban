@@ -32,6 +32,7 @@ import { resolveProjectInputPath } from "../projects/project-path";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
 import { resolveRepoNameWithOwner } from "../workspace/repo-name";
+import { resolveTaskWorktreeContext } from "../workspace/task-worktree-context";
 import {
 	type ParsedTaskCard,
 	parseTaskCardDocument,
@@ -273,7 +274,10 @@ function buildTaskClineSettingsForUpdate(
 	return nextSettings;
 }
 
-function resolveTaskCommandTarget(input: TaskCommandTarget, commandName: string): ResolvedTaskCommandTarget {
+async function resolveTaskCommandTarget(
+	input: TaskCommandTarget & { cwd: string },
+	commandName: string,
+): Promise<ResolvedTaskCommandTarget> {
 	const taskId = input.taskId?.trim();
 	const column = input.column;
 	if (taskId && column) {
@@ -289,6 +293,13 @@ function resolveTaskCommandTarget(input: TaskCommandTarget, commandName: string)
 		return {
 			kind: "column",
 			column,
+		};
+	}
+	const worktreeContext = await resolveTaskWorktreeContext(input.cwd);
+	if (worktreeContext) {
+		return {
+			kind: "task",
+			taskId: worktreeContext.taskId,
 		};
 	}
 	throw new Error(`${commandName} requires either --task-id or --column.`);
@@ -315,7 +326,9 @@ async function resolveRuntimeWorkspace(
 	options: { autoCreateIfMissing?: boolean } = {},
 ) {
 	const normalizedProjectPath = (projectPath ?? "").trim();
-	const resolvedPath = normalizedProjectPath ? resolveProjectInputPath(normalizedProjectPath, cwd) : cwd;
+	const resolvedPath = normalizedProjectPath
+		? resolveProjectInputPath(normalizedProjectPath, cwd)
+		: ((await resolveTaskWorktreeContext(cwd))?.mainRepoPath ?? cwd);
 	return await loadWorkspaceContext(resolvedPath, {
 		autoCreateIfMissing: options.autoCreateIfMissing ?? true,
 	});
@@ -702,7 +715,7 @@ async function createTask(input: {
 
 async function updateTaskCommand(input: {
 	cwd: string;
-	taskId: string;
+	taskId?: string;
 	title?: string;
 	projectPath?: string;
 	prompt?: string;
@@ -737,6 +750,10 @@ async function updateTaskCommand(input: {
 	}
 
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const inputTaskId = input.taskId?.trim() || (await resolveTaskWorktreeContext(input.cwd))?.taskId;
+	if (!inputTaskId) {
+		throw new Error("task update requires --task-id, or must be run from inside a task worktree.");
+	}
 	const externalIssue =
 		input.externalIssueRef === undefined
 			? undefined
@@ -750,10 +767,10 @@ async function updateTaskCommand(input: {
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const updated = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
-		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+		const taskId = resolveCardIdFromRefOrIssue(runtimeState, inputTaskId);
 		const taskRecord = findTaskRecord(runtimeState, taskId);
 		if (!taskRecord) {
-			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
+			throw new Error(`Task "${inputTaskId}" was not found in workspace ${workspaceRepoPath}.`);
 		}
 		// baseRef/agentModel/skill drive worktree creation and launch-time agent
 		// guidance, all fixed once a task leaves backlog. Changing them afterward
@@ -813,15 +830,19 @@ async function updateTaskCommand(input: {
 
 async function linkTasks(input: {
 	cwd: string;
-	taskId: string;
+	taskId?: string;
 	linkedTaskId: string;
 	projectPath?: string;
 }): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const inputTaskId = input.taskId?.trim() || (await resolveTaskWorktreeContext(input.cwd))?.taskId;
+	if (!inputTaskId) {
+		throw new Error("task link requires --task-id, or must be run from inside a task worktree.");
+	}
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const dependency = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
-		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+		const taskId = resolveCardIdFromRefOrIssue(runtimeState, inputTaskId);
 		const linkedTaskId = resolveCardIdFromRefOrIssue(runtimeState, input.linkedTaskId);
 		const linked = addTaskDependency(runtimeState.board, taskId, linkedTaskId);
 		if (!linked.added || !linked.dependency) {
@@ -1006,17 +1027,21 @@ async function sendTaskInput(input: {
 	};
 }
 
-export async function reviewTask(input: { cwd: string; taskId: string; projectPath?: string }): Promise<JsonRecord> {
+export async function reviewTask(input: { cwd: string; taskId?: string; projectPath?: string }): Promise<JsonRecord> {
 	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd, {
 		autoCreateIfMissing: false,
 	});
+	const taskId = input.taskId?.trim() || (await resolveTaskWorktreeContext(input.cwd))?.taskId;
+	if (!taskId) {
+		throw new Error("task review requires a task id, or must be run from inside a task worktree.");
+	}
 	const runtimeClient = createRuntimeTrpcClient(workspace.workspaceId);
 	const result = await runtimeClient.runtime.notifyTaskReadyForReview.mutate({
-		taskId: input.taskId,
+		taskId,
 	});
 
 	if (!result.ok) {
-		throw new Error(result.error ?? `Task "${input.taskId}" could not be notified for review.`);
+		throw new Error(result.error ?? `Task "${taskId}" could not be notified for review.`);
 	}
 
 	return {
@@ -1285,7 +1310,7 @@ async function completeTask(input: {
 	column?: ListTaskColumn;
 	projectPath?: string;
 }): Promise<JsonRecord> {
-	const target = resolveTaskCommandTarget(input, "task done");
+	const target = await resolveTaskCommandTarget(input, "task done");
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
@@ -1366,7 +1391,7 @@ async function trashTask(input: {
 	column?: ListTaskColumn;
 	projectPath?: string;
 }): Promise<JsonRecord> {
-	const target = resolveTaskCommandTarget(input, "task trash");
+	const target = await resolveTaskCommandTarget(input, "task trash");
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
@@ -1455,7 +1480,7 @@ async function deleteTaskCommand(input: {
 	column?: ListTaskColumn;
 	projectPath?: string;
 }): Promise<JsonRecord> {
-	const target = resolveTaskCommandTarget(input, "task delete");
+	const target = await resolveTaskCommandTarget(input, "task delete");
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
@@ -1743,7 +1768,7 @@ export function registerTaskCommand(program: Command): void {
 	task
 		.command("update")
 		.description("Update an existing task.")
-		.requiredOption("--task-id <id>", "Task ID.")
+		.option("--task-id <id>", "Task ID. Defaults to the current task worktree's own card when omitted.")
 		.option("--title <text>", "Replacement task title.")
 		.option("--prompt <text>", "Replacement task prompt.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
@@ -1776,7 +1801,7 @@ export function registerTaskCommand(program: Command): void {
 		)
 		.action(
 			async (options: {
-				taskId: string;
+				taskId?: string;
 				title?: string;
 				prompt?: string;
 				projectPath?: string;
@@ -1886,7 +1911,10 @@ export function registerTaskCommand(program: Command): void {
 	task
 		.command("link")
 		.description("Link two tasks so one task waits on another.")
-		.requiredOption("--task-id <id>", "One of the two task IDs to link.")
+		.option(
+			"--task-id <id>",
+			"One of the two task IDs to link. Defaults to the current task worktree's own card when omitted.",
+		)
 		.requiredOption("--linked-task-id <id>", "The other task ID to link.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
 		.addHelpText(
@@ -1905,7 +1933,7 @@ export function registerTaskCommand(program: Command): void {
 				"",
 			].join("\n"),
 		)
-		.action(async (options: { taskId: string; linkedTaskId: string; projectPath?: string }) => {
+		.action(async (options: { taskId?: string; linkedTaskId: string; projectPath?: string }) => {
 			await runTaskCommand(
 				async () =>
 					await linkTasks({
@@ -1972,9 +2000,9 @@ export function registerTaskCommand(program: Command): void {
 	task
 		.command("review")
 		.description("Notify the workspace home-agent that a task is ready for review.")
-		.argument("<id>", "Task ID.")
+		.argument("[id]", "Task ID. Defaults to the current task worktree's own card when omitted.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
-		.action(async (id: string, options: { projectPath?: string }) => {
+		.action(async (id: string | undefined, options: { projectPath?: string }) => {
 			await runTaskCommand(
 				async () =>
 					await reviewTask({
