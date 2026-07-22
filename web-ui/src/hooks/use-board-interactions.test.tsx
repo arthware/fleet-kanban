@@ -570,7 +570,7 @@ describe("useBoardInteractions", () => {
 		expect(ensureTaskWorkspace).toHaveBeenCalledWith(expectedTask);
 		expect(startTaskSession).toHaveBeenCalledWith(expectedTask, {
 			resumeFromTrash: true,
-			resumeMode: "fresh",
+			resumeMode: "resume",
 		});
 		expect(showAppToastMock).toHaveBeenCalledWith({
 			intent: "warning",

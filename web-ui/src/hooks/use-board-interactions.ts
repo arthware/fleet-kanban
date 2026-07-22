@@ -564,10 +564,9 @@ export function useBoardInteractions({
 					timeout: 7000,
 				});
 			}
-			const sessionLifecycle = sessions[taskId]?.agentSessionLifecycle;
 			const resumed = await startTaskSession(task, {
 				resumeFromTrash: true,
-				resumeMode: sessionLifecycle === "resumable" ? "resume" : "fresh",
+				resumeMode: "resume",
 			});
 			if (resumed.ok) {
 				setBoard((currentBoard) => {

@@ -155,6 +155,18 @@ function updateSummary(entry: SessionEntry, patch: Partial<RuntimeTaskSessionSum
 	return entry.summary;
 }
 
+function hasPriorTaskLaunch(summary: RuntimeTaskSessionSummary): boolean {
+	return (
+		summary.agentId !== null ||
+		summary.workspacePath !== null ||
+		summary.startedAt !== null ||
+		summary.lastOutputAt !== null ||
+		summary.exitCode !== null ||
+		summary.agentSessionId !== null ||
+		summary.agentSessionLifecycle !== undefined
+	);
+}
+
 function isActiveState(state: RuntimeTaskSessionState): boolean {
 	return state === "running" || state === "awaiting_review";
 }
@@ -320,13 +332,31 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 	async startTaskSession(request: StartTaskSessionRequest): Promise<RuntimeTaskSessionSummary> {
 		const entry = this.ensureEntry(request.taskId);
+		if (entry.active && isActiveState(entry.summary.state)) {
+			return cloneSummary(entry.summary);
+		}
+
+		const isFirstTaskLaunch = !hasPriorTaskLaunch(entry.summary);
+		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
+		updateSummary(entry, { agentSessionLifecycle: lifecycle });
+
+		// The home/architect chat is a single, persistent conversation. Give it a
+		// deterministic session id so it is always resumable and never lost on a
+		// board restart: start it with --session-id the first time, then resume it on
+		// every launch after (chosen by whether its transcript already exists).
+		const homeAgentSessionId =
+			request.agentId === "claude" && request.workspaceId && isHomeAgentSessionId(request.taskId)
+				? deriveHomeAgentClaudeSessionId(request.workspaceId, request.agentId)
+				: null;
+
+		if (!homeAgentSessionId && !isFirstTaskLaunch && lifecycle === "gone") {
+			return cloneSummary(entry.summary);
+		}
+
 		entry.restartRequest = {
 			kind: "task",
 			request: cloneStartTaskSessionRequest(request),
 		};
-		if (entry.active && isActiveState(entry.summary.state)) {
-			return cloneSummary(entry.summary);
-		}
 
 		if (entry.active) {
 			stopWorkspaceTrustTimers(entry.active);
@@ -347,20 +377,6 @@ export class TerminalSessionManager implements TerminalSessionService {
 			},
 		});
 
-		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
-		const requestedResumeMode = request.resumeMode ?? (lifecycle === "resumable" ? "resume" : "fresh");
-		const resumeMode = requestedResumeMode === "resume" && lifecycle === "resumable" ? "resume" : "fresh";
-		updateSummary(entry, { agentSessionLifecycle: lifecycle });
-
-		// The home/architect chat is a single, persistent conversation. Give it a
-		// deterministic session id so it is always resumable and never lost on a
-		// board restart: start it with --session-id the first time, then resume it on
-		// every launch after (chosen by whether its transcript already exists).
-		const homeAgentSessionId =
-			request.agentId === "claude" && request.workspaceId && isHomeAgentSessionId(request.taskId)
-				? deriveHomeAgentClaudeSessionId(request.workspaceId, request.agentId)
-				: null;
-
 		let launchSessionId: string | null;
 		let resumeSession: boolean;
 		if (homeAgentSessionId) {
@@ -378,12 +394,12 @@ export class TerminalSessionManager implements TerminalSessionService {
 			updateSummary(entry, { agentSessionId: launchSessionId });
 		} else {
 			// Resume by the task's stored session id only when lifecycle routing says
-			// it is resumable. A gone transcript starts fresh even if an old id remains
-			// persisted.
+			// it is resumable. A prior launch with no resumable transcript is allowed
+			// to reattach/no-op, but must not mint a fresh prompt-replaying session.
 			({ agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
 				agentId: request.agentId,
 				storedSessionId: entry.summary.agentSessionId,
-				resumeMode,
+				resumeMode: lifecycle === "resumable" ? "resume" : isFirstTaskLaunch ? "fresh" : "unavailable",
 				mintSessionId: () => randomUUID(),
 			}));
 		}
@@ -395,7 +411,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			args: request.args,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
-			prompt: resumeSession ? "" : request.prompt,
+			prompt: homeAgentSessionId ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
 			agentModel: request.agentModel,
 			images: request.images,
 			startInPlanMode: request.startInPlanMode,

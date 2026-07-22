@@ -486,7 +486,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 							? terminalManager.getSummary(body.taskId)
 							: null;
 				const resumeMode =
-					body.resumeMode ?? (previousSummary?.agentSessionLifecycle === "resumable" ? "resume" : "fresh");
+					body.resumeMode ?? (previousSummary?.agentSessionLifecycle === "resumable" ? "resume" : undefined);
 				const summary = await terminalManager.startTaskSession({
 					taskId: body.taskId,
 					agentId: resolved.agentId,
@@ -507,7 +507,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				});
 
 				let nextSummary = summary;
-				if (shouldCaptureTurnCheckpoint) {
+				if (shouldCaptureTurnCheckpoint && summary.pid !== null) {
 					try {
 						const nextTurn = (summary.latestTurnCheckpoint?.turn ?? 0) + 1;
 						const checkpoint = await captureTaskTurnCheckpoint({

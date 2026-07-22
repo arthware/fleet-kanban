@@ -36,6 +36,17 @@ describe("resolveLaunchSessionId", () => {
 		expect(result).toEqual({ agentSessionId: "minted-id", resumeSession: false });
 	});
 
+	it("does not mint a replacement id when a requested resume is not resumable", () => {
+		const result = resolveLaunchSessionId({
+			agentId: "claude",
+			storedSessionId: "dead-stored-id",
+			resumeMode: "unavailable",
+			mintSessionId: () => "should-not-be-used",
+		});
+
+		expect(result).toEqual({ agentSessionId: "dead-stored-id", resumeSession: false });
+	});
+
 	it("does not mint an id for a fresh Codex start, since Codex assigns its own", () => {
 		const result = resolveLaunchSessionId({
 			agentId: "codex",

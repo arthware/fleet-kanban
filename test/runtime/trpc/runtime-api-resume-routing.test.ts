@@ -241,7 +241,7 @@ describe("runtime-api terminal resume routing", () => {
 		expect(spawnRequest?.args).not.toContain("--session-id");
 	});
 
-	it("starts fresh instead of emitting a dead stored id when the stored transcript is gone", async () => {
+	it("does not relaunch when the stored transcript is gone", async () => {
 		locateAgentTranscriptMock.mockResolvedValue({ present: false });
 		const terminalManager = new TerminalSessionManager();
 		hydrateStoredClaudeSession(terminalManager, "dead-session");
@@ -250,14 +250,9 @@ describe("runtime-api terminal resume routing", () => {
 		const response = await startTaskSession(api);
 
 		expect(response.ok).toBe(true);
-		expect(ptySessionSpawnMock).toHaveBeenCalledTimes(1);
-		const spawnRequest = ptySessionSpawnMock.mock.calls[0]?.[0] as MockSpawnRequest | undefined;
-		expect(spawnRequest?.args).toContain("--session-id");
-		expect(spawnRequest?.args).not.toContain("--resume");
-		expect(spawnRequest?.args).not.toContain("--continue");
-		expect(spawnRequest?.args).not.toContain("dead-session");
-		const freshSessionId = spawnRequest?.args[(spawnRequest?.args.indexOf("--session-id") ?? -2) + 1];
-		expect(freshSessionId).toEqual(expect.any(String));
-		expect(freshSessionId).not.toBe("dead-session");
+		expect(ptySessionSpawnMock).not.toHaveBeenCalled();
+		expect(turnCheckpointMocks.captureTaskTurnCheckpoint).not.toHaveBeenCalled();
+		expect(terminalManager.getSummary("task-1")?.agentSessionId).toBe("dead-session");
+		expect(terminalManager.getSummary("task-1")?.pid).toBeNull();
 	});
 });

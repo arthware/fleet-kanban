@@ -56,7 +56,7 @@ describe("TerminalSessionManager auto-restart", () => {
 		}));
 	});
 
-	it("restarts an attached agent session after it exits", async () => {
+	it("does not auto-restart a prior task launch without a resumable session", async () => {
 		const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
 		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {
 			const session = createMockPtySession(spawnedSessions.length === 0 ? 111 : 222, request);
@@ -82,12 +82,12 @@ describe("TerminalSessionManager auto-restart", () => {
 
 		expect(ptySessionSpawnMock).toHaveBeenCalledTimes(1);
 		spawnedSessions[0]?.triggerExit(130);
+		await Promise.resolve();
+		await Promise.resolve();
 
-		await vi.waitFor(() => {
-			expect(ptySessionSpawnMock).toHaveBeenCalledTimes(2);
-		});
-		expect(manager.getSummary("task-1")?.state).toBe("running");
-		expect(manager.getSummary("task-1")?.pid).toBe(222);
+		expect(ptySessionSpawnMock).toHaveBeenCalledTimes(1);
+		expect(manager.getSummary("task-1")?.state).not.toBe("running");
+		expect(manager.getSummary("task-1")?.pid).toBeNull();
 	});
 
 	it("resumes by stored id when the transcript is present", async () => {
@@ -134,14 +134,46 @@ describe("TerminalSessionManager auto-restart", () => {
 		);
 	});
 
-	it("starts fresh instead of resuming a gone stored id during automatic restart", async () => {
-		const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
-		ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {
-			const session = createMockPtySession(spawnedSessions.length === 0 ? 111 : 222, request);
-			spawnedSessions.push(session);
-			return session;
+	it("given a review card with no resumable session, when resume is requested, then it does not relaunch or replay the prompt", async () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "awaiting_review",
+				agentId: "codex",
+				workspacePath: "/tmp/task-1",
+				pid: null,
+				startedAt: 1,
+				updatedAt: 1,
+				lastOutputAt: 1,
+				reviewReason: null,
+				exitCode: 0,
+				agentSessionId: null,
+				agentSessionLifecycle: "gone",
+				lastHookAt: null,
+				latestHookActivity: null,
+				latestTurnCheckpoint: null,
+				previousTurnCheckpoint: null,
+			},
 		});
 
+		const summary = await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp/task-1",
+			prompt: "Original card prompt",
+			resumeMode: "resume",
+		});
+
+		expect(prepareAgentLaunchMock).not.toHaveBeenCalled();
+		expect(ptySessionSpawnMock).not.toHaveBeenCalled();
+		expect(summary.state).toBe("awaiting_review");
+		expect(summary.pid).toBeNull();
+	});
+
+	it("does not start fresh when a stored session id is gone", async () => {
 		const manager = new TerminalSessionManager();
 		manager.hydrateFromRecord({
 			"task-1": {
@@ -174,23 +206,14 @@ describe("TerminalSessionManager auto-restart", () => {
 			binary: "claude",
 			args: [],
 			cwd: "/tmp/task-1",
-			prompt: "",
+			prompt: "Original card prompt",
 			resumeFromTrash: true,
 			resumeMode: "resume",
 		});
-		spawnedSessions[0]?.triggerExit(1);
 
-		await vi.waitFor(() => {
-			expect(prepareAgentLaunchMock).toHaveBeenCalledTimes(2);
-		});
-
-		const restartLaunch = prepareAgentLaunchMock.mock.calls[1]?.[0];
-		expect(restartLaunch).toEqual(
-			expect.objectContaining({
-				resumeSession: false,
-			}),
-		);
-		expect(restartLaunch?.agentSessionId).not.toBe("dead-session");
+		expect(prepareAgentLaunchMock).not.toHaveBeenCalled();
+		expect(ptySessionSpawnMock).not.toHaveBeenCalled();
+		expect(manager.getSummary("task-1")?.agentSessionId).toBe("dead-session");
 	});
 
 	it("does not restart an attached agent session after an explicit stop", async () => {
