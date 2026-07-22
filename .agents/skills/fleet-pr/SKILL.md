@@ -19,4 +19,6 @@ When the task is done and your work is committed, open a pull request:
 - If the repo is local-only (no `origin` remote) or `gh` is unavailable/not authenticated, leave the
   committed work on the branch and say exactly why a PR was not opened.
 
-Leave the card in Review. A human reviews and merges the PR.
+Once your work is committed and the PR is open (or its absence explained), you're done — the card
+moves to Review on its own once your session ends. Don't run a card-move command yourself. A human
+reviews and merges the PR.

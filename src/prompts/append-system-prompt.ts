@@ -155,7 +155,7 @@ If the user asks you to write code, fix a bug, implement a feature, refactor, or
 - Kanban also supports linking tasks. Linking is useful both for parallelization and for dependencies: when work is easy to decompose into multiple pieces that can be done in parallel, link multiple backlog tasks to the same dependency so they all become ready to start once that dependency finishes; when one piece of work depends on another, use links to represent that follow-on dependency. If both linked tasks are in backlog, Kanban preserves the order you pass to the command: \`--task-id\` waits on \`--linked-task-id\`, and on the board the arrow points into \`--linked-task-id\`. Once only one linked task remains in backlog, Kanban reorients the saved dependency so the backlog task is the waiting dependent task and the other task is the prerequisite. The board arrow points into the prerequisite task so the user can see what must finish first. A link requires at least one backlog task, and when the linked review task is moved to done, that backlog task becomes ready to start.
 - How linking works: when a task in the review column is moved to done, any linked backlog tasks automatically start. This is how you chain work so tasks kick off autonomously without manual intervention.
 - Tasks can also enable automatic PR review. PR-mode cards receive the \`fleet-pr\` skill when their agent starts, so the agent commits as it works and opens one idempotent PR before leaving the card in Review. Linked backlog tasks still start only when a human moves the reviewed task to done.
-- If your current working directory is inside \`.cline/worktrees/\`, you are inside a Kanban task worktree. In that case, create or manage tasks against the main workspace path, not the task worktree path. Pass the main workspace with \`--project-path\`.
+- If your current working directory is inside a Kanban task worktree, \`--project-path\` and (for \`task review\`/\`done\`/\`update\`/\`trash\`/\`delete\`/\`link\`) \`--task-id\` are optional: they resolve automatically to that worktree's registered workspace and its own card. Only pass them explicitly to target a different workspace or task than the one currently checked out.
 - If a task command fails because the runtime is unavailable, tell the user to start Kanban in that workspace first with \`${kanbanCommand}\`, then retry the task command.
 
 # Command Prefix
@@ -220,10 +220,10 @@ Parameters:
 Purpose: update an existing task, including prompt, base ref, plan mode, and auto-review behavior.
 
 Command:
-\`${kanbanCommand} task update --task-id <task_id> [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode pr] [--external-issue <ref>|default]\`
+\`${kanbanCommand} task update [--task-id <task_id>] [--title "<text>"] [--prompt "<text>"] [--project-path <path>] [--base-ref <branch>] [--start-in-plan-mode <true|false>] [--auto-review-enabled <true|false>] [--auto-review-mode pr] [--external-issue <ref>|default]\`
 
 Parameters:
-- \`--task-id <task_id>\` required task ID.
+- \`--task-id <task_id>\` optional task ID. Defaults to the current task worktree's own card when omitted.
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 - \`--title "<text>"\` optional replacement title.
 - \`--prompt "<text>"\` optional replacement prompt text.
@@ -249,7 +249,7 @@ Parameters:
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 
 Notes:
-- Provide exactly one of \`--task-id\` or \`--column\`.
+- Provide exactly one of \`--task-id\` or \`--column\`, or omit both when run from inside a task worktree to target that worktree's own card.
 - \`task done --column done\` is a no-op for tasks already in done.
 
 ## task trash
@@ -265,7 +265,7 @@ Parameters:
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 
 Notes:
-- Provide exactly one of \`--task-id\` or \`--column\`.
+- Provide exactly one of \`--task-id\` or \`--column\`, or omit both when run from inside a task worktree to target that worktree's own card.
 - \`task trash --column trash\` is a no-op for tasks already in trash.
 
 ## task delete
@@ -281,7 +281,7 @@ Parameters:
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 
 Notes:
-- Provide exactly one of \`--task-id\` or \`--column\`.
+- Provide exactly one of \`--task-id\` or \`--column\`, or omit both when run from inside a task worktree to target that worktree's own card.
 - \`task delete --column done\` permanently removes completed task records.
 
 ## task link
@@ -289,10 +289,10 @@ Notes:
 Purpose: link two tasks so one task waits on another. At least one linked task must be in backlog.
 
 Command:
-\`${kanbanCommand} task link --task-id <task_id> --linked-task-id <task_id> [--project-path <path>]\`
+\`${kanbanCommand} task link [--task-id <task_id>] --linked-task-id <task_id> [--project-path <path>]\`
 
 Parameters:
-- \`--task-id <task_id>\` required one of the two task IDs to link.
+- \`--task-id <task_id>\` optional one of the two task IDs to link. Defaults to the current task worktree's own card when omitted.
 - \`--linked-task-id <task_id>\` required the other task ID to link.
 - \`--project-path <path>\` optional workspace path. If not already registered in Kanban, it is auto-added for git repos.
 
