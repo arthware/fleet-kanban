@@ -115,6 +115,7 @@ async function setupWorkspaceStateStream(input: {
 	workspaceId: string;
 	workspacePath: string;
 	board: RuntimeBoardData;
+	heartbeatIntervalMs?: number;
 }) {
 	let board = input.board;
 	const hub = createRuntimeStateHub({
@@ -143,6 +144,7 @@ async function setupWorkspaceStateStream(input: {
 			}),
 			buildWorkspaceStateSnapshot: async () => createWorkspaceState(input.workspacePath, board),
 		},
+		heartbeatIntervalMs: input.heartbeatIntervalMs,
 	});
 
 	const server: Server = createServer();
@@ -442,6 +444,61 @@ describe("workspace state broadcast while metadata refresh is blocked", () => {
 			await expectNoStreamMessage(
 				stream.messages,
 				(message) => message.type === "error" && message.message.includes("metadata"),
+			);
+		} finally {
+			await stream.cleanup();
+		}
+	});
+});
+
+describe("server-side heartbeat liveness", () => {
+	it("given a connected client that responds to pings, when the heartbeat interval sweeps, then the server keeps the client alive", async () => {
+		const workspaceId = "workspace-heartbeat-responsive";
+		const workspacePath = "/tmp/workspace-heartbeat-responsive";
+		const stream = await setupWorkspaceStateStream({
+			workspaceId,
+			workspacePath,
+			board: emptyBoard(),
+			heartbeatIntervalMs: 50,
+		});
+
+		try {
+			expect(stream.client.readyState).toBe(WebSocket.OPEN);
+
+			// Wait for 150ms to allow at least 2 heartbeat ticks to occur
+			await new Promise((resolve) => setTimeout(resolve, 150));
+
+			// Standard clients automatically respond to pings, so it must survive
+			expect(stream.client.readyState).toBe(WebSocket.OPEN);
+		} finally {
+			await stream.cleanup();
+		}
+	});
+
+	it("given a connected client that fails to respond to pings, when the heartbeat interval sweeps, then the server terminates the connection", async () => {
+		const workspaceId = "workspace-heartbeat-unresponsive";
+		const workspacePath = "/tmp/workspace-heartbeat-unresponsive";
+		const stream = await setupWorkspaceStateStream({
+			workspaceId,
+			workspacePath,
+			board: emptyBoard(),
+			heartbeatIntervalMs: 50,
+		});
+
+		try {
+			expect(stream.client.readyState).toBe(WebSocket.OPEN);
+
+			// Force client to be unresponsive to server pings by overriding the pong method
+			stream.client.pong = () => {};
+
+			// Wait for 150ms to allow at least 2 heartbeat ticks to occur and reap the client
+			await new Promise<void>((resolve) => {
+				stream.client.on("close", () => resolve());
+				setTimeout(resolve, 300); // Backstop timeout
+			});
+
+			expect(stream.client.readyState === WebSocket.CLOSED || stream.client.readyState === WebSocket.CLOSING).toBe(
+				true,
 			);
 		} finally {
 			await stream.cleanup();

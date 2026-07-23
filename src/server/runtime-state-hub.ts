@@ -79,6 +79,7 @@ export interface CreateRuntimeStateHubDependencies {
 		WorkspaceRegistry,
 		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot"
 	>;
+	heartbeatIntervalMs?: number;
 }
 
 export interface RuntimeStateHub {
@@ -136,6 +137,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	const runtimeStateClientsByWorkspaceId = new Map<string, Set<WebSocket>>();
 	const runtimeStateClients = new Set<WebSocket>();
 	const runtimeStateWorkspaceIdByClient = new Map<WebSocket, string>();
+	const responsiveClients = new Set<WebSocket>();
 	let clineSessionContextVersion = 0;
 	const runtimeStateWebSocketServer = new WebSocketServer({ noServer: true });
 	const workspaceMetadataMonitor = createWorkspaceMetadataMonitor({
@@ -315,7 +317,34 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}
 		runtimeStateWorkspaceIdByClient.delete(client);
 		runtimeStateClients.delete(client);
+		responsiveClients.delete(client);
 	};
+
+	const heartbeatIntervalMs = deps.heartbeatIntervalMs ?? 20_000;
+	const heartbeatInterval = setInterval(() => {
+		for (const client of runtimeStateClients) {
+			if (!responsiveClients.has(client)) {
+				try {
+					client.terminate();
+				} catch {
+					// Ignore termination errors.
+				}
+				cleanupRuntimeStateClient(client);
+			} else {
+				responsiveClients.delete(client);
+				try {
+					client.ping();
+				} catch {
+					try {
+						client.terminate();
+					} catch {
+						// Ignore termination errors.
+					}
+					cleanupRuntimeStateClient(client);
+				}
+			}
+		}
+	}, heartbeatIntervalMs);
 
 	const disposeWorkspace = (workspaceId: string, options?: DisposeRuntimeStateWorkspaceOptions) => {
 		const unsubscribeSummary = terminalSummaryUnsubscribeByWorkspaceId.get(workspaceId);
@@ -479,6 +508,10 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				state for a client that never finished the handshake.
 			*/
 			runtimeStateClients.add(client);
+			responsiveClients.add(client);
+			client.on("pong", () => {
+				responsiveClients.add(client);
+			});
 			let monitorWorkspaceId: string | null = null;
 			let didConnectWorkspaceMonitor = false;
 
@@ -641,6 +674,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		bumpClineSessionContextVersion,
 		broadcastTaskReadyForReview,
 		close: async () => {
+			clearInterval(heartbeatInterval);
 			for (const timer of taskSessionBroadcastTimersByWorkspaceId.values()) {
 				clearTimeout(timer);
 			}
