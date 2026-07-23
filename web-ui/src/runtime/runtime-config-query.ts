@@ -29,6 +29,8 @@ import type {
 	RuntimeConfigResponse,
 	RuntimeDebugResetAllStateResponse,
 	RuntimeFeaturebaseTokenResponse,
+	RuntimeFleetUpdateApplyResult,
+	RuntimeFleetUpdateStatusResponse,
 	RuntimeProjectShortcut,
 	RuntimeRunUpdateResponse,
 	RuntimeUpdateStatusResponse,
@@ -256,4 +258,14 @@ export async function fetchRuntimeUpdateStatus(workspaceId: string | null): Prom
 export async function runRuntimeUpdateNow(workspaceId: string | null): Promise<RuntimeRunUpdateResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
 	return await trpcClient.runtime.runUpdateNow.mutate();
+}
+
+export async function fetchFleetUpdateStatus(workspaceId: string | null): Promise<RuntimeFleetUpdateStatusResponse> {
+	const trpcClient = getRuntimeTrpcClient(workspaceId);
+	return await trpcClient.runtime.getFleetUpdateStatus.query();
+}
+
+export async function applyFleetUpdate(workspaceId: string | null): Promise<RuntimeFleetUpdateApplyResult> {
+	const trpcClient = getRuntimeTrpcClient(workspaceId);
+	return await trpcClient.runtime.applyFleetUpdate.mutate();
 }
