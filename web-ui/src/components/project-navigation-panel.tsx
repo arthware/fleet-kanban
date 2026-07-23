@@ -2,6 +2,7 @@ import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, ChevronUp, Ellipsis, ExternalLink, Info, Lightbulb, Plus, X } from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { AgentBudgetReadout } from "@/components/agent-budget-readout";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
 import { Button } from "@/components/ui/button";
 import { ClineIcon } from "@/components/ui/cline-icon";
@@ -20,7 +21,12 @@ import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import type { FeaturebaseFeedbackState } from "@/hooks/use-featurebase-feedback-widget";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import type { RuntimeAgentId, RuntimeClineProviderSettings, RuntimeProjectSummary } from "@/runtime/types";
+import type {
+	RuntimeAgentBudgetResponse,
+	RuntimeAgentId,
+	RuntimeClineProviderSettings,
+	RuntimeProjectSummary,
+} from "@/runtime/types";
 import {
 	LocalStorageKey,
 	readLocalStorageItem,
@@ -57,6 +63,7 @@ export function ProjectNavigationPanel({
 	selectedAgentId,
 	clineProviderSettings,
 	featurebaseFeedbackState,
+	agentBudget,
 	onSelectProject,
 	onRemoveProject,
 	onAddProject,
@@ -76,6 +83,7 @@ export function ProjectNavigationPanel({
 	selectedAgentId?: RuntimeAgentId | null;
 	clineProviderSettings?: RuntimeClineProviderSettings | null;
 	featurebaseFeedbackState?: FeaturebaseFeedbackState;
+	agentBudget?: RuntimeAgentBudgetResponse | null;
 	onSelectProject: (projectId: string) => void;
 	onRemoveProject: (projectId: string) => Promise<boolean>;
 	onAddProject: () => void;
@@ -312,7 +320,9 @@ export function ProjectNavigationPanel({
 							aria-label="Close sidebar"
 							className="min-w-[44px] min-h-[44px] -mr-2"
 						/>
-					) : null}
+					) : (
+						<AgentBudgetReadout budget={agentBudget ?? null} className="shrink-0" />
+					)}
 				</div>
 				<div className="mt-2 rounded-md bg-surface-2 border border-border p-1">
 					<div className="grid grid-cols-2 gap-1">
