@@ -35,17 +35,31 @@ export function agentBudgetHealthClassName(remainingPercent: number | null): str
 }
 
 function AgentBudgetPill({ provider }: { provider: RuntimeAgentBudgetProvider }): React.ReactElement {
-	const percent = provider.worstRemainingPercent;
 	const isStale = provider.staleSeconds !== null && provider.staleSeconds > STALE_THRESHOLD_SECONDS;
 	const title = provider.windows.map((w) => `${w.name}: ${w.remainingPercent ?? "?"}%`).join(" · ");
+
+	let displayPercent = provider.worstRemainingPercent;
+	let weekSuffix = "";
+
+	if (provider.provider === "claude") {
+		const h5Window = provider.windows.find((w) => w.name === "5h");
+		const weekWindow = provider.windows.find((w) => w.name === "week");
+
+		if (h5Window && weekWindow) {
+			displayPercent = h5Window.remainingPercent;
+			if (weekWindow.remainingPercent !== null && weekWindow.remainingPercent < 20) {
+				weekSuffix = ` · wk ${Math.round(weekWindow.remainingPercent)}%`;
+			}
+		}
+	}
 
 	return (
 		<span
 			data-testid={`agent-budget-pill-${provider.provider}`}
 			title={title}
-			className={cn("font-medium whitespace-nowrap", agentBudgetHealthClassName(percent))}
+			className={cn("font-medium whitespace-nowrap", agentBudgetHealthClassName(displayPercent))}
 		>
-			{providerLabel(provider.provider)} {percent === null ? "?" : Math.round(percent)}%
+			{providerLabel(provider.provider)} {displayPercent === null ? "?" : Math.round(displayPercent)}%{weekSuffix}
 			{isStale ? <span className="text-text-tertiary">~</span> : null}
 		</span>
 	);
