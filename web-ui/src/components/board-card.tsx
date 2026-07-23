@@ -713,11 +713,14 @@ export function BoardCard({
 									isDependencyTarget && "kb-board-card-dependency-target",
 								)}
 							>
-								{card.externalIssue || card.prUrl || (workspaceId && workspacePath) ? (
-									<div
-										className="mb-1 flex min-w-0 items-center gap-1.5 empty:hidden"
-										data-testid="board-card-meta-row"
-									>
+								<div
+									className="mb-1 flex items-center justify-between gap-1.5"
+									data-testid="board-card-meta-row"
+								>
+									<div className="flex min-w-0 flex-1 items-center gap-1.5">
+										<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
+											{card.id}
+										</span>
 										<ExternalIssueBadge issue={card.externalIssue} />
 										<PrBadge card={card} />
 										<DesignDocBadge
@@ -726,68 +729,6 @@ export function BoardCard({
 											workspacePath={workspacePath}
 											designDoc={designDoc}
 										/>
-									</div>
-								) : null}
-								<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
-									{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
-									<div className="flex-1 min-w-0">
-										{isEditingTitle ? (
-											<input
-												ref={titleInputRef}
-												value={draftTitle}
-												onChange={(event) => setDraftTitle(event.currentTarget.value)}
-												onBlur={submitTitle}
-												onKeyDown={handleTitleKeyDown}
-												onMouseDown={(event) => {
-													event.stopPropagation();
-												}}
-												className="h-7 w-full rounded-md border border-border-focus bg-surface-2 px-2 text-sm font-medium text-text-primary focus:outline-none"
-											/>
-										) : onSaveTitle ? (
-											<div className="flex items-center gap-1 min-w-0">
-												<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
-													{card.id}
-												</span>
-												<p
-													className={cn(
-														"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
-														isTrashCard && "line-through text-text-tertiary",
-													)}
-												>
-													{displayTitle}
-												</p>
-												<button
-													type="button"
-													aria-label="Edit task title"
-													onMouseDown={stopEvent}
-													onClick={(event) => {
-														stopEvent(event);
-														setDraftTitle(card.title);
-														setIsEditingTitle(true);
-													}}
-													className={cn(
-														"shrink-0 cursor-pointer rounded-sm p-0.5 text-text-tertiary hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-														isHovered ? "opacity-100" : "opacity-0",
-													)}
-												>
-													<Pencil size={12} />
-												</button>
-											</div>
-										) : (
-											<div className="flex items-center gap-1 min-w-0">
-												<span className="shrink-0 font-mono text-[10px] text-text-tertiary select-all">
-													{card.id}
-												</span>
-												<p
-													className={cn(
-														"kb-line-clamp-1 m-0 min-w-0 font-medium text-sm",
-														isTrashCard && "line-through text-text-tertiary",
-													)}
-												>
-													{displayTitle}
-												</p>
-											</div>
-										)}
 									</div>
 									{columnId === "backlog" ? (
 										<Button
@@ -860,6 +801,60 @@ export function BoardCard({
 										</Tooltip>
 									) : null}
 								</div>
+								<div className="mt-1.5 flex items-center gap-2" style={{ minHeight: 24 }}>
+									{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
+									<div className="min-w-0 flex-1">
+										{isEditingTitle ? (
+											<input
+												ref={titleInputRef}
+												value={draftTitle}
+												onChange={(event) => setDraftTitle(event.currentTarget.value)}
+												onBlur={submitTitle}
+												onKeyDown={handleTitleKeyDown}
+												onMouseDown={(event) => {
+													event.stopPropagation();
+												}}
+												className="h-7 w-full rounded-md border border-border-focus bg-surface-2 px-2 text-sm font-medium text-text-primary focus:outline-none"
+											/>
+										) : onSaveTitle ? (
+											<div className="flex items-center gap-1 min-w-0">
+												<p
+													className={cn(
+														"kb-line-clamp-1 m-0 min-w-0 text-sm font-semibold text-text-primary",
+														isTrashCard && "line-through text-text-tertiary",
+													)}
+												>
+													{displayTitle}
+												</p>
+												<button
+													type="button"
+													aria-label="Edit task title"
+													onMouseDown={stopEvent}
+													onClick={(event) => {
+														stopEvent(event);
+														setDraftTitle(card.title);
+														setIsEditingTitle(true);
+													}}
+													className={cn(
+														"shrink-0 cursor-pointer rounded-sm p-0.5 text-text-tertiary hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+														isHovered ? "opacity-100" : "opacity-0",
+													)}
+												>
+													<Pencil size={12} />
+												</button>
+											</div>
+										) : (
+											<p
+												className={cn(
+													"kb-line-clamp-1 m-0 min-w-0 text-sm font-semibold text-text-primary",
+													isTrashCard && "line-through text-text-tertiary",
+												)}
+											>
+												{displayTitle}
+											</p>
+										)}
+									</div>
+								</div>
 								{needsInput ? (
 									<div className="mt-1">
 										<span className="inline-flex max-w-full items-center gap-1 rounded-md border border-status-blue/40 bg-status-blue/10 px-1.5 py-0.5 text-xs font-medium text-status-blue">
@@ -905,7 +900,7 @@ export function BoardCard({
 										</p>
 									</div>
 								) : null}
-								{isPlanCard || badgeInfo || tokenUsageChip || completionPolicyBadgeLabel ? (
+								{isPlanCard || badgeInfo || completionPolicyBadgeLabel ? (
 									<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
 										{isPlanCard ? (
 											<span
@@ -940,14 +935,6 @@ export function BoardCard({
 												</span>
 											</span>
 										) : null}
-										{tokenUsageChip ? (
-											<span
-												className="shrink-0 font-mono text-[11px] text-text-tertiary"
-												title={tokenUsageChip.title}
-											>
-												{tokenUsageChip.label}
-											</span>
-										) : null}
 										{completionPolicyBadgeLabel ? (
 											<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
 												{completionPolicyBadgeLabel}
@@ -955,7 +942,7 @@ export function BoardCard({
 										) : null}
 									</div>
 								) : null}
-								{sessionActivity ? (
+								{!isDoneCard && sessionActivity ? (
 									<div
 										className="flex gap-1.5 items-start mt-[6px]"
 										style={{
@@ -980,57 +967,80 @@ export function BoardCard({
 										</div>
 									</div>
 								) : null}
-								{showWorkspaceStatus && reviewWorkspacePath ? (
-									<p
-										className="font-mono"
-										style={{
-											margin: "4px 0 0",
-											fontSize: 12,
-											lineHeight: 1.4,
-											whiteSpace: "normal",
-											overflowWrap: "anywhere",
-											color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
-										}}
+								{tokenUsageChip || (showWorkspaceStatus && reviewWorkspacePath) ? (
+									<div
+										className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5"
+										data-testid="board-card-footer"
 									>
-										{isTrashCard ? (
-											<>
-												{reviewWorkspacePath ? (
-													<span
-														style={{
-															color: SESSION_ACTIVITY_COLOR.muted,
-															textDecoration: "line-through",
-														}}
-													>
-														{reviewWorkspacePath}
-													</span>
-												) : null}
-											</>
-										) : reviewWorkspaceSnapshot ? (
-											<>
-												<GitBranch
-													size={10}
-													style={{
-														display: "inline",
-														color: SESSION_ACTIVITY_COLOR.secondary,
-														margin: "0px 4px 2px",
-														verticalAlign: "middle",
-													}}
-												/>
-												<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewRefLabel}</span>
-												{reviewChangeSummary ? (
+										{showWorkspaceStatus && reviewWorkspacePath ? (
+											<p
+												className="font-mono"
+												style={{
+													margin: 0,
+													fontSize: 12,
+													lineHeight: 1.4,
+													whiteSpace: "normal",
+													overflowWrap: "anywhere",
+													color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
+												}}
+											>
+												{isTrashCard ? (
 													<>
-														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
-														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
-															{reviewChangeSummary.filesLabel}
+														{reviewWorkspacePath ? (
+															<span
+																style={{
+																	color: SESSION_ACTIVITY_COLOR.muted,
+																	textDecoration: "line-through",
+																}}
+															>
+																{reviewWorkspacePath}
+															</span>
+														) : null}
+													</>
+												) : reviewWorkspaceSnapshot ? (
+													<>
+														<GitBranch
+															size={10}
+															style={{
+																display: "inline",
+																color: SESSION_ACTIVITY_COLOR.secondary,
+																margin: "0px 4px 2px",
+																verticalAlign: "middle",
+															}}
+														/>
+														<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>
+															{reviewRefLabel}
 														</span>
-														<span className="text-status-green"> +{reviewChangeSummary.additions}</span>
-														<span className="text-status-red"> -{reviewChangeSummary.deletions}</span>
-														<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
+														{reviewChangeSummary ? (
+															<>
+																<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
+																<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
+																	{reviewChangeSummary.filesLabel}
+																</span>
+																<span className="text-status-green">
+																	{" "}
+																	+{reviewChangeSummary.additions}
+																</span>
+																<span className="text-status-red">
+																	{" "}
+																	-{reviewChangeSummary.deletions}
+																</span>
+																<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
+															</>
+														) : null}
 													</>
 												) : null}
-											</>
+											</p>
 										) : null}
-									</p>
+										{tokenUsageChip ? (
+											<span
+												className="shrink-0 font-mono text-[11px] text-text-tertiary"
+												title={tokenUsageChip.title}
+											>
+												{tokenUsageChip.label}
+											</span>
+										) : null}
+									</div>
 								) : null}
 								{showImplementHere ? (
 									<div className="mt-1.5">
