@@ -64,8 +64,30 @@ describe("locateAgentTranscript", () => {
 		expect(location).toEqual({ present: false });
 	});
 
+	it("finds a gemini transcript stored under a tmp slug chats directory", async () => {
+		const sessionId = "afd41427-2374-46d9-84f1-9634c8e89cee";
+		const expectedPath = await writeTranscript(
+			join(".gemini", "tmp", "fleet-kanban-5", "chats", `session-2026-07-23T18-23-${sessionId.slice(0, 8)}.jsonl`),
+		);
+
+		const location = await locateAgentTranscript({ agentId: "gemini", sessionId, homePath });
+
+		expect(location).toEqual({ present: true, path: expectedPath });
+	});
+
+	it("reports a gemini transcript absent when no matching file exists", async () => {
+		const sessionId = "afd41427-2374-46d9-84f1-9634c8e89cee";
+		await writeTranscript(
+			join(".gemini", "tmp", "fleet-kanban-5", "chats", "session-2026-07-23T18-23-different.jsonl"),
+		);
+
+		const location = await locateAgentTranscript({ agentId: "gemini", sessionId, homePath });
+
+		expect(location).toEqual({ present: false });
+	});
+
 	it("reports absent for an unknown agent kind instead of throwing", async () => {
-		const location = await locateAgentTranscript({ agentId: "gemini", sessionId: "any-session", homePath });
+		const location = await locateAgentTranscript({ agentId: "unknown-agent", sessionId: "any-session", homePath });
 
 		expect(location).toEqual({ present: false });
 	});

@@ -1044,6 +1044,24 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("--last");
 	});
 
+	it("resumes a Gemini session by its stored session id", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini-resume-id",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			agentSessionId: "stored-gemini-id",
+			resumeSession: true,
+		});
+
+		const resumeIndex = launch.args.indexOf("--resume");
+		expect(resumeIndex).toBeGreaterThan(-1);
+		expect(launch.args[resumeIndex + 1]).toBe("stored-gemini-id");
+	});
+
 	it("resumes a Cursor session without appending the initial prompt", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
