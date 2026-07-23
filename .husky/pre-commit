@@ -9,7 +9,7 @@ unset KANBAN_RUNTIME_PORT
 STAGED_FILES=$(git diff --cached --name-only)
 
 echo "Running biome check on staged files..."
-npx biome check --staged --no-errors-on-unmatched --files-ignore-unknown=true
+npx biome check --write --staged --no-errors-on-unmatched --files-ignore-unknown=true
 if [ $? -ne 0 ]; then
 	echo "Biome check failed."
 	exit 1
