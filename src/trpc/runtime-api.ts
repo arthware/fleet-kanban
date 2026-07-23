@@ -385,15 +385,11 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					workspaceIndex = [];
 				}
 				if (isHomeAgentSessionId(body.taskId)) {
-					const homeAgentContext = await resolveHomeAgentContext(
-						{
-							workspaceId: workspaceScope.workspaceId,
-							workspacePath: workspaceScope.workspacePath,
-							listWorkspaces: async () => workspaceIndex,
-						},
-						undefined,
-						readDoctrineFile,
-					);
+					const homeAgentContext = await resolveHomeAgentContext({
+						workspaceId: workspaceScope.workspaceId,
+						workspacePath: workspaceScope.workspacePath,
+						listWorkspaces: async () => workspaceIndex,
+					});
 					taskCwd = homeAgentContext.cwd;
 					architectContextPreamble = homeAgentContext.architectContextPreamble;
 					fleetToolsWarning = homeAgentContext.fleetToolsWarning;

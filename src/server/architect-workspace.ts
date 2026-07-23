@@ -10,8 +10,6 @@
 
 import path from "node:path";
 
-import { readFileIfExists } from "../fs/read-file-if-exists";
-import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { isPathWithinRoot } from "../workspace/path-sandbox";
 import { type FleetAgentHelpResult, runFleetAgentHelp as runFleetAgentHelpViaCli } from "./fleet-cli";
 
@@ -145,36 +143,6 @@ export function resolveDoctrineScope(repoPath: string, workspaces: RegisteredWor
 }
 
 /**
- * The architect's own governing constitution: the harness core (Articles 1–5) it
- * must enforce on every card it authors and follow itself. By the constitution's
- * governance clause that core is inviolable and identical across every overseen
- * repo, so any overseen repo's constitution carries it — we resolve the first that
- * has one, through the same {@link resolveDoctrineScope} + {@link loadDoctrine} seam
- * as that repo's cards. Returns null when no overseen repo carries doctrine.
- *
- * See docs/design/architect-doctrine-placement.md § "Phase 1b".
- */
-async function resolveArchitectConstitution(
-	classification: ArchitectClassification,
-	workspaces: RegisteredWorkspace[],
-	read: ReadFileIfExists,
-): Promise<string | null> {
-	const overseen = classification.implWorkspaceIds
-		.map((id) => workspaces.find((ws) => ws.workspaceId === id))
-		.filter((ws): ws is RegisteredWorkspace => ws !== undefined);
-	for (const repo of overseen) {
-		const doctrine = await loadDoctrine(
-			{ repoPath: repo.repoPath, ...resolveDoctrineScope(repo.repoPath, workspaces) },
-			read,
-		);
-		if (doctrine) {
-			return doctrine.constitution;
-		}
-	}
-	return null;
-}
-
-/**
  * Initial-context section that makes the architect's home agent aware of the
  * sub-repositories it oversees. Pure over the classification + workspace index:
  * lists each impl workspace's id and repo path so the overseer knows, straight
@@ -194,7 +162,6 @@ export function buildArchitectContextPreamble(
 	classification: ArchitectClassification,
 	workspaces: RegisteredWorkspace[],
 	fleetToolsHelp?: string | null,
-	constitution?: string | null,
 ): string {
 	if (classification.architectWorkspaceId === null) {
 		return "";
@@ -214,12 +181,7 @@ ${list}
 They live as subdirectories of your workspace, so you can read across them with your normal file tools.`;
 
 	const tools = fleetToolsHelp?.trim();
-	const workspaceSection = tools ? `${subRepos}\n\n${tools}` : subRepos;
-	// The constitution leads the durable preamble: the architect is governed by the
-	// same doctrine it dispatches to cards, so the law sits above its workspace
-	// awareness. Reuses the card-path prepend so the framing is identical; a null
-	// constitution leaves the preamble unchanged (Article 3 — one composition).
-	return prependConstitution(workspaceSection, constitution ?? null);
+	return tools ? `${subRepos}\n\n${tools}` : subRepos;
 }
 
 export interface SelectArchitectAwareProjectsInput {
@@ -355,7 +317,6 @@ function describeMissingFleetTools(reason: string): string {
 export async function resolveHomeAgentContext(
 	input: ResolveHomeAgentCwdInput,
 	runFleetAgentHelp: FleetAgentHelpRunner = runFleetAgentHelpViaCli,
-	readDoctrineFile: ReadFileIfExists = readFileIfExists,
 ): Promise<HomeAgentContext> {
 	let workspaces: RegisteredWorkspace[];
 	try {
@@ -375,12 +336,10 @@ export async function resolveHomeAgentContext(
 	}
 
 	const fleet = await runFleetAgentHelp(cwd);
-	const constitution = await resolveArchitectConstitution(classification, workspaces, readDoctrineFile);
 	const architectContextPreamble = buildArchitectContextPreamble(
 		classification,
 		workspaces,
 		fleet.ok ? fleet.instructions : null,
-		constitution,
 	);
 	const fleetToolsWarning = fleet.ok ? null : describeMissingFleetTools(fleet.error);
 	return { cwd, architectContextPreamble, fleetToolsWarning };
@@ -392,12 +351,6 @@ export async function resolveHomeAgentContext(
  * skips the fleet CLI (empty instructions) since the cwd never depends on it.
  */
 export async function resolveHomeAgentCwd(input: ResolveHomeAgentCwdInput): Promise<string> {
-	// cwd never depends on the fleet CLI or the constitution, so skip both reads.
-	return (
-		await resolveHomeAgentContext(
-			input,
-			async () => ({ ok: true, instructions: "" }),
-			async () => null,
-		)
-	).cwd;
+	// cwd never depends on the fleet CLI, so skip that read.
+	return (await resolveHomeAgentContext(input, async () => ({ ok: true, instructions: "" }))).cwd;
 }
