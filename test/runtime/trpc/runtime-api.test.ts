@@ -129,7 +129,7 @@ vi.mock("../../../src/server/browser.js", () => ({
 
 import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
 import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
-import { PR_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/pr-card-directive";
+import { buildPrCardPromptDirective } from "../../../src/prompts/pr-card-directive";
 import { SUBMIT_ENTER_DELAY_MS } from "../../../src/terminal/agent-session-adapters";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
@@ -716,7 +716,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		expect(response.ok).toBe(true);
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}${PR_CARD_PROMPT_DIRECTIVE}Implement the body.`,
+				prompt: `${IMPLEMENT_CARD_PROMPT_DIRECTIVE}${buildPrCardPromptDirective("main")}Implement the body.`,
 			}),
 		);
 	});
