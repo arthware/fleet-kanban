@@ -29,6 +29,23 @@ describe("board card PR field schema", () => {
 		expect(card.prNumber).toBe(42);
 	});
 
+	it("carries a stored PR gate status through a board card round-trip", () => {
+		const card = runtimeBoardCardSchema.parse({
+			id: "task-1",
+			prompt: "Ship a feature",
+			startInPlanMode: false,
+			baseRef: "main",
+			prUrl: PR.url,
+			prState: PR.state,
+			prNumber: PR.number,
+			prGateStatus: "passing",
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		expect(card.prGateStatus).toBe("passing");
+	});
+
 	it("parses a board card written before the PR fields existed", () => {
 		const card = runtimeBoardCardSchema.parse({
 			id: "task-legacy",
@@ -46,7 +63,12 @@ describe("board card PR field schema", () => {
 });
 
 function boardWithCard(
-	overrides?: Partial<{ prUrl: string; prState: "open" | "merged" | "closed"; prNumber: number }>,
+	overrides?: Partial<{
+		prUrl: string;
+		prState: "open" | "merged" | "closed";
+		prNumber: number;
+		prGateStatus: "passing" | "failing" | "pending" | "none";
+	}>,
 ): RuntimeBoardData {
 	return {
 		columns: [
@@ -97,6 +119,15 @@ describe("setCardPrUrl", () => {
 
 		expect(result.updated).toBe(true);
 		expect(result.board.columns[0]?.cards[0]?.prState).toBe("merged");
+	});
+
+	it("updates the stored PR when its gate status changes", () => {
+		const board = boardWithCard({ prUrl: PR.url, prState: "open", prNumber: PR.number, prGateStatus: "pending" });
+
+		const result = setCardPrUrl(board, "task-1", { ...PR, gateStatus: "passing" });
+
+		expect(result.updated).toBe(true);
+		expect(result.board.columns[0]?.cards[0]?.prGateStatus).toBe("passing");
 	});
 
 	it("leaves the board untouched when no card matches the task id", () => {

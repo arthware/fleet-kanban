@@ -2,6 +2,7 @@ import type {
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
+	RuntimeCardPrGateStatus,
 	RuntimeCardPrState,
 	RuntimeGitSyncSummary,
 	RuntimeTaskWorkspaceMetadata,
@@ -28,6 +29,7 @@ interface TrackedTaskWorkspace {
 	branchName: string;
 	hasStoredPrUrl: boolean;
 	storedPrState: RuntimeCardPrState | null;
+	storedPrGateStatus: RuntimeCardPrGateStatus | null;
 }
 
 interface CachedHomeGitMetadata {
@@ -126,6 +128,7 @@ function collectTrackedTasks(board: RuntimeBoardData): TrackedTaskWorkspace[] {
 				branchName: deriveTrackedTaskBranchName(card),
 				hasStoredPrUrl: typeof card.prUrl === "string" && card.prUrl.length > 0,
 				storedPrState: card.prState ?? null,
+				storedPrGateStatus: card.prGateStatus ?? null,
 			});
 		}
 	}
