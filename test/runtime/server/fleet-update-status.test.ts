@@ -177,7 +177,7 @@ describe("applyFleetUpdate", () => {
 		expect(spawnDetached).not.toHaveBeenCalled();
 	});
 
-	it("given no cards in progress and an update is available, when applyFleetUpdate is called, then it spawns the update+restart detached and reports started", async () => {
+	it("given no cards in progress and an update is available, when applyFleetUpdate is called, then it spawns the update+restart detached with the absolute binary path and reports started", async () => {
 		const { run } = makeCountingRun(VENDOR_BEHIND_STDOUT);
 		const unref = vi.fn();
 		const spawnDetached = vi.fn().mockReturnValue({ unref });
@@ -196,10 +196,26 @@ describe("applyFleetUpdate", () => {
 		expect(result).toEqual({ started: true, reason: null });
 		expect(spawnDetached).toHaveBeenCalledWith(
 			"sh",
-			["-c", "fleet update && fleet service restart"],
+			["-c", "'stub-fleet' update && 'stub-fleet' service restart"],
 			expect.objectContaining({ detached: true, stdio: ["ignore", 7, 7] }),
 		);
 		expect(unref).toHaveBeenCalledTimes(1);
 		expect(closeLogFd).toHaveBeenCalledWith(7);
+	});
+
+	it("given the fleet binary cannot be resolved, when applyFleetUpdate is called, then it does not spawn and reports binary-not-found", async () => {
+		const { run } = makeCountingRun(VENDOR_BEHIND_STDOUT);
+		const spawnDetached = vi.fn();
+
+		const result = await applyFleetUpdate({
+			binary: null,
+			run,
+			inProgressCount: 0,
+			spawnDetached,
+			openLogFd: () => 0,
+		});
+
+		expect(result).toEqual({ started: false, reason: "binary-not-found" });
+		expect(spawnDetached).not.toHaveBeenCalled();
 	});
 });
