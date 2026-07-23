@@ -258,6 +258,57 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 	return null;
 }
 
+interface AgentBadgeInfo {
+	shortLabel: string;
+	modelText: string | null;
+	isDefaultModel: boolean;
+	colorClasses: string;
+}
+
+function resolveAgentBadgeInfo(
+	agentId: RuntimeAgentId | null,
+	modelLabel: { text: string; isDefault: boolean } | null,
+	isTrashCard: boolean,
+): AgentBadgeInfo | null {
+	if (!agentId && !modelLabel) {
+		return null;
+	}
+
+	const entry = agentId ? getRuntimeAgentCatalogEntry(agentId) : null;
+	const shortLabel = entry ? (entry.shortLabel ?? entry.label) : (agentId ?? "");
+
+	// Per-provider color mappings using existing status-* theme tokens as complete literal strings for JIT
+	let colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue"; // fallback default
+	if (agentId === "claude") {
+		colorClasses = "border-status-orange/30 bg-status-orange/10 text-status-orange";
+	} else if (agentId === "codex") {
+		colorClasses = "border-status-green/30 bg-status-green/10 text-status-green";
+	} else if (agentId === "gemini") {
+		colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue";
+	} else if (agentId === "cursor") {
+		colorClasses = "border-status-purple/30 bg-status-purple/10 text-status-purple";
+	} else if (agentId === "cline") {
+		colorClasses = "border-status-cyan/30 bg-status-cyan/10 text-status-cyan";
+	} else if (agentId === "droid") {
+		colorClasses = "border-status-gold/30 bg-status-gold/10 text-status-gold";
+	} else if (agentId === "kiro") {
+		colorClasses = "border-status-violet/30 bg-status-violet/10 text-status-violet";
+	} else if (agentId === "opencode") {
+		colorClasses = "border-status-lime/30 bg-status-lime/10 text-status-lime";
+	}
+
+	if (isTrashCard) {
+		colorClasses = "border-border text-text-tertiary bg-surface-1";
+	}
+
+	return {
+		shortLabel,
+		modelText: modelLabel?.text ?? null,
+		isDefaultModel: modelLabel?.isDefault ?? false,
+		colorClasses,
+	};
+}
+
 export function BoardCard({
 	card,
 	index,
@@ -494,10 +545,6 @@ export function BoardCard({
 	// falling back to the workspace's default agent so operators can see what a
 	// card actually runs on, not just what it explicitly overrode.
 	const effectiveAgentId = card.agentId ?? defaultAgentId ?? null;
-	const agentLabel = useMemo(
-		() => (effectiveAgentId ? (getRuntimeAgentCatalogEntry(effectiveAgentId)?.label ?? effectiveAgentId) : null),
-		[effectiveAgentId],
-	);
 	const modelOverrideLabel = useMemo(() => {
 		if (card.clineSettings === undefined) {
 			return null;
@@ -543,12 +590,9 @@ export function BoardCard({
 		}
 		return null;
 	}, [modelOverrideLabel, card.agentModel, effectiveAgentId]);
-	const taskAgentSettings = useMemo(() => {
-		if (!agentLabel && !resolvedModelLabel) {
-			return null;
-		}
-		return { agentLabel, modelLabel: resolvedModelLabel };
-	}, [agentLabel, resolvedModelLabel]);
+	const badgeInfo = useMemo(() => {
+		return resolveAgentBadgeInfo(effectiveAgentId, resolvedModelLabel, isTrashCard);
+	}, [effectiveAgentId, resolvedModelLabel, isTrashCard]);
 	const isPlanCard = cardKind(card) === "plan";
 	const completionPolicyBadgeLabel = getTaskCompletionPolicyBadgeLabel(card);
 	// Cumulative token usage, derived on read from the agent's own transcript.
@@ -861,7 +905,7 @@ export function BoardCard({
 										</p>
 									</div>
 								) : null}
-								{isPlanCard || taskAgentSettings || tokenUsageChip || completionPolicyBadgeLabel ? (
+								{isPlanCard || badgeInfo || tokenUsageChip || completionPolicyBadgeLabel ? (
 									<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
 										{isPlanCard ? (
 											<span
@@ -875,27 +919,23 @@ export function BoardCard({
 												Plan
 											</span>
 										) : null}
-										{taskAgentSettings ? (
+										{badgeInfo ? (
 											<span
 												className={cn(
 													"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-													isTrashCard
-														? "border-border text-text-tertiary bg-surface-1"
-														: "border-status-blue/30 bg-status-blue/10 text-status-blue",
+													badgeInfo.colorClasses,
 												)}
 											>
 												<Bot size={12} className="shrink-0" />
 												<span className="truncate">
-													{taskAgentSettings.agentLabel}
-													{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
-													{taskAgentSettings.modelLabel ? (
-														<span
-															className={cn(
-																taskAgentSettings.modelLabel.isDefault && "text-text-tertiary",
-															)}
-														>
-															{taskAgentSettings.modelLabel.text}
-														</span>
+													{badgeInfo.shortLabel}
+													{badgeInfo.modelText ? (
+														<>
+															{badgeInfo.shortLabel && " "}
+															<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
+																{badgeInfo.modelText}
+															</span>
+														</>
 													) : null}
 												</span>
 											</span>
@@ -1074,16 +1114,23 @@ export function BoardCard({
 								Plan
 							</span>
 						) : null}
-						{taskAgentSettings ? (
-							<span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-status-blue/30 bg-status-blue/10 px-1.5 py-0.5 text-xs text-status-blue">
+						{badgeInfo ? (
+							<span
+								className={cn(
+									"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+									badgeInfo.colorClasses,
+								)}
+							>
 								<Bot size={12} className="shrink-0" />
 								<span className="truncate">
-									{taskAgentSettings.agentLabel}
-									{taskAgentSettings.agentLabel && taskAgentSettings.modelLabel ? " · " : null}
-									{taskAgentSettings.modelLabel ? (
-										<span className={cn(taskAgentSettings.modelLabel.isDefault && "text-text-tertiary")}>
-											{taskAgentSettings.modelLabel.text}
-										</span>
+									{badgeInfo.shortLabel}
+									{badgeInfo.modelText ? (
+										<>
+											{badgeInfo.shortLabel && " "}
+											<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
+												{badgeInfo.modelText}
+											</span>
+										</>
 									) : null}
 								</span>
 							</span>
