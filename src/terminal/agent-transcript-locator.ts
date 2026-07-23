@@ -41,6 +41,8 @@ export async function locateAgentTranscript(input: LocateAgentTranscriptInput): 
 			return locateClaudeTranscript(input.homePath, sessionId);
 		case "codex":
 			return locateCodexTranscript(input.homePath, sessionId);
+		case "gemini":
+			return locateGeminiTranscript(input.homePath, sessionId);
 		default:
 			// Agents without a known transcript layout: report absent rather than
 			// guessing a path. Keeps the function total for every agent kind.
@@ -95,6 +97,36 @@ async function locateCodexTranscript(homePath: string, sessionId: string): Promi
 			}
 			if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(suffix)) {
 				return { present: true, path: entryPath };
+			}
+		}
+	}
+
+	return ABSENT;
+}
+
+/**
+ * Gemini stores session transcripts under `~/.gemini/tmp/<slug>/chats/session-*.jsonl`.
+ * We scan the `.gemini/tmp/` directory and match files whose name ends with
+ * either `-${sessionId.slice(0, 8)}.jsonl` or `-${sessionId}.jsonl`.
+ */
+async function locateGeminiTranscript(homePath: string, sessionId: string): Promise<AgentTranscriptLocation> {
+	const tmpRoot = join(homePath, ".gemini", "tmp");
+	const projectDirs = await readDirEntries(tmpRoot);
+
+	const suffix8 = `-${sessionId.slice(0, 8)}.jsonl`;
+	const suffixFull = `-${sessionId}.jsonl`;
+
+	for (const entry of projectDirs) {
+		if (!entry.isDirectory()) {
+			continue;
+		}
+		const chatsDir = join(tmpRoot, entry.name, "chats");
+		const chatFiles = await readDirEntries(chatsDir);
+		for (const file of chatFiles) {
+			if (file.isFile() && file.name.startsWith("session-")) {
+				if (file.name.endsWith(suffix8) || file.name.endsWith(suffixFull)) {
+					return { present: true, path: join(chatsDir, file.name) };
+				}
 			}
 		}
 	}

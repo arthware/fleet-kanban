@@ -1076,7 +1076,11 @@ const geminiAdapter: AgentSessionAdapter = {
 			args.push("--yolo");
 		}
 
-		if (input.resumeFromTrash && !hasCliOption(args, "--resume")) {
+		const geminiSessionId = input.agentSessionId?.trim();
+		const hasResumeFlag = hasCliOption(args, "--resume") || hasCliOption(args, "-r");
+		if (input.resumeSession && geminiSessionId && !hasResumeFlag) {
+			args.push("--resume", geminiSessionId);
+		} else if (input.resumeFromTrash && !hasResumeFlag) {
 			args.push("--resume", "latest");
 		}
 
