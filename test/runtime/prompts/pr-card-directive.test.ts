@@ -51,4 +51,24 @@ describe("prependPrCardDirective", () => {
 		// then
 		expect(result).toBe(prompt);
 	});
+
+	it("given a PR auto-review card, when the prompt is built, then it mandates a non-interactive gh pr create with explicit title and body", () => {
+		// given
+		const prompt = "Do the thing.";
+		// when
+		const result = prependPrCardDirective(prompt, true, "pr", "production-line");
+		// then
+		expect(result).toContain("--title");
+		expect(result).toContain("--body");
+		expect(result).toMatch(/never.*(bare|interactive)/i);
+	});
+
+	it("given a PR auto-review card, when the prompt is built, then it instructs the agent to never ask which base branch to use", () => {
+		// given
+		const prompt = "Do the thing.";
+		// when
+		const result = prependPrCardDirective(prompt, true, "pr", "production-line");
+		// then
+		expect(result).toMatch(/never ask which base/i);
+	});
 });
