@@ -1327,12 +1327,141 @@ describe("BoardCard", () => {
 		expect(metaRow.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
-	it("does not render an empty top meta row when the card has no cross-reference chips", async () => {
+	it("still renders the meta row for the card id alone when there are no cross-reference chips", async () => {
 		await act(async () => {
 			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
 		});
 
-		expect(container.querySelector('[data-testid="board-card-meta-row"]')).toBeNull();
+		const metaRow = container.querySelector<HTMLElement>('[data-testid="board-card-meta-row"]');
+		expect(metaRow).toBeInstanceOf(HTMLElement);
+		expect(metaRow?.textContent).toContain("task-1");
+		expect(findPrBadge(container)).toBeNull();
+		expect(findExternalIssueLink(container)).toBeNull();
+	});
+
+	it("renders the card id in the meta row above the title, on the left", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ id: "cc618" })} index={0} columnId="backlog" />);
+		});
+
+		const metaRow = container.querySelector<HTMLElement>('[data-testid="board-card-meta-row"]');
+		const idSpan = metaRow
+			? Array.from(metaRow.querySelectorAll("span")).find((el) => el.textContent?.trim() === "cc618")
+			: undefined;
+		const title = Array.from(container.querySelectorAll("p")).find(
+			(element) => element.textContent?.trim() === "Review API changes",
+		);
+
+		expect(metaRow).toBeInstanceOf(HTMLElement);
+		expect(idSpan).toBeDefined();
+		expect(title).toBeInstanceOf(HTMLElement);
+		if (!(metaRow instanceof HTMLElement) || !(title instanceof HTMLElement)) {
+			throw new Error("Expected meta row and title to render.");
+		}
+		expect(metaRow.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("keeps the PR gate-status icon rendered in the meta row next to the PR badge", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						prGateStatus: "passing",
+					})}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		const metaRow = container.querySelector<HTMLElement>('[data-testid="board-card-meta-row"]');
+		expect(metaRow?.querySelector("svg.lucide-check")).toBeInstanceOf(SVGSVGElement);
+	});
+
+	it("given a done card with live session activity, when it renders, then it shows no status/activity line", async () => {
+		const summary = createSummary("awaiting_review", {
+			latestHookActivity: {
+				activityText: "Final: Ready for review",
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Ready for review",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		await act(async () => {
+			root.render(
+				<BoardCard card={createCard({ id: "done-1" })} index={0} columnId="done" sessionSummary={summary} />,
+			);
+		});
+
+		expect(findSessionActivityDot(container)).toBeNull();
+		expect(container.textContent).not.toContain("Ready for review");
+	});
+
+	it("given a non-done in_progress card with the same live session activity, when it renders, then it still shows the status/activity line", async () => {
+		const summary = createSummary("awaiting_review", {
+			latestHookActivity: {
+				activityText: "Final: Ready for review",
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Ready for review",
+				hookEventName: "agent_end",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="in_progress" sessionSummary={summary} />);
+		});
+
+		expect(findSessionActivityDot(container)).not.toBeNull();
+		expect(container.textContent).toContain("Ready for review");
+	});
+
+	it("renders the diff-stat and token/cost metrics inside the footer region, separate from the agent chip row", async () => {
+		mockWorkspaceSnapshot = {
+			taskId: "task-1",
+			path: "/tmp/fleet-kanban-worktrees/task-1",
+			branch: "task/card-pr-url-helper",
+			isDetached: false,
+			headCommit: "abc123",
+			changedFiles: 4,
+			additions: 12,
+			deletions: 3,
+		};
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude" })}
+					index={0}
+					columnId="in_progress"
+					sessionSummary={createSummary("awaiting_review")}
+					tokenUsage={{
+						inputTokens: 2_345,
+						outputTokens: 0,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+						costUsd: null,
+					}}
+				/>,
+			);
+		});
+
+		const footer = container.querySelector<HTMLElement>('[data-testid="board-card-footer"]');
+		const chipRow = container.querySelector<HTMLElement>('[data-testid="board-card-chip-row"]');
+		expect(footer).toBeInstanceOf(HTMLElement);
+		expect(footer?.textContent).toContain("task/card-pr-url-helper");
+		expect(footer?.textContent).toContain("4 files");
+		expect(footer?.textContent).toContain("2.3K tok");
+		expect(chipRow?.textContent).not.toContain("2.3K tok");
 	});
 
 	it("renders the stored PR badge in every board column", async () => {
@@ -1761,7 +1890,7 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("1.2M tok");
 	});
 
-	it("renders the token-usage chip next to the agent model label", async () => {
+	it("renders the token-usage chip inside the footer, separate from the agent model chip row", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -1782,11 +1911,13 @@ describe("BoardCard", () => {
 		const usageChip = Array.from(container.querySelectorAll("span")).find(
 			(element) => element.textContent?.trim() === "2.3K tok",
 		);
+		const footer = container.querySelector<HTMLElement>('[data-testid="board-card-footer"]');
+		const chipRow = container.querySelector<HTMLElement>('[data-testid="board-card-chip-row"]');
+
 		expect(usageChip).toBeDefined();
-		// The chip shares the model chip's row (adjacent), but is a separate
-		// element carrying its own muted styling — the model label is NOT inside it.
-		expect(usageChip?.parentElement?.textContent).toContain("Haiku 4.5");
-		expect(usageChip?.textContent).not.toContain("Haiku 4.5");
+		expect(footer?.contains(usageChip ?? null)).toBe(true);
+		expect(chipRow?.contains(usageChip ?? null)).toBe(false);
+		expect(chipRow?.textContent).toContain("Haiku 4.5");
 	});
 
 	it("appends an estimated cost to the token chip when cost is known", async () => {
