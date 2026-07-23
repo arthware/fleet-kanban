@@ -1,13 +1,10 @@
 ---
 name: fleet-implement
-description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch (the land/fleet-pr phase owns any PR)
+description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch and hand off to the PR phase
 ---
 
 You are working a build card: take it from pickup to a verified, committed build — intake →
-tests-first → implement → verify → commit. This is the build half; it ends at a
-committed branch and doesn't itself run a review pass — the fleet-pr / land phase owns the PR and
-review, so build and review never overlap. If a fleet-pr / auto-PR flow is also active, defer PR
-creation to it rather than block it (see Commit).
+tests-first → implement → verify → commit. This is the build half; it focuses on testing, implementing, and committing on the task branch. If a fleet-pr / auto-PR flow is also active, follow the **fleet-pr** skill's instructions on PR creation (see Commit).
 
 Read the repo's implement profile for the concrete details — how to run tests, build, and lint; the
 house style; and how to spin up a throwaway instance to verify a UI: `.claude/implement-profile.md`
@@ -53,12 +50,6 @@ Commit **as you go, not once at the end.** After each meaningful, self-consisten
 then the implementation that greens them, then a refactor — stage and commit with a semantic-commit
 subject (`feat:`, `fix:`, `refactor:`, …) following the repo's convention. Commit at **coherent
 boundaries** where the tree is self-consistent: not per line, not one giant commit — the history
-should read as the steps you took, and each diff shows its own how. The build phase ends at a
-**verified, committed branch**, and you don't run a review pass yourself.
+should read as the steps you took, and each diff shows its own how.
 
-Opening the PR is the land phase's job, not part of the build — but don't treat "no PR" as absolute.
-If this card also runs in **auto-PR mode** (the **fleet-pr** skill is active alongside this one), the
-two compose: build with the tests-first discipline here, and follow **fleet-pr** for its
-commit-as-you-go cadence and for opening the single idempotent PR. **Defer** PR creation to fleet-pr
-rather than contradict it. If no PR/land phase applies, stop once the branch is committed and
-verified — that alone is done; the card advances on its own, so don't run a card-move command.
+Committing is continuous (as you go, at coherent boundaries). When the build is verified and committed, the **fleet-pr** skill governs what 'done' means and opens the PR — follow it; do not declare the card done here. If no fleet-pr/land phase is active, leave the verified committed branch and stop.
