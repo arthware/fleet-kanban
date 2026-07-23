@@ -45,6 +45,8 @@ import type {
 	RuntimeDirectoryListRequest,
 	RuntimeDirectoryListResponse,
 	RuntimeFeaturebaseTokenResponse,
+	RuntimeFleetUpdateApplyResult,
+	RuntimeFleetUpdateStatusResponse,
 	RuntimeGitCheckoutRequest,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitCommitDiffRequest,
@@ -151,6 +153,8 @@ import {
 	runtimeDirectoryListRequestSchema,
 	runtimeDirectoryListResponseSchema,
 	runtimeFeaturebaseTokenResponseSchema,
+	runtimeFleetUpdateApplyResultSchema,
+	runtimeFleetUpdateStatusResponseSchema,
 	runtimeGitCheckoutRequestSchema,
 	runtimeGitCheckoutResponseSchema,
 	runtimeGitCommitDiffRequestSchema,
@@ -297,6 +301,8 @@ export interface RuntimeTrpcContext {
 		getFeaturebaseToken: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFeaturebaseTokenResponse>;
 		getClineAccountBalance: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineAccountBalanceResponse>;
 		getAgentBudget: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeAgentBudgetResponse>;
+		getFleetUpdateStatus: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFleetUpdateStatusResponse>;
+		applyFleetUpdate: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFleetUpdateApplyResult>;
 		getClineAccountOrganizations: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 		) => Promise<RuntimeClineAccountOrganizationsResponse>;
@@ -601,6 +607,12 @@ export const runtimeAppRouter = t.router({
 		}),
 		getAgentBudget: t.procedure.output(runtimeAgentBudgetResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getAgentBudget(ctx.workspaceScope);
+		}),
+		getFleetUpdateStatus: t.procedure.output(runtimeFleetUpdateStatusResponseSchema).query(async ({ ctx }) => {
+			return await ctx.runtimeApi.getFleetUpdateStatus(ctx.workspaceScope);
+		}),
+		applyFleetUpdate: t.procedure.output(runtimeFleetUpdateApplyResultSchema).mutation(async ({ ctx }) => {
+			return await ctx.runtimeApi.applyFleetUpdate(ctx.workspaceScope);
 		}),
 		getClineAccountOrganizations: t.procedure
 			.output(runtimeClineAccountOrganizationsResponseSchema)
