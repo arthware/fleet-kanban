@@ -723,9 +723,17 @@ function withPrompt(args: string[], prompt: string, mode: "append" | "flag", fla
  * text; `submit: false` stages it in the prompt without sending — used by
  * `fleet task say --no-submit` to compose multi-line steering before submitting.
  */
-export function toBracketedPasteSubmission(command: string, submit = true): string {
-	return `\u001b[200~${command}\u001b[201~${submit ? "\r" : ""}`;
+export function toBracketedPaste(command: string): string {
+	return `\u001b[200~${command}\u001b[201~`;
 }
+
+/**
+ * Delay between writing a bracketed paste and writing the submit Enter. It lets the
+ * paste flush and be processed by the agent TUI (paste mode closed) so the Enter
+ * arrives in a distinct PTY read and registers as a submit keystroke rather than
+ * being coalesced into the paste. Applies to every PTY agent (claude, codex, ...).
+ */
+export const SUBMIT_ENTER_DELAY_MS = 50;
 
 // Cursor Agent does not expose a separate append-system-prompt flag, so home
 // sidebar guidance is passed as part of the initial prompt content.
