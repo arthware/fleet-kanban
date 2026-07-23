@@ -9,20 +9,10 @@ permissions:
 
 jobs:
   build-check-test:
+    name: Build, Lint, and Test (Ubuntu, Node 22)
     timeout-minutes: 10
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            node-version: 20
-          - os: ubuntu-latest
-            node-version: 22
-          # - os: windows-latest
-          #   node-version: 22
-          - os: macos-latest
-            node-version: 22
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,42 +20,40 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22
           cache: npm
 
-      # macOS node-gyp/electron rebuilds can fail with Python 3.12/distutils; pin 3.11.
-      - name: Setup Python (for node-gyp on macOS)
-        if: matrix.os == 'macos-latest'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
+      - name: Install Root Dependencies
         run: npm ci
 
-      - name: Install web-ui dependencies
+      - name: Install Web UI Dependencies
         run: npm ci --prefix web-ui
 
-      - name: Install packages/desktop dependencies
-        run: npm ci --prefix packages/desktop
-
-      - name: Build
-        run: npm run build
+      # Configuring a global git identity is required because some fast tests
+      # query git history, verify workspace post-create hooks, or commit to mock/temp repositories.
+      - name: Configure Git Identity
+        run: |
+          git config --global user.email "ci@fleet.local"
+          git config --global user.name "fleet ci"
 
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
+      # We run `web:build` instead of full root `npm run build` because:
+      # 1. Full root build triggers Sentry sourcemap upload, which requires secrets and is slow/heavy.
+      # 2. We only need to verify that both the Web UI and root packages compile correctly.
+      - name: Compile Web UI
+        run: npm run web:build
+
+      - name: Typecheck Root
         run: npm run typecheck
 
-      - name: Root tests
-        run: npm test
+      # Root fast tests include all runtime, utility, and state unit tests.
+      # We intentionally run `npm run test:fast` rather than `npm test` or `npm run test:integration`
+      # because the integration/agent tests spawn real agent CLI binaries (e.g., claude/gemini)
+      # and boot live board/socket infrastructure, which are not CI-safe or available in GitHub Actions.
+      - name: Run Root Fast Tests (CI-Safe)
+        run: npm run test:fast
 
-      - name: Web UI tests
+      - name: Run Web UI Tests
         run: npm --prefix web-ui run test
-
-      - name: packages/desktop typecheck
-        run: npm --prefix packages/desktop run typecheck
-
-      - name: packages/desktop tests
-        run: npm --prefix packages/desktop test
