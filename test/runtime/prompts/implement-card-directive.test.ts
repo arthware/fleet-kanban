@@ -44,4 +44,14 @@ describe("prependImplementCardDirective", () => {
 		// then
 		expect(result).toBe(prompt);
 	});
+
+	it("given a build card, when the prompt is built, then it authorizes committing without pausing to ask permission", () => {
+		// given
+		const prompt = "Do the thing.";
+		// when
+		const result = prependImplementCardDirective(prompt, cardTaskId, false);
+		// then
+		expect(result).toMatch(/card is your authorization to commit/i);
+		expect(result).toMatch(/never (pause to )?ask/i);
+	});
 });

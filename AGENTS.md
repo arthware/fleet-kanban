@@ -70,7 +70,11 @@ Architecture opinions
 - Do not optimize for line count alone. Optimize for codebase navigability and clarity.
 
 Git guardrails
-- NEVER commit unless user asks.
+- This repo develops autonomously: a card agent's task IS the authorization to commit and push —
+  committing as you go is expected work, not something to pause and ask permission for. Never halt a
+  card session asking "should I commit?"; see the fleet-implement/fleet-pr skills for when a card is
+  done. (The separate, legitimate case of asking when the implementation surface or acceptance
+  criteria is ambiguous — before writing code — is unaffected.)
 
 GitHub issues
 When reading issues:

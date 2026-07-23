@@ -46,6 +46,11 @@ verification fails, fix the root cause and re-verify before continuing.
 
 ## Commit
 
+**The card is your authorization to commit — never pause to ask the operator whether to commit.**
+The repo's "never commit unless user asks" guardrail is written for human dev sessions; a card
+satisfies it. (This is separate from the Intake allowance to ask when the surface or acceptance
+itself is ambiguous — that pause is fine; pausing to ask permission to commit is not.)
+
 Commit **as you go, not once at the end.** After each meaningful, self-consistent step — the tests,
 then the implementation that greens them, then a refactor — stage and commit with a semantic-commit
 subject (`feat:`, `fix:`, `refactor:`, …) following the repo's convention. Commit at **coherent
