@@ -784,6 +784,12 @@ async function updateTaskCommand(input: {
 				`Task "${taskId}" is in "${taskRecord.columnId}" — base-ref, agent-model, and skill can only be changed while a task is in backlog.`,
 			);
 		}
+		if ((input.prompt !== undefined || input.title !== undefined) && taskRecord.columnId !== "backlog") {
+			const field = input.prompt !== undefined ? "prompt" : "title";
+			throw new Error(
+				`cannot edit the ${field} of card ${taskId}: it is in ${taskRecord.columnId} (started); prompt/title are editable only in backlog`,
+			);
+		}
 		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
 			providerId: input.clineProviderId,
 			modelId: input.clineModelId,

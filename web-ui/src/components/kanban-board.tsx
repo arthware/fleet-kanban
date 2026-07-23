@@ -426,7 +426,7 @@ export function KanbanBoard({
 						editingTaskId={column.id === "backlog" ? editingTaskId : null}
 						inlineTaskEditor={column.id === "backlog" ? inlineTaskEditor : undefined}
 						onEditTask={column.id === "backlog" ? onEditTask : undefined}
-						onSaveTitle={column.id !== "trash" ? onSaveTaskTitle : undefined}
+						onSaveTitle={column.id === "backlog" ? onSaveTaskTitle : undefined}
 						onOpenPrTask={column.id === "review" ? onOpenPrTask : undefined}
 						onImplementHereTask={column.id === "review" ? onImplementHereTask : undefined}
 						onCancelAutomaticTaskAction={onCancelAutomaticTaskAction}

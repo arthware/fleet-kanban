@@ -14,6 +14,7 @@ import {
 	moveTaskToColumn,
 	normalizeBoardData,
 	trashTaskAndGetReadyLinkedTaskIds,
+	updateTask,
 	updateTaskTitle,
 } from "@/state/board-state";
 import type { ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
@@ -996,5 +997,43 @@ describe("board dependency state", () => {
 			modelId: "anthropic/claude-opus-4.6",
 			reasoningEffort: "medium",
 		});
+	});
+
+	it("denies prompt edits on started tasks (in_progress, review, done, trash)", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "in_progress", {
+			title: "Original",
+			prompt: "Task A prompt",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "in_progress")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected in_progress task to exist");
+		}
+		const updated = updateTask(board, task.id, {
+			title: "Original",
+			prompt: "New prompt",
+			baseRef: "main",
+		});
+		const updatedTask = updated.board.columns.find((column) => column.id === "in_progress")?.cards[0];
+		expect(updatedTask?.prompt).toBe("Task A prompt");
+	});
+
+	it("denies title edits on started tasks (in_progress, review, done, trash)", () => {
+		let board = createInitialBoardData();
+		board = addTaskToColumn(board, "review", {
+			title: "Original Title",
+			prompt: "Task B prompt",
+			baseRef: "main",
+		});
+		const task = board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(task).toBeDefined();
+		if (!task) {
+			throw new Error("Expected review task to exist");
+		}
+		const updated = updateTaskTitle(board, task.id, "New Title");
+		const updatedTask = updated.board.columns.find((column) => column.id === "review")?.cards[0];
+		expect(updatedTask?.title).toBe("Original Title");
 	});
 });
