@@ -1,4 +1,6 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
+
+import { useDocumentVisibility } from "@/hooks/use-document-visibility";
 
 import type {
 	RuntimeClineMcpServerAuthStatus,
@@ -27,6 +29,9 @@ const STREAM_RECONNECT_MAX_DELAY_MS = 5_000;
 // and forces a reconnect. It must exceed the server's own assembly timeout so that,
 // when the server is alive, its error+close wins first and this is only the backstop.
 const STREAM_SNAPSHOT_TIMEOUT_MS = 15_000;
+// Watchdog for established socket liveness. Must comfortably exceed the server ping interval (e.g. ~3x)
+// to avoid false reconnect storms during normal activity.
+const CLIENT_STALENESS_TIMEOUT_MS = 60_000;
 
 function mergeTaskSessionSummaries(
 	currentSessions: Record<string, RuntimeTaskSessionSummary>,
@@ -337,11 +342,37 @@ export function useRuntimeStateStream(
 ): UseRuntimeStateStreamResult {
 	const enabled = options.enabled ?? true;
 	const pinned = options.pinned ?? false;
+	const isDocumentVisible = useDocumentVisibility();
+
 	const [state, dispatch] = useReducer(
 		runtimeStateStreamReducer,
 		requestedWorkspaceId,
 		createInitialRuntimeStateStreamStore,
 	);
+
+	const [reconnectTrigger, setReconnectTrigger] = useState(0);
+
+	const socketRef = useRef<WebSocket | null>(null);
+	const lastMessageTimeRef = useRef<number>(Date.now());
+
+	useEffect(() => {
+		if (!enabled) {
+			return;
+		}
+		if (isDocumentVisible) {
+			const hasSocket = socketRef.current !== null;
+			const isSocketOpenOrConnecting =
+				socketRef.current &&
+				(socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING);
+			const isStale = Date.now() - lastMessageTimeRef.current > CLIENT_STALENESS_TIMEOUT_MS;
+			const isDisconnected = state.isRuntimeDisconnected;
+
+			if (isDisconnected || (hasSocket && (!isSocketOpenOrConnecting || isStale))) {
+				setReconnectTrigger((prev) => prev + 1);
+			}
+		}
+	}, [isDocumentVisible, enabled, state.isRuntimeDisconnected]);
+
 	useEffect(() => {
 		if (!enabled) {
 			return;
@@ -350,6 +381,7 @@ export function useRuntimeStateStream(
 		let socket: WebSocket | null = null;
 		let reconnectTimer: number | null = null;
 		let snapshotTimer: number | null = null;
+		let stalenessTimer: number | null = null;
 		let reconnectAttempt = 0;
 		let activeWorkspaceId = requestedWorkspaceId;
 		let requestedWorkspaceForConnection = requestedWorkspaceId;
@@ -363,8 +395,34 @@ export function useRuntimeStateStream(
 			}
 		};
 
+		const clearStalenessTimer = () => {
+			if (stalenessTimer !== null) {
+				window.clearTimeout(stalenessTimer);
+				stalenessTimer = null;
+			}
+		};
+
+		const resetStalenessTimer = () => {
+			clearStalenessTimer();
+			if (cancelled) {
+				return;
+			}
+			stalenessTimer = window.setTimeout(() => {
+				if (cancelled) {
+					return;
+				}
+				dispatch({
+					type: "stream_disconnected",
+					message: "Runtime stream staleness watchdog triggered.",
+				});
+				cleanupSocket();
+				scheduleReconnect();
+			}, CLIENT_STALENESS_TIMEOUT_MS);
+		};
+
 		const cleanupSocket = () => {
 			clearSnapshotTimer();
+			clearStalenessTimer();
 			if (socket) {
 				socket.onopen = null;
 				socket.onmessage = null;
@@ -372,6 +430,7 @@ export function useRuntimeStateStream(
 				socket.onclose = null;
 				socket.close();
 				socket = null;
+				socketRef.current = null;
 			}
 		};
 
@@ -400,6 +459,8 @@ export function useRuntimeStateStream(
 			cleanupSocket();
 			try {
 				socket = new WebSocket(getRuntimeStreamUrl(requestedWorkspaceForConnection));
+				socketRef.current = socket;
+				lastMessageTimeRef.current = Date.now();
 			} catch (error) {
 				dispatch({
 					type: "stream_disconnected",
@@ -426,6 +487,8 @@ export function useRuntimeStateStream(
 				dispatch({ type: "stream_connected" });
 			};
 			socket.onmessage = (event) => {
+				lastMessageTimeRef.current = Date.now();
+				resetStalenessTimer();
 				try {
 					const payload = JSON.parse(String(event.data)) as RuntimeStateStreamMessage;
 					if (payload.type === "snapshot") {
@@ -578,7 +641,7 @@ export function useRuntimeStateStream(
 			}
 			cleanupSocket();
 		};
-	}, [requestedWorkspaceId, enabled, pinned]);
+	}, [requestedWorkspaceId, enabled, pinned, reconnectTrigger]);
 
 	return {
 		currentProjectId: state.currentProjectId,
