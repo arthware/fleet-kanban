@@ -54,4 +54,76 @@ describe("PrBadge", () => {
 		expect(label?.textContent).toBe("PR #42");
 		expect(label?.className).not.toContain("line-through");
 	});
+
+	it("given an open PR with passing gate, when PrBadge renders, then it renders a green check icon", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						prGateStatus: "passing",
+					}}
+				/>,
+			);
+		});
+
+		const checkIcon = container.querySelector("svg.text-status-green");
+		expect(checkIcon).not.toBeNull();
+	});
+
+	it("given an open PR with failing gate, when PrBadge renders, then it renders a red X/failing icon", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						prGateStatus: "failing",
+					}}
+				/>,
+			);
+		});
+
+		const failIcon = container.querySelector("svg.text-status-red");
+		expect(failIcon).not.toBeNull();
+	});
+
+	it("given an open PR with pending gate, when PrBadge renders, then it renders an amber spinner", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						prGateStatus: "pending",
+					}}
+				/>,
+			);
+		});
+
+		const pendingIcon = container.querySelector("svg.text-status-amber.animate-spin");
+		expect(pendingIcon).not.toBeNull();
+	});
+
+	it("given an open PR with gate status none, when PrBadge renders, then it does not render a gate status icon", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/42",
+						prState: "open",
+						prNumber: 42,
+						prGateStatus: "none",
+					}}
+				/>,
+			);
+		});
+
+		const gateIcon = container.querySelector("svg.text-status-green, svg.text-status-red, svg.text-status-amber");
+		expect(gateIcon).toBeNull();
+	});
 });

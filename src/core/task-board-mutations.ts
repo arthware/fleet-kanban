@@ -4,6 +4,7 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
+	RuntimeCardPrGateStatus,
 	RuntimeCardPrState,
 	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
@@ -740,6 +741,7 @@ export interface RuntimeCardPrRef {
 	url: string;
 	state: RuntimeCardPrState;
 	number: number;
+	gateStatus?: RuntimeCardPrGateStatus;
 }
 
 /**
@@ -766,7 +768,12 @@ export function setCardPrUrl(
 			if (card.id !== normalizedTaskId) {
 				return card;
 			}
-			if (card.prUrl === pr.url && card.prState === pr.state && card.prNumber === pr.number) {
+			if (
+				card.prUrl === pr.url &&
+				card.prState === pr.state &&
+				card.prNumber === pr.number &&
+				card.prGateStatus === pr.gateStatus
+			) {
 				return card;
 			}
 			columnUpdated = true;
@@ -776,6 +783,7 @@ export function setCardPrUrl(
 				prUrl: pr.url,
 				prState: pr.state,
 				prNumber: pr.number,
+				prGateStatus: pr.gateStatus,
 			};
 		});
 		return columnUpdated ? { ...column, cards } : column;

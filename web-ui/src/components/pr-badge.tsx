@@ -1,9 +1,9 @@
-import { GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed } from "lucide-react";
+import { Check, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, Loader2, X } from "lucide-react";
 import type { MouseEvent, ReactElement } from "react";
 import { cn } from "@/components/ui/cn";
 import type { BoardCard } from "@/types";
 
-type PrBadgeCard = Pick<BoardCard, "prNumber" | "prState" | "prUrl">;
+type PrBadgeCard = Pick<BoardCard, "prNumber" | "prState" | "prUrl" | "prGateStatus">;
 
 const PR_BADGE_STATE_CONFIG = {
 	open: {
@@ -40,6 +40,16 @@ export function PrBadge({ card, className }: { card: PrBadgeCard; className?: st
 		event.stopPropagation();
 	};
 
+	const showGate = state === "open" && card.prGateStatus && card.prGateStatus !== "none";
+	const GateIcon =
+		card.prGateStatus === "passing"
+			? Check
+			: card.prGateStatus === "failing"
+				? X
+				: card.prGateStatus === "pending"
+					? Loader2
+					: null;
+
 	return (
 		<a
 			href={card.prUrl}
@@ -55,6 +65,17 @@ export function PrBadge({ card, className }: { card: PrBadgeCard; className?: st
 		>
 			<Icon size={14} className="shrink-0" />
 			<span className={cn("min-w-0 truncate", state === "closed" && "line-through")}>{label}</span>
+			{showGate && GateIcon && (
+				<GateIcon
+					size={12}
+					className={cn(
+						"shrink-0 ml-0.5",
+						card.prGateStatus === "passing" && "text-status-green",
+						card.prGateStatus === "failing" && "text-status-red",
+						card.prGateStatus === "pending" && "text-status-amber animate-spin",
+					)}
+				/>
+			)}
 		</a>
 	);
 }

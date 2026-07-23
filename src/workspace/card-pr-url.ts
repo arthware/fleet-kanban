@@ -18,15 +18,17 @@ const GH_REPO_PR_LIST_ARGS = [
 	"--limit",
 	String(GH_PR_LIST_LIMIT),
 	"--json",
-	"headRefName,url,state,number",
+	"headRefName,url,state,number,statusCheckRollup",
 ] as const;
 
 export type CardPrState = "open" | "merged" | "closed";
+export type CardPrGateStatus = "passing" | "failing" | "pending" | "none";
 
 export interface CardPrRef {
 	url: string;
 	state: CardPrState;
 	number: number;
+	gateStatus?: CardPrGateStatus;
 }
 
 export type GhRunner = (args: string[], cwd: string) => Promise<string>;
@@ -36,6 +38,7 @@ interface GhPrListItem {
 	url: string;
 	state: CardPrState;
 	number: number;
+	gateStatus?: CardPrGateStatus;
 }
 
 interface GhRepoPrListItem extends GhPrListItem {
@@ -54,12 +57,78 @@ function normalizePrState(value: unknown): CardPrState | null {
 	return null;
 }
 
+export function derivePrGateStatus(rollup: unknown): CardPrGateStatus {
+	if (!Array.isArray(rollup) || rollup.length === 0) {
+		return "none";
+	}
+
+	let hasPending = false;
+	let hasFailing = false;
+	let hasPassing = false;
+
+	for (const item of rollup) {
+		if (item === null || typeof item !== "object") {
+			continue;
+		}
+
+		const candidate = item as {
+			status?: unknown;
+			conclusion?: unknown;
+			state?: unknown;
+		};
+
+		const state = typeof candidate.state === "string" ? candidate.state.toUpperCase() : null;
+		const status = typeof candidate.status === "string" ? candidate.status.toUpperCase() : null;
+		const conclusion = typeof candidate.conclusion === "string" ? candidate.conclusion.toUpperCase() : null;
+
+		if (
+			state === "FAILURE" ||
+			state === "ERROR" ||
+			conclusion === "FAILURE" ||
+			conclusion === "CANCELLED" ||
+			conclusion === "TIMED_OUT" ||
+			conclusion === "ACTION_REQUIRED"
+		) {
+			hasFailing = true;
+			break;
+		}
+
+		if (
+			state === "PENDING" ||
+			status === "QUEUED" ||
+			status === "IN_PROGRESS" ||
+			(status !== null && status !== "COMPLETED") ||
+			(status !== null && !conclusion)
+		) {
+			hasPending = true;
+		} else if (
+			state === "SUCCESS" ||
+			conclusion === "SUCCESS" ||
+			conclusion === "NEUTRAL" ||
+			conclusion === "SKIPPED"
+		) {
+			hasPassing = true;
+		}
+	}
+
+	if (hasFailing) {
+		return "failing";
+	}
+	if (hasPending) {
+		return "pending";
+	}
+	if (hasPassing) {
+		return "passing";
+	}
+	return "none";
+}
+
 function parseGhPrListItem(value: unknown): GhPrListItem | null {
 	if (value === null || typeof value !== "object") {
 		return null;
 	}
 
-	const candidate = value as { url?: unknown; state?: unknown; number?: unknown };
+	const candidate = value as { url?: unknown; state?: unknown; number?: unknown; statusCheckRollup?: unknown };
 	const state = normalizePrState(candidate.state);
 	if (typeof candidate.url !== "string" || !candidate.url.trim() || state === null) {
 		return null;
@@ -68,10 +137,13 @@ function parseGhPrListItem(value: unknown): GhPrListItem | null {
 		return null;
 	}
 
+	const gateStatus = derivePrGateStatus(candidate.statusCheckRollup);
+
 	return {
 		url: candidate.url,
 		state,
 		number: candidate.number,
+		gateStatus,
 	};
 }
 
@@ -130,6 +202,7 @@ export function selectRepoCardPrsByHead(prListJson: string): Map<string, CardPrR
 					url: selected.url,
 					state: selected.state,
 					number: selected.number,
+					gateStatus: selected.gateStatus,
 				});
 			}
 		}
