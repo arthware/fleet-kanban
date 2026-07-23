@@ -6,6 +6,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import type {
+	RuntimeAgentBudgetResponse,
 	RuntimeArchivedCardsResponse,
 	RuntimeArchivedTaskRestoreRequest,
 	RuntimeClineAccountBalanceResponse,
@@ -111,6 +112,7 @@ import type {
 	RuntimeWorktreeEnsureResponse,
 } from "../core/api-contract";
 import {
+	runtimeAgentBudgetResponseSchema,
 	runtimeArchivedCardsResponseSchema,
 	runtimeArchivedTaskRestoreRequestSchema,
 	runtimeClineAccountBalanceResponseSchema,
@@ -294,6 +296,7 @@ export interface RuntimeTrpcContext {
 		getClineKanbanAccess: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineKanbanAccessResponse>;
 		getFeaturebaseToken: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFeaturebaseTokenResponse>;
 		getClineAccountBalance: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineAccountBalanceResponse>;
+		getAgentBudget: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeAgentBudgetResponse>;
 		getClineAccountOrganizations: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 		) => Promise<RuntimeClineAccountOrganizationsResponse>;
@@ -595,6 +598,9 @@ export const runtimeAppRouter = t.router({
 		}),
 		getClineAccountBalance: t.procedure.output(runtimeClineAccountBalanceResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getClineAccountBalance(ctx.workspaceScope);
+		}),
+		getAgentBudget: t.procedure.output(runtimeAgentBudgetResponseSchema).query(async ({ ctx }) => {
+			return await ctx.runtimeApi.getAgentBudget(ctx.workspaceScope);
 		}),
 		getClineAccountOrganizations: t.procedure
 			.output(runtimeClineAccountOrganizationsResponseSchema)
