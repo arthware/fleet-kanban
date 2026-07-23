@@ -3,6 +3,7 @@
 // on state orchestration instead of transport plumbing.
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
+	RuntimeAgentBudgetResponse,
 	RuntimeAgentId,
 	RuntimeClineAccountBalanceResponse,
 	RuntimeClineAccountOrganizationsResponse,
@@ -225,6 +226,11 @@ export async function fetchClineAccountBalance(
 ): Promise<RuntimeClineAccountBalanceResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
 	return await trpcClient.runtime.getClineAccountBalance.query();
+}
+
+export async function fetchAgentBudget(workspaceId: string | null): Promise<RuntimeAgentBudgetResponse> {
+	const trpcClient = getRuntimeTrpcClient(workspaceId);
+	return await trpcClient.runtime.getAgentBudget.query();
 }
 
 export async function fetchClineAccountOrganizations(

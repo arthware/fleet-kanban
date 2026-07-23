@@ -54,6 +54,7 @@ import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { prependImplementCardDirective } from "../prompts/implement-card-directive";
 import { prependPrCardDirective } from "../prompts/pr-card-directive";
+import { getAgentBudget } from "../server/agent-budget";
 import {
 	type RegisteredWorkspace,
 	resolveArchitectHomeAgentWorkspaceId,
@@ -817,6 +818,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		},
 		getClineAccountBalance: async (_workspaceScope) => {
 			return await clineProviderService.getClineAccountBalance();
+		},
+		getAgentBudget: async (_workspaceScope) => {
+			return await getAgentBudget();
 		},
 		getClineAccountOrganizations: async (_workspaceScope) => {
 			return await clineProviderService.getClineAccountOrganizations();

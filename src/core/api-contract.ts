@@ -841,6 +841,29 @@ export const runtimeClineAccountSwitchResponseSchema = z.object({
 });
 export type RuntimeClineAccountSwitchResponse = z.infer<typeof runtimeClineAccountSwitchResponseSchema>;
 
+export const runtimeAgentBudgetWindowSchema = z.object({
+	name: z.string(),
+	remainingPercent: z.number().nullable(),
+	resetsAt: z.number().nullable(),
+});
+export type RuntimeAgentBudgetWindow = z.infer<typeof runtimeAgentBudgetWindowSchema>;
+
+export const runtimeAgentBudgetProviderSchema = z.object({
+	provider: z.string(),
+	plan: z.string().nullable(),
+	staleSeconds: z.number().nullable(),
+	worstRemainingPercent: z.number().nullable(),
+	windows: z.array(runtimeAgentBudgetWindowSchema),
+});
+export type RuntimeAgentBudgetProvider = z.infer<typeof runtimeAgentBudgetProviderSchema>;
+
+export const runtimeAgentBudgetResponseSchema = z.object({
+	available: z.boolean(),
+	generatedAt: z.number().nullable(),
+	providers: z.array(runtimeAgentBudgetProviderSchema),
+});
+export type RuntimeAgentBudgetResponse = z.infer<typeof runtimeAgentBudgetResponseSchema>;
+
 export const runtimeFeaturebaseTokenResponseSchema = z.object({
 	featurebaseJwt: z.string(),
 });

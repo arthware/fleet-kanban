@@ -34,6 +34,7 @@ import { createInitialBoardData } from "@/data/board-data";
 import { createIdleTaskSession } from "@/hooks/app-utils";
 import { KanbanAccessBlockedFallback } from "@/hooks/kanban-access-blocked-fallback";
 import { RuntimeDisconnectedFallback } from "@/hooks/runtime-disconnected-fallback";
+import { useAgentBudget } from "@/hooks/use-agent-budget";
 import { useAppHotkeys } from "@/hooks/use-app-hotkeys";
 import { useBoardInteractions } from "@/hooks/use-board-interactions";
 import { useDebugTools } from "@/hooks/use-debug-tools";
@@ -177,6 +178,7 @@ export default function App(): ReactElement {
 		workspaceId: settingsWorkspaceId,
 		clineProviderSettings: settingsRuntimeProjectConfig?.clineProviderSettings ?? null,
 	});
+	const agentBudgetQuery = useAgentBudget();
 	const {
 		isStartupOnboardingDialogOpen,
 		handleOpenStartupOnboardingDialog,
@@ -940,6 +942,7 @@ export default function App(): ReactElement {
 						selectedAgentId={settingsRuntimeProjectConfig?.selectedAgentId ?? null}
 						clineProviderSettings={settingsRuntimeProjectConfig?.clineProviderSettings ?? null}
 						featurebaseFeedbackState={featurebaseFeedbackState}
+						agentBudget={agentBudgetQuery.data}
 						onSelectProject={(projectId) => {
 							void handleSelectProject(projectId);
 						}}
