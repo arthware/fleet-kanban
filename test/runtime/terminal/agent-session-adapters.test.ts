@@ -1,9 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createGitProcessEnv } from "../../../src/core/git-process-env";
 import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 
@@ -1416,5 +1418,87 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 		} finally {
 			restoreProviderEnv();
 		}
+	});
+});
+
+function initGitRepoWithOrigin(originUrl: string | null): string {
+	// Sanitize the ambient env (this suite may itself run from inside a git hook, which
+	// leaks GIT_DIR/GIT_INDEX_FILE and would otherwise hijack these repo-scoped commands).
+	const gitEnv = createGitProcessEnv();
+	const cwd = mkdtempSync(join(tmpdir(), "kanban-agent-adapters-gh-env-"));
+	execFileSync("git", ["init"], { cwd, env: gitEnv });
+	if (originUrl) {
+		execFileSync("git", ["remote", "add", "origin", originUrl], { cwd, env: gitEnv });
+	}
+	return cwd;
+}
+
+describe("prepareAgentLaunch — card gh environment", () => {
+	let repoDir: string | null = null;
+
+	afterEach(() => {
+		if (repoDir) {
+			rmSync(repoDir, { recursive: true, force: true });
+			repoDir = null;
+		}
+	});
+
+	it("given a card agent launch in a worktree whose origin is a GitHub fork, when the launch env is prepared, then GH_REPO targets the fork and GH_PROMPT_DISABLED is set", async () => {
+		// given
+		repoDir = initGitRepoWithOrigin("https://github.com/arthware/fleet-kanban.git");
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gh-env",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: repoDir,
+			prompt: "",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.env.GH_REPO).toBe("arthware/fleet-kanban");
+		expect(launch.env.GH_PROMPT_DISABLED).toBe("1");
+	});
+
+	it("given a card agent launch in a worktree with no resolvable origin remote, when the launch env is prepared, then GH_REPO is absent but GH_PROMPT_DISABLED is still set", async () => {
+		// given
+		repoDir = initGitRepoWithOrigin(null);
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gh-env-no-origin",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: repoDir,
+			prompt: "",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(launch.env.GH_REPO).toBeUndefined();
+		expect(launch.env.GH_PROMPT_DISABLED).toBe("1");
+	});
+
+	it("given a home-agent sidebar session, when the launch env is prepared, then neither GH_REPO nor GH_PROMPT_DISABLED are set", async () => {
+		// given
+		repoDir = initGitRepoWithOrigin("https://github.com/arthware/fleet-kanban.git");
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "__home_agent__:workspace-1:claude",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd: repoDir,
+			prompt: "",
+		});
+
+		// then
+		expect(launch.env.GH_REPO).toBeUndefined();
+		expect(launch.env.GH_PROMPT_DISABLED).toBeUndefined();
 	});
 });

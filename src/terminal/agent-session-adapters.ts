@@ -9,12 +9,15 @@ import type {
 	RuntimeTaskImage,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
+import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { buildKanbanCommandParts } from "../core/kanban-command";
 import { quoteShellArg } from "../core/shell";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
 import { prependPlanCardDirective } from "../prompts/plan-card-directive";
 import { getRuntimeHomePath } from "../state/workspace-state";
+import { runGit } from "../workspace/git-utils";
+import { parseGithubRemoteNameWithOwner } from "../workspace/repo-name";
 import { isClaudeCloudProviderBackend, resolveClaudePermissionStrategy } from "./claude-permission-strategy";
 import { configureCodexHooks, hasCodexConfigOverride } from "./codex-hook-config";
 import { createHookRuntimeEnv } from "./hook-runtime-context";
@@ -1720,13 +1723,41 @@ const ADAPTERS: Record<RuntimeAgentId, AgentSessionAdapter> = {
 	cline: clineAdapter,
 };
 
+const CARD_GH_REMOTE_TIMEOUT_MS = 5_000;
+
+// gh goes interactive ("Where should we push the '<branch>' branch?") whenever it can't tell which
+// repo a card's multi-remote worktree (origin = fork, upstream = the repo we track) targets, hanging
+// the session's PTY forever. GH_REPO removes the ambiguity so gh never needs to ask; GH_PROMPT_DISABLED
+// is the backstop that turns any other missing-info prompt into a visible, retryable error instead of
+// a hang. Home-agent sidebar sessions aren't card worktrees and don't run `gh pr create`, so they're
+// left untouched.
+async function resolveCardGhEnv(cwd: string): Promise<Record<string, string>> {
+	const env: Record<string, string> = { GH_PROMPT_DISABLED: "1" };
+	const origin = await runGit(cwd, ["remote", "get-url", "origin"], { timeoutMs: CARD_GH_REMOTE_TIMEOUT_MS });
+	const nameWithOwner = origin.ok ? parseGithubRemoteNameWithOwner(origin.stdout) : null;
+	if (nameWithOwner) {
+		env.GH_REPO = nameWithOwner;
+	}
+	return env;
+}
+
 export async function prepareAgentLaunch(input: AgentAdapterLaunchInput): Promise<PreparedAgentLaunch> {
 	const preparedPrompt = await prepareTaskPromptWithImages({
 		prompt: input.prompt,
 		images: input.images,
 	});
-	return await ADAPTERS[input.agentId].prepare({
+	const launch = await ADAPTERS[input.agentId].prepare({
 		...input,
 		prompt: preparedPrompt,
 	});
+	if (isHomeAgentSessionId(input.taskId)) {
+		return launch;
+	}
+	return {
+		...launch,
+		env: {
+			...launch.env,
+			...(await resolveCardGhEnv(input.cwd)),
+		},
+	};
 }
