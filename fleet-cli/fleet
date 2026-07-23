@@ -17,6 +17,7 @@
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
 #   fleet service [start|stop|restart [--build|--install]|status]   run the board under launchd
 #       (--build = stop, rebuild source offline, restart; --install = same but force `npm install` first)
+#   fleet task [create|start|ls|cat|tail|say|update|link|unlink|done|land|delete]   manage cards/tasks on the board
 #   fleet kanban daemon [install|uninstall|status]          DEPRECATED synonym for `fleet service`
 #   fleet xtools [<name> [args] | new <name> [--py] | ls | edit <name> | rm <name>]   agent-authored ad-hoc commands in tracked <project>/fleet/xtools/ (legacy .fleet/xtools supported)
 set -euo pipefail
@@ -903,8 +904,10 @@ _fleet_repo_path() {
 fleet_task() {
   [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
-  kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
   local sub="${1:-}"; [ $# -gt 0 ] && shift
+  if [ "$sub" != "land" ]; then
+    kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+  fi
   case "$sub" in
     create|new|add)
       # Thin delegation to `kanban task create`: fleet owns only --repo→--project-path
@@ -1282,6 +1285,165 @@ PY
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
+    land)
+      local card="" repo="fleet-kanban" base="" merge_method="squash" delete_branch=1 do_done=1 dry_run=0 force=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --repo) repo="$2"; shift 2;;
+          --base) base="$2"; shift 2;;
+          --merge) merge_method="$2"; shift 2;;
+          --no-delete-branch) delete_branch=0; shift;;
+          --no-done) do_done=0; shift;;
+          -n|--dry-run) dry_run=1; shift;;
+          --force) force=1; shift;;
+          -h|--help)
+            echo "usage: fleet task land <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase]" >&2
+            echo "                               [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]" >&2
+            echo "       merges a finished card's open PR, moves card to done, and fast-forwards local base ref." >&2
+            return 0;;
+          -*) echo "task land: unknown flag '$1'" >&2; return 2;;
+          *) if [ -z "$card" ]; then card="$1"; else echo "task land: unexpected arg '$1'" >&2; return 2; fi; shift;;
+        esac
+      done
+
+      [ -n "$card" ] || { echo "task land: give a <card-id> (see: fleet task land --help)" >&2; return 2; }
+
+      case "$merge_method" in squash|merge|rebase) ;; *) echo "task land: --merge must be squash|merge|rebase" >&2; return 2;; esac
+
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task land: multiple repos configured — pass --repo <name>" >&2; return 1; }
+      [ -d "$pp" ] || { echo "task land: no such repo dir: $pp" >&2; return 1; }
+
+      if ! git -C "$pp" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "task land: '$pp' is not a git repo (use --repo <name>)" >&2; return 1
+      fi
+
+      # --- resolve the card (base ref + column) from the kanban CLI, machine-readable ---
+      local card_json
+      card_json="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task list --project-path "$pp" 2>/dev/null \
+        | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=(JSON.parse(s).tasks||[]).find(x=>x.id===process.argv[1]);process.stdout.write(t?JSON.stringify(t):"")})' "$card")"
+      [ -n "$card_json" ] || { echo "task land: card '$card' not found in $pp" >&2; return 1; }
+
+      local card_base card_col
+      card_base="$(printf '%s' "$card_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).baseRef||""))')"
+      card_col="$(printf '%s' "$card_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).column||""))')"
+      [ -z "$base" ] && base="${card_base:-production-line}"
+
+      # --- find the card's open PR by branch prefix `<id>-` (deterministic, no slug logic) ---
+      local pr_json pr_count
+      pr_json="$(cd "$pp" && gh pr list --state open \
+              --json number,headRefName,baseRefName,mergeable,mergeStateStatus,title 2>/dev/null \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const id=process.argv[1];const m=JSON.parse(s).filter(p=>p.headRefName.startsWith(id+"-"));process.stdout.write(JSON.stringify(m))})' "$card")"
+      pr_count="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s).length)))')"
+
+      if [ "$pr_count" = "0" ]; then
+        echo "task land: no open PR whose branch starts with '$card-' in $(basename "$pp")" >&2
+        echo "           (the card may not have opened a PR yet — check: fleet task tail $card)" >&2
+        return 1
+      fi
+      if [ "$pr_count" != "1" ]; then
+        echo "task land: found $pr_count open PRs for '$card-*' — resolve by hand:" >&2
+        printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const p of JSON.parse(s))console.error("           #"+p.number+"  "+p.headRefName)})'
+        return 1
+      fi
+
+      local pr_num pr_head pr_pbase pr_mergeable pr_state
+      pr_num="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s)[0].number)))')"
+      pr_head="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].headRefName))')"
+      pr_pbase="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].baseRefName))')"
+      pr_mergeable="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].mergeable))')"
+      pr_state="$(printf '%s' "$pr_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].mergeStateStatus))')"
+
+      # GitHub computes mergeability lazily — a fresh `pr list` often returns UNKNOWN. The
+      # list call itself triggers the computation, so one re-query via `pr view` usually
+      # returns the settled state (avoids spuriously demanding --force on a just-opened PR).
+      if [ "$pr_state" = "UNKNOWN" ] || [ "$pr_mergeable" = "UNKNOWN" ]; then
+        local rq
+        rq="$(cd "$pp" && gh pr view "$pr_num" --json mergeable,mergeStateStatus 2>/dev/null || echo '')"
+        if [ -n "$rq" ]; then
+          pr_mergeable="$(printf '%s' "$rq" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).mergeable||""))')"
+          pr_state="$(printf '%s' "$rq" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).mergeStateStatus||""))')"
+        fi
+      fi
+
+      echo "task land: card $card ($card_col) → PR #$pr_num  [$pr_head → $pr_pbase]  $pr_mergeable/$pr_state"
+
+      # The PR base should match where we ff. Warn if they disagree (e.g. card baseRef stale).
+      if [ -n "$pr_pbase" ] && [ "$pr_pbase" != "$base" ]; then
+        echo "task land: NOTE PR merges into '$pr_pbase' but --base is '$base' — will merge into '$pr_pbase', ff '$base'." >&2
+      fi
+
+      # Mergeability gate.
+      if [ "$pr_mergeable" = "CONFLICTING" ]; then
+        echo "task land: PR #$pr_num is CONFLICTING — rebase/resolve first (won't merge)." >&2; return 1
+      fi
+      if [ "$pr_state" != "CLEAN" ] && [ "$force" -ne 1 ]; then
+        echo "task land: PR #$pr_num is '$pr_state' (not CLEAN) — pass --force to merge anyway." >&2; return 1
+      fi
+
+      if [ "$dry_run" -eq 1 ]; then
+        echo "--- dry run (no changes) ---"
+        echo "  1. (cd $(basename "$pp") && gh pr merge $pr_num --$merge_method)"
+        if [ "$delete_branch" -eq 1 ]; then
+          echo "     then delete REMOTE branch $pr_head (worktree keeps the local one)"
+        fi
+        if [ "$do_done" -eq 1 ]; then
+          echo "  2. task done --task-id $card"
+        else
+          echo "  2. (skipped: --no-done)"
+        fi
+        echo "  3. fetch origin $base && ff-or-rebase local $base"
+        return 0
+      fi
+
+      # --- 1. merge ---
+      # NOTE: never pass `gh --delete-branch` — a card's head branch is checked out in its
+      # worktree (task done KEEPS the worktree), so gh's local-branch delete fails and aborts
+      # the land mid-flight. Merge first; then delete only the REMOTE branch, tolerating
+      # failure. The local branch is cleaned when the card is trashed/deleted.
+      say "→ merging PR #$pr_num (--$merge_method)…"
+      ( cd "$pp" && gh pr merge "$pr_num" "--$merge_method" )
+      say "  merged."
+      if [ "$delete_branch" -eq 1 ]; then
+        ( cd "$pp" && git push origin --delete "$pr_head" >/dev/null 2>&1 ) \
+          && say "  deleted remote branch $pr_head." \
+          || say "  (remote branch $pr_head not deleted — already gone or worktree-held; harmless.)"
+      fi
+
+      # --- 2. move the card to done (stops its idle/resident session) ---
+      if [ "$do_done" -eq 1 ]; then
+        say "→ moving card $card to done…"
+        CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task done --task-id "$card" --project-path "$pp" >/dev/null 2>&1 \
+          && say "  done." || say "  WARN: task done failed (board may be down) — card left in $card_col."
+      fi
+
+      # --- 3. fast-forward (or rebase) the local base ref so the next worktree forks from merged code ---
+      say "→ fast-forwarding local $base…"
+      git -C "$pp" fetch origin "$base" >/dev/null 2>&1 || { say "  WARN: fetch origin $base failed."; return 0; }
+      local cur_branch
+      cur_branch="$(git -C "$pp" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+      if [ "$cur_branch" != "$base" ]; then
+        say "  NOTE: repo is on '$cur_branch', not '$base' — skipped ff (checkout $base and rerun to update the base ref)."
+        return 0
+      fi
+      if git -C "$pp" merge --ff-only "origin/$base" >/dev/null 2>&1; then
+        say "  fast-forwarded."
+      else
+        # Diverged: local base has unpushed commit(s). Replay them on top of origin (what a
+        # by-hand land does) instead of leaving the base un-updated.
+        say "  local $base diverged (unpushed local commits) — rebasing onto origin/$base…"
+        if git -C "$pp" rebase "origin/$base" >/dev/null 2>&1; then
+          local ahead
+          ahead="$(git -C "$pp" rev-list --count "origin/$base..HEAD" 2>/dev/null || echo '?')"
+          say "  rebased ($ahead local commit(s) now on top of origin/$base — unpushed)."
+        else
+          git -C "$pp" rebase --abort >/dev/null 2>&1 || true
+          say "  WARN: rebase hit conflicts — aborted. Reconcile $base by hand."
+          return 1
+        fi
+      fi
+
+      say "landed $card (#$pr_num)."
+      ;;
     *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review pr] [--start]" >&2
        echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
        echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
@@ -1291,6 +1453,7 @@ PY
        echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
        echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2
        echo "       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent" >&2
+       echo "       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]" >&2
        echo "       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)" >&2
        echo "       fleet task cat <id>          one task: state + worktree + diff" >&2
        echo "       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation" >&2
@@ -1498,7 +1661,7 @@ esac
 case "$cmd" in
   help|-h|--help)
     if [ "${1:-}" = "--agent" ]; then _fleet_help_agent
-    else grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//' | head -18; fi;;
+    else grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//' | head -21; fi;;
   status) exec python3 "$DIR/fleet.py" "$@";;
   -*) exec python3 "$DIR/fleet.py" "$cmd" "$@";;   # leading flag -> status view
   new|up|run|ls|rm) exec "$DIR/wt" "$cmd" "$@";;
