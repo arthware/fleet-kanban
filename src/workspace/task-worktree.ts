@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createKanbanClineLogger } from "../cline-sdk/cline-runtime-logger";
 import { loadRuntimeConfig } from "../config/runtime-config";
 import type {
+	RuntimeAgentId,
 	RuntimeTaskWorkspaceInfoResponse,
 	RuntimeWorktreeDeleteResponse,
 	RuntimeWorktreeEnsureResponse,
@@ -26,7 +27,20 @@ const KANBAN_TRASHED_TASK_PATCHES_DIR_NAME = "trashed-task-patches";
 const KANBAN_TASK_WORKTREE_SETUP_LOCKFILE_NAME = "kanban-task-worktree-setup.lock";
 const TASK_PATCH_FILE_SUFFIX = ".patch";
 const WORKTREE_SKILLS_RELATIVE_PATH = ".agents/skills";
+const WORKTREE_CLAUDE_SKILLS_RELATIVE_PATH = ".claude/skills";
 const LOGGER = createKanbanClineLogger({ component: "worktree-post-create" });
+
+/**
+ * Where a card's agent harness discovers its skills inside the worktree.
+ *
+ * Claude Code resolves its `Skill` tool against project skills under
+ * `.claude/skills`; codex and the other CLI harnesses follow the `.agents/skills`
+ * (AGENTS.md) convention. An unknown or unset agent falls back to `.agents/skills`
+ * so worktree setup never regresses when a new agent id appears.
+ */
+export function resolveWorktreeSkillsRelativePath(agentId?: RuntimeAgentId | null): string {
+	return agentId === "claude" ? WORKTREE_CLAUDE_SKILLS_RELATIVE_PATH : WORKTREE_SKILLS_RELATIVE_PATH;
+}
 
 const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
 	".git",
@@ -120,12 +134,13 @@ export async function resolveCanonicalSkillsDir(options?: {
 
 export async function ensureWorktreeSkillsDirectory(options: {
 	worktreePath: string;
+	skillsRelativePath?: string;
 	canonicalSkillsDir?: string | null;
 	resolveCanonicalSkillsDir?: () => Promise<string | null>;
 	fs?: WorktreeSkillsFs;
 }): Promise<WorktreeSkillsPlacementStatus> {
 	const fs = options.fs ?? DEFAULT_WORKTREE_SKILLS_FS;
-	const targetPath = join(options.worktreePath, WORKTREE_SKILLS_RELATIVE_PATH);
+	const targetPath = join(options.worktreePath, options.skillsRelativePath ?? WORKTREE_SKILLS_RELATIVE_PATH);
 	if (await lstatExists(targetPath, fs)) {
 		return "existing";
 	}
@@ -446,13 +461,17 @@ async function syncManagedIgnoredPathExcludes(repoPath: string, relativePaths: s
 	await lockedFileSystem.writeTextFileAtomic(excludePath, normalizedNextContent);
 }
 
-async function syncIgnoredPathsIntoWorktree(repoPath: string, worktreePath: string): Promise<void> {
+async function syncIgnoredPathsIntoWorktree(
+	repoPath: string,
+	worktreePath: string,
+	skillsRelativePath: string = WORKTREE_SKILLS_RELATIVE_PATH,
+): Promise<void> {
 	const ignoredPaths = getUniquePaths(await listIgnoredPaths(repoPath)).filter(
 		(relativePath) => !shouldSkipSymlink(relativePath),
 	);
 	const turbopackNodeModulesSkipPaths = new Set(await listTurbopackNodeModulesSymlinkSkipPaths(repoPath));
 	const mirroredIgnoredPaths = ignoredPaths.filter((relativePath) => !turbopackNodeModulesSkipPaths.has(relativePath));
-	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, WORKTREE_SKILLS_RELATIVE_PATH]);
+	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, skillsRelativePath]);
 
 	await syncManagedIgnoredPathExcludes(repoPath, managedExcludePaths);
 	for (const relativePath of mirroredIgnoredPaths) {
@@ -578,11 +597,15 @@ async function prepareNewTaskWorktree(options: {
 	taskId: string;
 	workspaceId: string;
 	baseRef: string;
+	skillsRelativePath: string;
 }): Promise<{ warning?: string }> {
 	try {
 		await initializeSubmodulesIfNeeded(options.worktreePath);
-		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath);
-		await ensureWorktreeSkillsDirectory({ worktreePath: options.worktreePath });
+		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
+		await ensureWorktreeSkillsDirectory({
+			worktreePath: options.worktreePath,
+			skillsRelativePath: options.skillsRelativePath,
+		});
 		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
 		const hook = runtimeConfig.worktree;
 		if (hook.postCreateCommand === undefined) {
@@ -654,18 +677,30 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 	workspaceId?: string;
 	baseRef: string;
 	branchName?: string;
+	/**
+	 * The card's resolved agent id — the same one used to launch the session.
+	 * Drives which skills location is mounted and git-excluded (claude →
+	 * `.claude/skills`, others → `.agents/skills`). Callers resolve it
+	 * (card override else workspace default); omitting it defaults to
+	 * `.agents/skills` so no config read lands on the worktree hot path.
+	 */
+	agentId?: RuntimeAgentId | null;
 }): Promise<RuntimeWorktreeEnsureResponse> {
 	try {
 		const context = await loadWorkspaceContext(options.cwd);
 		const taskId = normalizeTaskIdForWorktreePath(options.taskId);
 		const worktreePath = getTaskWorktreePath(context.repoPath, taskId);
+		// Skill placement follows the card's resolved agent; callers pass it in.
+		// Resolving it here would drag a config read onto the existing-worktree
+		// re-sync hot path, so we keep this pure and default to .agents/skills.
+		const skillsRelativePath = resolveWorktreeSkillsRelativePath(options.agentId);
 		// Investigation note: ensure is called on every task start. The previous implementation
 		// compared the worktree HEAD to the latest baseRef commit and recreated the worktree
 		// when the base branch advanced, which could destroy valid task progress. Existing
 		// worktrees are now treated as authoritative and only missing worktrees are created.
 		const existingResult = await runGit(worktreePath, ["rev-parse", "HEAD"]);
 		if (existingResult.ok && existingResult.stdout) {
-			await syncIgnoredPathsIntoWorktree(context.repoPath, worktreePath);
+			await syncIgnoredPathsIntoWorktree(context.repoPath, worktreePath, skillsRelativePath);
 			return {
 				ok: true,
 				path: worktreePath,
@@ -677,7 +712,7 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 		return await withTaskWorktreeSetupLock(context.repoPath, async () => {
 			const lockedExistingCommit = await tryRunGit(worktreePath, ["rev-parse", "HEAD"]);
 			if (lockedExistingCommit) {
-				await syncIgnoredPathsIntoWorktree(context.repoPath, worktreePath);
+				await syncIgnoredPathsIntoWorktree(context.repoPath, worktreePath, skillsRelativePath);
 				return {
 					ok: true,
 					path: worktreePath,
@@ -770,6 +805,7 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 				taskId,
 				workspaceId: options.workspaceId ?? "",
 				baseRef: requestedBaseRef,
+				skillsRelativePath,
 			});
 			if (prepareResult.warning) {
 				warning = appendWorktreeWarning(warning, prepareResult.warning);
