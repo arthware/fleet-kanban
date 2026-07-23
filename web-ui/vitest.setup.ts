@@ -1,3 +1,7 @@
+// Configure React testing environment to support act(...)
+// This avoids React's "The current testing environment is not configured to support act(...)" warning.
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 // Node.js v22+ adds a built-in localStorage to globalThis that lacks
 // Web Storage API methods when --localstorage-file is not provided.
 // This conflicts with jsdom's proper implementation because vitest's
