@@ -103,4 +103,102 @@ describe("AgentBudgetReadout", () => {
 
 		expect(container.querySelector('[data-testid="agent-budget-readout"]')).toBeNull();
 	});
+
+	it("given a claude provider with 5h=31% and week=50%, when rendered, then it shows the 5h value and not the week value", () => {
+		const budget = makeBudget({
+			providers: [
+				{
+					provider: "claude",
+					plan: "max",
+					staleSeconds: 0,
+					worstRemainingPercent: 50,
+					windows: [
+						{ name: "5h", remainingPercent: 31, resetsAt: 1_700_100_000 },
+						{ name: "week", remainingPercent: 50, resetsAt: 1_700_100_000 },
+					],
+				},
+			],
+		});
+
+		act(() => {
+			root.render(<AgentBudgetReadout budget={budget} />);
+		});
+
+		const claudePill = container.querySelector('[data-testid="agent-budget-pill-claude"]');
+		expect(claudePill?.textContent).toContain("31%");
+		expect(claudePill?.textContent).not.toContain("50%");
+		expect(claudePill?.textContent).not.toContain("wk");
+	});
+
+	it("given a claude provider with 5h=31% and week=18%, when rendered, then it shows both the 5h and the week values", () => {
+		const budget = makeBudget({
+			providers: [
+				{
+					provider: "claude",
+					plan: "max",
+					staleSeconds: 0,
+					worstRemainingPercent: 18,
+					windows: [
+						{ name: "5h", remainingPercent: 31, resetsAt: 1_700_100_000 },
+						{ name: "week", remainingPercent: 18, resetsAt: 1_700_100_000 },
+					],
+				},
+			],
+		});
+
+		act(() => {
+			root.render(<AgentBudgetReadout budget={budget} />);
+		});
+
+		const claudePill = container.querySelector('[data-testid="agent-budget-pill-claude"]');
+		expect(claudePill?.textContent).toContain("31%");
+		expect(claudePill?.textContent).toContain("wk 18%");
+	});
+
+	it("given a codex provider with 5h and week windows, when rendered, then it remains unchanged and shows the worst remaining percent", () => {
+		const budget = makeBudget({
+			providers: [
+				{
+					provider: "codex",
+					plan: "plus",
+					staleSeconds: 0,
+					worstRemainingPercent: 6,
+					windows: [
+						{ name: "5h", remainingPercent: 31, resetsAt: 1_700_100_000 },
+						{ name: "week", remainingPercent: 6, resetsAt: 1_700_100_000 },
+					],
+				},
+			],
+		});
+
+		act(() => {
+			root.render(<AgentBudgetReadout budget={budget} />);
+		});
+
+		const codexPill = container.querySelector('[data-testid="agent-budget-pill-codex"]');
+		expect(codexPill?.textContent).toContain("6%");
+		expect(codexPill?.textContent).not.toContain("31%");
+		expect(codexPill?.textContent).not.toContain("wk");
+	});
+
+	it("given a claude provider missing its 5h window, when rendered, then it falls back to worst remaining percent", () => {
+		const budget = makeBudget({
+			providers: [
+				{
+					provider: "claude",
+					plan: "max",
+					staleSeconds: 0,
+					worstRemainingPercent: 55,
+					windows: [{ name: "week", remainingPercent: 55, resetsAt: 1_700_100_000 }],
+				},
+			],
+		});
+
+		act(() => {
+			root.render(<AgentBudgetReadout budget={budget} />);
+		});
+
+		const claudePill = container.querySelector('[data-testid="agent-budget-pill-claude"]');
+		expect(claudePill?.textContent).toContain("55%");
+	});
 });
