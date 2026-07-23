@@ -130,6 +130,7 @@ vi.mock("../../../src/server/browser.js", () => ({
 import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
 import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
 import { PR_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/pr-card-directive";
+import { SUBMIT_ENTER_DELAY_MS } from "../../../src/terminal/agent-session-adapters";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
 
@@ -139,6 +140,9 @@ function createTestRuntimeApi(
 ): RuntimeTrpcContext["runtimeApi"] {
 	return createRuntimeApi({
 		...deps,
+		// Default the submit-Enter delay to a no-op so PTY-submit tests don't wait on a
+		// real timer; the deferral test injects its own gated delay to assert ordering.
+		delay: deps.delay ?? (async () => {}),
 		getUpdateStatus:
 			deps.getUpdateStatus ??
 			vi.fn(() => ({
@@ -1774,6 +1778,88 @@ describe("createRuntimeApi startTaskSession", () => {
 			"task-1",
 			Buffer.from("[200~draft steering[201~", "utf8"),
 		);
+	});
+
+	it("defers the submit Enter to a later tick so the paste settles before it (claude)", async () => {
+		const summary = createSummary({ agentId: "claude", pid: 4242 });
+		const terminalManager = {
+			writeInput: vi.fn(() => summary),
+			stopTaskSession: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+
+		// A gated delay parks the call between the paste write and the Enter write, so we
+		// can observe the Enter has NOT been written while the paste is still settling.
+		let releaseDelay!: () => void;
+		const delayGate = new Promise<void>((resolve) => {
+			releaseDelay = resolve;
+		});
+		const delay = vi.fn(() => delayGate);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+			delay,
+		});
+
+		const pending = api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "steer", bracketedPaste: true, submit: true },
+		);
+
+		// Drain microtasks so the paste write runs and the call parks on the delay gate.
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// Paste landed; the Enter waits behind the delay — it is NOT fused to the paste.
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(1);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(1, "task-1", Buffer.from("[200~steer[201~", "utf8"));
+		expect(delay).toHaveBeenCalledWith(SUBMIT_ENTER_DELAY_MS);
+
+		releaseDelay();
+		const response = await pending;
+		expect(response.ok).toBe(true);
+		// Only after the delay does the Enter go out, as its own distinct PTY write.
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(2);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(2, "task-1", Buffer.from("\r", "utf8"));
+	});
+
+	it("submits codex steering the same way — paste then a separate deferred Enter", async () => {
+		const summary = createSummary({ agentId: "codex", pid: 5151 });
+		const terminalManager = {
+			writeInput: vi.fn(() => summary),
+			stopTaskSession: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "keep going", bracketedPaste: true, submit: true },
+		);
+		expect(response.ok).toBe(true);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(
+			1,
+			"task-1",
+			Buffer.from("[200~keep going[201~", "utf8"),
+		);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(2, "task-1", Buffer.from("\r", "utf8"));
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(2);
 	});
 
 	it("sends cline steering input as a plain message, ignoring bracketed-paste framing", async () => {

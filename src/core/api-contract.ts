@@ -1204,8 +1204,10 @@ export const runtimeTaskSessionInputRequestSchema = z.object({
 	// discrete message. Additive/optional so existing callers (live terminal typing)
 	// keep raw-byte behavior.
 	bracketedPaste: z.boolean().optional(),
-	// Only meaningful with bracketedPaste: append the paste terminator + carriage
-	// return to submit the staged text. false stages it without submitting.
+	// Only meaningful with bracketedPaste: submit the pasted text by writing a
+	// separate Enter (a distinct PTY write a tick after the paste, so the TUI
+	// registers it as a submit rather than swallowing it as paste content). false
+	// stages the text in the prompt without submitting (`fleet task say --no-submit`).
 	submit: z.boolean().optional(),
 });
 export type RuntimeTaskSessionInputRequest = z.infer<typeof runtimeTaskSessionInputRequestSchema>;

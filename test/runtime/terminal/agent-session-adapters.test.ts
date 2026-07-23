@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
-import { prepareAgentLaunch, toBracketedPasteSubmission } from "../../../src/terminal/agent-session-adapters";
+import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
 const originalAppData = process.env.APPDATA;
@@ -1137,19 +1137,16 @@ describe("prepareAgentLaunch hook strategies", () => {
 	});
 });
 
-describe("toBracketedPasteSubmission", () => {
-	it("wraps text in bracketed-paste markers and submits with a carriage return by default", () => {
-		expect(toBracketedPasteSubmission("hello there")).toBe("[200~hello there[201~\r");
+describe("toBracketedPaste", () => {
+	it("wraps text in bracketed-paste markers", () => {
+		expect(toBracketedPaste("hello there")).toBe("[200~hello there[201~");
 	});
 
-	it("submits when submit is explicitly true", () => {
-		expect(toBracketedPasteSubmission("do the thing", true)).toBe("[200~do the thing[201~\r");
-	});
-
-	it("stages text without a trailing carriage return when submit is false", () => {
-		// --no-submit: the text is pasted into the prompt but NOT sent, so the
-		// architect can stage multi-line steering before submitting.
-		expect(toBracketedPasteSubmission("line one", false)).toBe("[200~line one[201~");
+	it("never appends a submit Enter — the carriage return is written separately", () => {
+		// A carriage return fused onto the paste-end marker (…[201~\r) is swallowed as
+		// paste content by Claude Code's Ink TUI, so the paste frame must exclude it;
+		// the submit Enter is a distinct PTY write a tick later.
+		expect(toBracketedPaste("line one")).not.toContain("\r");
 	});
 });
 

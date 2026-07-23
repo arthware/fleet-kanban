@@ -63,7 +63,7 @@ import {
 import { openInBrowser } from "../server/browser";
 import { listWorkspaceIndexEntries, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
-import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
+import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
@@ -92,6 +92,12 @@ export interface CreateRuntimeApiDependencies {
 	prepareForStateReset?: () => Promise<void>;
 	getUpdateStatus: () => RuntimeUpdateStatusResponse;
 	runUpdateNow: () => Promise<RuntimeRunUpdateResponse>;
+	/**
+	 * Waits `ms` before the bracketed-paste submit Enter is written, so the paste
+	 * settles into its own PTY read first (see {@link SUBMIT_ENTER_DELAY_MS}).
+	 * Defaults to a real timer; injected so tests drive the deferral deterministically.
+	 */
+	delay?: (ms: number) => Promise<void>;
 }
 
 async function resolveExistingTaskCwdOrEnsure(options: {
@@ -133,6 +139,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 	const buildConfigResponse = (runtimeConfig: RuntimeConfigState) =>
 		buildRuntimeConfigResponse(runtimeConfig, clineProviderService.getProviderSettingsSummary());
 
+	const delay = deps.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
 	const sendTaskSessionInput: RuntimeTrpcContext["runtimeApi"]["sendTaskSessionInput"] = async (
 		workspaceScope,
 		input,
@@ -157,7 +165,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			// treats a carriage return fused onto the paste-end marker (…[201~\r)
 			// as buffered text, not a submit — so the steer text lands but never sends.
 			const ptyPayload = body.bracketedPaste
-				? toBracketedPasteSubmission(body.text, false)
+				? toBracketedPaste(body.text)
 				: body.appendNewline
 					? `${body.text}\n`
 					: body.text;
@@ -170,10 +178,13 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					error: "Task session is not running.",
 				};
 			}
-			// Send the Enter as a SEPARATE write so paste-mode has closed and the
-			// carriage return registers as a submit keypress. `--no-submit` skips this,
-			// leaving the text staged in the prompt.
+			// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
+			// with the paste, the PTY coalesces both into one read, so the TUI still sees
+			// the Enter fused onto the paste-end marker and swallows it (the bug this path
+			// had). The delay lets the paste flush and paste-mode close first, so the Enter
+			// registers as a submit keypress. `--no-submit` skips it, staging the text.
 			if (body.bracketedPaste && wantsSubmit) {
+				await delay(SUBMIT_ENTER_DELAY_MS);
 				const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
 				if (afterSubmit) {
 					summary = afterSubmit;
