@@ -503,14 +503,66 @@ _service_restart() {
 # and rebuilds it. Consumer projects (non-dogfood) fall through to it in kanban_bin
 # (tier 2) and pick up the new build on their next `fleet kanban start`. Dogfood
 # (tools/) overrides this with its own working-copy kanban_source and is untouched.
+# Cheap, read-only check for whether the shared vendor build is behind the fork's
+# remote — no fetch/mutation, just `git ls-remote` + `git rev-parse HEAD`. Used by the
+# board's title-bar update indicator, so it must never exit non-zero or hang the caller.
+_fleet_update_check() {
+  local ref="${1:-main}" as_json="${2:-0}"
+  local bin="" mode="source" current="" latest="" update_available="false"
+  bin="$(kanban_bin 2>/dev/null || true)"
+  if [ -n "$bin" ] && [ "$bin" = "$KANBAN_SRC_VENDOR/dist/cli.js" ]; then
+    mode="vendor"
+    if [ -d "$KANBAN_SRC_VENDOR/.git" ]; then
+      current="$(git -C "$KANBAN_SRC_VENDOR" rev-parse HEAD 2>/dev/null || true)"
+      latest="$(git -C "$KANBAN_SRC_VENDOR" ls-remote origin "$ref" 2>/dev/null | cut -f1)"
+      [ -n "$current" ] && [ -n "$latest" ] && [ "$current" != "$latest" ] && update_available="true"
+    fi
+  fi
+  if [ "$as_json" = "1" ]; then
+    FLEET_UPDATE_MODE="$mode" FLEET_UPDATE_CURRENT="$current" FLEET_UPDATE_LATEST="$latest" \
+      FLEET_UPDATE_AVAILABLE="$update_available" python3 -c "
+import json, os
+
+def optional(key):
+    value = os.environ.get(key, '')
+    return value or None
+
+print(json.dumps({
+    'mode': os.environ['FLEET_UPDATE_MODE'],
+    'current': optional('FLEET_UPDATE_CURRENT'),
+    'latest': optional('FLEET_UPDATE_LATEST'),
+    'updateAvailable': os.environ.get('FLEET_UPDATE_AVAILABLE') == 'true',
+}))
+"
+    return 0
+  fi
+  case "$mode" in
+    source) dim "source-mode board — no shared vendor build to check";;
+    vendor)
+      if [ "$update_available" = "true" ]; then
+        say "update available: ${current:0:7} → ${latest:0:7} ($ref)"
+      else
+        dim "up to date (${current:0:7})"
+      fi
+      ;;
+  esac
+  return 0
+}
+
 fleet_update() {
-  local repo="" ref="main"
+  local repo="" ref="main" check=0 as_json=0
   while [ $# -gt 0 ]; do case "$1" in
     --repo) repo="$2"; shift 2;;
     --ref|--branch) ref="$2"; shift 2;;
-    -h|--help) echo "usage: fleet update [--repo <git-url>] [--ref <branch>]  (refresh the shared fleet-kanban build)"; return 0;;
+    --check) check=1; shift;;
+    --json) as_json=1; shift;;
+    -h|--help) echo "usage: fleet update [--repo <git-url>] [--ref <branch>] [--check [--json]]  (refresh the shared fleet-kanban build, or check whether one is available)"; return 0;;
     *) echo "fleet update: unknown flag $1" >&2; return 1;;
   esac; done
+  if [ "$check" = "1" ]; then
+    _fleet_update_check "$ref" "$as_json"
+    return 0
+  fi
   local dst="$KANBAN_SRC_VENDOR"
   if [ -d "$dst/.git" ]; then
     say "updating shared fleet-kanban build → $dst ($ref)"

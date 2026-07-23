@@ -868,6 +868,32 @@ export const runtimeAgentBudgetResponseSchema = z.object({
 });
 export type RuntimeAgentBudgetResponse = z.infer<typeof runtimeAgentBudgetResponseSchema>;
 
+export const runtimeFleetUpdateModeSchema = z.enum(["vendor", "source"]);
+export type RuntimeFleetUpdateMode = z.infer<typeof runtimeFleetUpdateModeSchema>;
+
+export const runtimeFleetUpdateStatusSchema = z.object({
+	mode: runtimeFleetUpdateModeSchema,
+	current: z.string().nullable(),
+	latest: z.string().nullable(),
+	updateAvailable: z.boolean(),
+});
+export type RuntimeFleetUpdateStatus = z.infer<typeof runtimeFleetUpdateStatusSchema>;
+
+export const runtimeFleetUpdateStatusResponseSchema = z.object({
+	status: runtimeFleetUpdateStatusSchema,
+	inProgressCount: z.number(),
+});
+export type RuntimeFleetUpdateStatusResponse = z.infer<typeof runtimeFleetUpdateStatusResponseSchema>;
+
+export const runtimeFleetUpdateApplyReasonSchema = z.enum(["cards-in-progress", "nothing-to-do"]);
+export type RuntimeFleetUpdateApplyReason = z.infer<typeof runtimeFleetUpdateApplyReasonSchema>;
+
+export const runtimeFleetUpdateApplyResultSchema = z.object({
+	started: z.boolean(),
+	reason: runtimeFleetUpdateApplyReasonSchema.nullable(),
+});
+export type RuntimeFleetUpdateApplyResult = z.infer<typeof runtimeFleetUpdateApplyResultSchema>;
+
 export const runtimeFeaturebaseTokenResponseSchema = z.object({
 	featurebaseJwt: z.string(),
 });
