@@ -128,14 +128,12 @@ export async function getAgentBudget(options: GetAgentBudgetOptions = {}): Promi
 
 	if (!inFlight) {
 		inFlight = refreshAgentBudget(options).then((data) => {
-			cache = { data, fetchedAtMs: now() };
+			if (data.available || !cache) {
+				cache = { data, fetchedAtMs: now() };
+			}
 			inFlight = null;
-			return data;
+			return cache ? cache.data : data;
 		});
-	}
-
-	if (cache) {
-		return cache.data;
 	}
 
 	return await inFlight;
