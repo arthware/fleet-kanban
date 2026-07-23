@@ -903,8 +903,10 @@ _fleet_repo_path() {
 fleet_task() {
   [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
-  kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
   local sub="${1:-}"; [ $# -gt 0 ] && shift
+  if [ "$sub" != "land" ]; then
+    kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+  fi
   case "$sub" in
     create|new|add)
       # Thin delegation to `kanban task create`: fleet owns only --repo→--project-path
