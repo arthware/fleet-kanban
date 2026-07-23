@@ -274,10 +274,47 @@ describe("createHooksApi", () => {
 			taskId: "task-1",
 			turn: 3,
 		});
-		expect(manager.applyTurnCheckpoint).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => {
+			expect(manager.applyTurnCheckpoint).toHaveBeenCalledTimes(1);
+		});
 		expect(deleteTaskTurnCheckpointRef).toHaveBeenCalledWith({
 			cwd: "/tmp/worktree",
 			ref: "refs/kanban/checkpoints/task-1/turn/1",
+		});
+	});
+
+	describe("given the turn checkpoint capture is slow", () => {
+		it("when a to_review hook is ingested, then the response resolves without waiting for the checkpoint", async () => {
+			// given
+			const transitionedSummary = createSummary({ state: "awaiting_review", reviewReason: "hook" });
+			const manager = {
+				getSummary: vi.fn(() => createSummary({ state: "running" })),
+				transitionToReview: vi.fn(() => transitionedSummary),
+				transitionToRunning: vi.fn(),
+				applyHookActivity: vi.fn(),
+				applyTurnCheckpoint: vi.fn(),
+			} as unknown as TerminalSessionManager;
+
+			const captureTaskTurnCheckpoint = vi.fn(() => new Promise<never>(() => {}));
+			const api = createHooksApi({
+				getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+				ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+				broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+				broadcastTaskReadyForReview: vi.fn(),
+				captureTaskTurnCheckpoint,
+			});
+
+			// when
+			const response = await api.ingest({
+				taskId: "task-1",
+				workspaceId: "workspace-1",
+				event: "to_review",
+			});
+
+			// then
+			expect(response).toEqual({ ok: true });
+			expect(captureTaskTurnCheckpoint).toHaveBeenCalledTimes(1);
+			expect(manager.applyTurnCheckpoint).not.toHaveBeenCalled();
 		});
 	});
 });

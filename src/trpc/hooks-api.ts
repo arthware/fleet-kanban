@@ -99,24 +99,29 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					const nextTurn = (transitionedSummary.latestTurnCheckpoint?.turn ?? 0) + 1;
 					const checkpointCwd = transitionedSummary.workspacePath ?? workspacePath;
 					const staleRef = transitionedSummary.previousTurnCheckpoint?.ref ?? null;
-					try {
-						const checkpoint = await checkpointCapture({
-							cwd: checkpointCwd,
-							taskId,
-							turn: nextTurn,
+					// Fire-and-forget: the review transition already happened above, so the
+					// hook ACK must not block on this. `checkpointCapture` runs `git add -A`
+					// over the whole worktree, which can exceed the hook client's 3s timeout
+					// on a post-verify worktree full of build/test artifacts.
+					void checkpointCapture({
+						cwd: checkpointCwd,
+						taskId,
+						turn: nextTurn,
+					})
+						.then((checkpoint) => {
+							manager.applyTurnCheckpoint(taskId, checkpoint);
+							if (staleRef) {
+								void checkpointRefDelete({
+									cwd: checkpointCwd,
+									ref: staleRef,
+								}).catch(() => {
+									// Best effort cleanup only.
+								});
+							}
+						})
+						.catch(() => {
+							// Best effort checkpointing only.
 						});
-						manager.applyTurnCheckpoint(taskId, checkpoint);
-						if (staleRef) {
-							void checkpointRefDelete({
-								cwd: checkpointCwd,
-								ref: staleRef,
-							}).catch(() => {
-								// Best effort cleanup only.
-							});
-						}
-					} catch {
-						// Best effort checkpointing only.
-					}
 				}
 
 				if (body.metadata) {
