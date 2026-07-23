@@ -596,10 +596,12 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 			}
 			columnUpdated = true;
 			updated = true;
+			const nextPrompt = column.id === "backlog" ? prompt : card.prompt;
+			const nextTitle = column.id === "backlog" ? title || card.title : card.title;
 			return {
 				...card,
-				title: title || card.title,
-				prompt,
+				title: nextTitle,
+				prompt: nextPrompt,
 				startInPlanMode: Boolean(draft.startInPlanMode),
 				autoReviewEnabled: Boolean(draft.autoReviewEnabled),
 				autoReviewMode: draft.autoReviewEnabled
