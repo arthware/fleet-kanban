@@ -71,4 +71,14 @@ describe("prependPrCardDirective", () => {
 		// then
 		expect(result).toMatch(/never ask which base/i);
 	});
+
+	it("given a PR auto-review card, when the prompt is built, then it authorizes committing and pushing without pausing to ask permission", () => {
+		// given
+		const prompt = "Do the thing.";
+		// when
+		const result = prependPrCardDirective(prompt, true, "pr", "production-line");
+		// then
+		expect(result).toMatch(/card is your authorization to commit/i);
+		expect(result).toMatch(/never pause to ask/i);
+	});
 });

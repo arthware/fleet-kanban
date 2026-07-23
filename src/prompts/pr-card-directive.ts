@@ -7,8 +7,11 @@ import type { RuntimeTaskAutoReviewMode } from "../core/api-contract";
 // here is the reliable channel (every agent gets it, unlike a skill that may not load). A bare
 // `gh pr create` also drops into an interactive prompt for base/title/body, which halts a
 // non-interactive agent session — so the directive spells out the full non-interactive form.
+// AGENTS.md's "never commit unless user asks" guardrail is written for human sessions; a
+// literal-minded agent (observed with Gemini) applies it to card work too and halts asking
+// permission to commit, so the directive states the authorization explicitly.
 export function buildPrCardPromptDirective(baseRef: string): string {
-	return `You are working an auto-review PR card. Use the fleet-pr skill: commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch \`${baseRef}\` non-interactively — \`gh pr create --base ${baseRef} --title <subject> --body <summary>\` (never a bare or interactive \`gh pr create\`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.\n\n`;
+	return `You are working an auto-review PR card. Use the fleet-pr skill: the card is your authorization to commit and push — never pause to ask whether to commit, push, or open the PR; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch \`${baseRef}\` non-interactively — \`gh pr create --base ${baseRef} --title <subject> --body <summary>\` (never a bare or interactive \`gh pr create\`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.\n\n`;
 }
 
 export function prependPrCardDirective(

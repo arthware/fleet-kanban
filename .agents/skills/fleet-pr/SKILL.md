@@ -5,6 +5,11 @@ description: use when working an auto-review PR card - commit as you go, push, a
 
 The **fleet-pr** skill defines when the card is done. Done = committed + branch pushed + PR open (or its absence explained) — nothing less. You are not done until the PR exists (or you've said exactly why it can't).
 
+**The card is your authorization to commit, push, and open the PR.** The repo's own guardrail
+("never commit unless user asks") is written for human dev sessions — a card satisfies it. Never
+pause to ask the operator for permission to commit, push, or open the PR; that halts the session with
+no one to answer.
+
 Commit as you work. After each meaningful, self-consistent step, stage and commit with
 `git add -A && git commit` and a semantic-commit subject (`feat:`, `fix:`, `refactor:`, ...). Do not
 wait until the end to save; the card should reach Review with its work already committed on the
