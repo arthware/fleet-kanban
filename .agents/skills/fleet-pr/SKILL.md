@@ -15,9 +15,15 @@ or `rm`/`mv` on repository paths). Do not touch the base worktree.
 
 When the task is done and your work is committed:
 1. **Push the task branch** to remote (e.g., `git push origin <branch>`). This is an explicit, mandatory step; without pushing, `gh pr create` will fail or the remote will be out of sync.
-2. **Open a pull request** using the GitHub CLI (`gh`):
+2. **Open a pull request** using the GitHub CLI (`gh`), always non-interactively:
    - Use the card's deterministic task branch as the PR head.
-   - Use the card's base ref as the PR base (e.g., `gh pr create --base <cardBase>`); if no other base is specified, this is `production-line`.
+   - The PR base is the card's base ref — it is provided in your task directive, and defaults to
+     `production-line` when the card doesn't override it. **Never ask which base branch to use**; if
+     you are ever unsure, use `production-line`.
+   - Always supply `--base <baseRef>`, `--title`, and `--body` (or `--fill`) together, e.g.
+     `gh pr create --base <baseRef> --title "<subject>" --body "<summary>"`. **Never run a bare
+     `gh pr create`**, or any form missing `--base`, `--title`, or `--body` — those drop `gh` into an
+     interactive prompt that halts the session.
    - If an open PR already exists for the same branch, do not create a duplicate. Report the existing PR
      URL instead.
    - If the repo is local-only (no `origin` remote) or `gh` is unavailable/not authenticated, leave the
