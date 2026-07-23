@@ -389,6 +389,9 @@ describe.sequential("task-worktree integration", () => {
 					cwd: repoPath,
 					taskId: "task-skills-exclude",
 					baseRef: "HEAD",
+					// Pin a codex-family agent so this exercises the .agents/skills path
+					// deterministically, independent of which CLI is installed locally.
+					agentId: "codex",
 				});
 				expect(ensured.ok).toBe(true);
 				if (!ensured.ok || !ensured.path) {
@@ -404,12 +407,101 @@ describe.sequential("task-worktree integration", () => {
 					cwd: repoPath,
 					taskId: "task-skills-exclude",
 					baseRef: "HEAD",
+					agentId: "codex",
 				});
 				expect(ensuredAgain.ok).toBe(true);
 				const skillsExcludeLines = readGitPath(ensured.path, "info/exclude")
 					.split("\n")
 					.filter((line) => line === "/.agents/skills");
 				expect(skillsExcludeLines).toHaveLength(1);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("given a claude card, when setup runs, then skills mount at .claude/skills and are excluded once", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-claude-skills-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-claude-skills",
+					baseRef: "HEAD",
+					agentId: "claude",
+				});
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+
+				// The claude harness reads .claude/skills — the location that fails on main.
+				expect(lstatSync(join(ensured.path, ".claude", "skills")).isSymbolicLink()).toBe(true);
+				expect(existsSync(join(ensured.path, ".claude", "skills", "fleet-implement", "SKILL.md"))).toBe(true);
+				expect(existsSync(join(ensured.path, ".claude", "skills", "fleet-pr", "SKILL.md"))).toBe(true);
+				// The codex/default mount is not created for a claude card.
+				expect(existsSync(join(ensured.path, ".agents", "skills"))).toBe(false);
+
+				expect(readGitPath(ensured.path, "info/exclude")).toContain("/.claude/skills\n");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".claude/skills"])).toBe("");
+				expect(runGit(ensured.path, ["check-ignore", "-v", ".claude/skills"])).toContain("info/exclude");
+
+				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-claude-skills",
+					baseRef: "HEAD",
+					agentId: "claude",
+				});
+				expect(ensuredAgain.ok).toBe(true);
+				const claudeExcludeLines = readGitPath(ensured.path, "info/exclude")
+					.split("\n")
+					.filter((line) => line === "/.claude/skills");
+				expect(claudeExcludeLines).toHaveLength(1);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("given a codex card, when setup runs, then skills stay at .agents/skills as before", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-codex-skills-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				mkdirSync(repoPath, { recursive: true });
+
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				runGit(repoPath, ["add", "README.md"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+
+				const ensured = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-codex-skills",
+					baseRef: "HEAD",
+					agentId: "codex",
+				});
+				expect(ensured.ok).toBe(true);
+				if (!ensured.ok || !ensured.path) {
+					throw new Error("Task worktree was not created");
+				}
+
+				expect(lstatSync(join(ensured.path, ".agents", "skills")).isSymbolicLink()).toBe(true);
+				expect(existsSync(join(ensured.path, ".claude", "skills"))).toBe(false);
+				expect(readGitPath(ensured.path, "info/exclude")).toContain("/.agents/skills\n");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".agents/skills"])).toBe("");
 			} finally {
 				cleanup();
 			}

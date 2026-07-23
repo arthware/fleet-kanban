@@ -10,6 +10,7 @@ import {
 	ensureWorktreeSkillsDirectory,
 	mirrorIgnoredPath,
 	resolveCanonicalSkillsDir,
+	resolveWorktreeSkillsRelativePath,
 } from "../../src/workspace/task-worktree";
 
 function createErrnoError(code: string): NodeJS.ErrnoException {
@@ -177,5 +178,44 @@ describe("worktree skills directory placement", () => {
 		} finally {
 			cleanup();
 		}
+	});
+
+	it("given a claude agent, when skills are placed at .claude/skills, then that location resolves to the canonical skills dir", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const worktreePath = join(root, "worktree");
+			mkdirSync(canonicalSkillsDir, { recursive: true });
+			mkdirSync(worktreePath, { recursive: true });
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath,
+				skillsRelativePath: resolveWorktreeSkillsRelativePath("claude"),
+				canonicalSkillsDir,
+			});
+
+			expect(result).toBe("linked");
+			expect(realpathSync(join(worktreePath, ".claude", "skills"))).toBe(realpathSync(canonicalSkillsDir));
+			// The codex/default location is NOT created for a claude card.
+			expect(() => lstatSync(join(worktreePath, ".agents", "skills"))).toThrow();
+		} finally {
+			cleanup();
+		}
+	});
+});
+
+describe("resolveWorktreeSkillsRelativePath", () => {
+	it("maps the claude agent to .claude/skills", () => {
+		expect(resolveWorktreeSkillsRelativePath("claude")).toBe(".claude/skills");
+	});
+
+	it("keeps codex and other agents on .agents/skills", () => {
+		expect(resolveWorktreeSkillsRelativePath("codex")).toBe(".agents/skills");
+		expect(resolveWorktreeSkillsRelativePath("gemini")).toBe(".agents/skills");
+	});
+
+	it("falls back to .agents/skills for an unset agent", () => {
+		expect(resolveWorktreeSkillsRelativePath()).toBe(".agents/skills");
+		expect(resolveWorktreeSkillsRelativePath(null)).toBe(".agents/skills");
 	});
 });

@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
+import { loadRuntimeConfig } from "../config/runtime-config";
 import type {
 	RuntimeArchivedCardsResponse,
 	RuntimeBoardCard,
@@ -367,11 +368,17 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 		ensureWorktree: async (workspaceScope, input) => {
 			const body = parseWorktreeEnsureRequest(input);
 			const card = await findBoardCard(deps, workspaceScope, body.taskId);
+			// Mount skills where this card's agent harness discovers them, mirroring
+			// the session-launch precedence (card override → workspace default). A
+			// claude card resolves to .claude/skills; codex and others to .agents/skills.
+			const effectiveAgentId =
+				card?.agentId ?? (await loadRuntimeConfig(workspaceScope.workspacePath)).selectedAgentId;
 			return await ensureTaskWorktreeIfDoesntExist({
 				cwd: workspaceScope.workspacePath,
 				taskId: body.taskId,
 				workspaceId: workspaceScope.workspaceId,
 				baseRef: body.baseRef,
+				agentId: effectiveAgentId,
 				branchName: card
 					? deriveTaskBranchName({
 							taskId: card.id,
