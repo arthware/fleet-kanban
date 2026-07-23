@@ -277,29 +277,29 @@ function resolveAgentBadgeInfo(
 	const entry = agentId ? getRuntimeAgentCatalogEntry(agentId) : null;
 	const shortLabel = entry ? (entry.shortLabel ?? entry.label) : (agentId ?? "");
 
-	// Per-provider color mappings using existing status-* theme tokens
-	let statusColor = "blue"; // fallback default
+	// Per-provider color mappings using existing status-* theme tokens as complete literal strings for JIT
+	let colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue"; // fallback default
 	if (agentId === "claude") {
-		statusColor = "orange";
+		colorClasses = "border-status-orange/30 bg-status-orange/10 text-status-orange";
 	} else if (agentId === "codex") {
-		statusColor = "green";
+		colorClasses = "border-status-green/30 bg-status-green/10 text-status-green";
 	} else if (agentId === "gemini") {
-		statusColor = "blue";
+		colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue";
 	} else if (agentId === "cursor") {
-		statusColor = "purple";
+		colorClasses = "border-status-purple/30 bg-status-purple/10 text-status-purple";
 	} else if (agentId === "cline") {
-		statusColor = "cyan";
+		colorClasses = "border-status-cyan/30 bg-status-cyan/10 text-status-cyan";
 	} else if (agentId === "droid") {
-		statusColor = "gold";
+		colorClasses = "border-status-gold/30 bg-status-gold/10 text-status-gold";
 	} else if (agentId === "kiro") {
-		statusColor = "violet";
+		colorClasses = "border-status-violet/30 bg-status-violet/10 text-status-violet";
 	} else if (agentId === "opencode") {
-		statusColor = "lime";
+		colorClasses = "border-status-lime/30 bg-status-lime/10 text-status-lime";
 	}
 
-	const colorClasses = isTrashCard
-		? "border-border text-text-tertiary bg-surface-1"
-		: `border-status-${statusColor}/30 bg-status-${statusColor}/10 text-status-${statusColor}`;
+	if (isTrashCard) {
+		colorClasses = "border-border text-text-tertiary bg-surface-1";
+	}
 
 	return {
 		shortLabel,

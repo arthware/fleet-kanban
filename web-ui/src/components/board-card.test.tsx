@@ -582,6 +582,22 @@ describe("BoardCard", () => {
 		expect(agentBadge?.className).toContain("text-status-green");
 	});
 
+	it("shows cyan classes for a Cline agent card", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ agentId: "cline" })} index={0} columnId="backlog" />);
+		});
+
+		expect(container.textContent).toContain("Cline default");
+		expect(container.textContent).not.toContain("·");
+
+		const agentBadge = Array.from(container.querySelectorAll("span")).find(
+			(el) => el.textContent?.trim() === "Cline default",
+		);
+		expect(agentBadge).toBeDefined();
+		expect(agentBadge?.className).toContain("border-status-cyan/30");
+		expect(agentBadge?.className).toContain("text-status-cyan");
+	});
+
 	it("shows muted classes for a trashed card regardless of the agent provider", async () => {
 		await act(async () => {
 			root.render(
