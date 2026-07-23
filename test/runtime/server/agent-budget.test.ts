@@ -101,7 +101,7 @@ describe("getAgentBudget", () => {
 		expect(callCount()).toBe(1);
 	});
 
-	it("given a stale cache with a prior good value, when getAgentBudget is called, then it serves the last-good value without waiting on the refresh", async () => {
+	it("given a stale cache, when getAgentBudget is called, then it awaits the refresh and returns the newly-refreshed value", async () => {
 		const { run: firstRun } = makeCountingRun(FIXTURE_STDOUT);
 		let now = 0;
 		const nowFn = () => now;
@@ -110,16 +110,41 @@ describe("getAgentBudget", () => {
 		expect(first.available).toBe(true);
 
 		now += 11 * 60 * 1000; // past the 10-minute TTL
-		let resolveSecondRun: (() => void) | undefined;
-		const secondRun: typeof firstRun = () =>
-			new Promise((resolve) => {
-				resolveSecondRun = () => resolve({ stdout: FIXTURE_STDOUT });
-			});
+		const secondStdout = JSON.stringify({
+			generated_at: 1784812901,
+			providers: [
+				{
+					provider: "claude",
+					plan: "max",
+					stale_seconds: 0,
+					windows: [{ name: "5h", remaining_percent: 25.0, resets_at: 1784829600 }],
+					worst_remaining_percent: 25.0,
+				},
+			],
+		});
+		const { run: secondRun } = makeCountingRun(secondStdout);
+
+		const staleRead = await getAgentBudget({ binary: "stub-fleet", run: secondRun, now: nowFn });
+
+		expect(staleRead.providers[0]?.worstRemainingPercent).toBe(25.0);
+	});
+
+	it("given a stale cache, when the subsequent refresh fails, then it falls back to the prior good value", async () => {
+		const { run: firstRun } = makeCountingRun(FIXTURE_STDOUT);
+		let now = 0;
+		const nowFn = () => now;
+
+		const first = await getAgentBudget({ binary: "stub-fleet", run: firstRun, now: nowFn });
+		expect(first.available).toBe(true);
+
+		now += 11 * 60 * 1000; // past the 10-minute TTL
+		const secondRun = async () => {
+			throw new Error("CLI failure");
+		};
 
 		const staleRead = await getAgentBudget({ binary: "stub-fleet", run: secondRun, now: nowFn });
 
 		expect(staleRead).toEqual(first);
-		resolveSecondRun?.();
 	});
 
 	it("given concurrent calls on a cold cache, when getAgentBudget is called twice without awaiting, then only one CLI call is made", async () => {
