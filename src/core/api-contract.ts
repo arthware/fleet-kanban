@@ -885,7 +885,7 @@ export const runtimeFleetUpdateStatusResponseSchema = z.object({
 });
 export type RuntimeFleetUpdateStatusResponse = z.infer<typeof runtimeFleetUpdateStatusResponseSchema>;
 
-export const runtimeFleetUpdateApplyReasonSchema = z.enum(["cards-in-progress", "nothing-to-do"]);
+export const runtimeFleetUpdateApplyReasonSchema = z.enum(["cards-in-progress", "nothing-to-do", "binary-not-found"]);
 export type RuntimeFleetUpdateApplyReason = z.infer<typeof runtimeFleetUpdateApplyReasonSchema>;
 
 export const runtimeFleetUpdateApplyResultSchema = z.object({

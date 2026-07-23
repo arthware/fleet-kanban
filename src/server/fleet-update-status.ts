@@ -144,6 +144,11 @@ export async function applyFleetUpdate(options: ApplyFleetUpdateOptions): Promis
 		return { started: false, reason: "cards-in-progress" };
 	}
 
+	const binary = options.binary === undefined ? resolveFleetUpdateBinary() : options.binary;
+	if (!binary) {
+		return { started: false, reason: "binary-not-found" };
+	}
+
 	const status = await getFleetUpdateStatus(options);
 	if (status.mode !== "vendor" || !status.updateAvailable) {
 		return { started: false, reason: "nothing-to-do" };
@@ -153,7 +158,7 @@ export async function applyFleetUpdate(options: ApplyFleetUpdateOptions): Promis
 	const openLogFd = options.openLogFd ?? defaultOpenLogFd;
 	const closeLogFd = options.closeLogFd ?? closeSync;
 	const logFd = openLogFd();
-	const child = spawnDetached("sh", ["-c", "fleet update && fleet service restart"], {
+	const child = spawnDetached("sh", ["-c", `'${binary}' update && '${binary}' service restart`], {
 		detached: true,
 		stdio: ["ignore", logFd, logFd],
 	});
