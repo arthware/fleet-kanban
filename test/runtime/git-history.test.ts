@@ -216,4 +216,46 @@ describe.sequential("git history runtime", () => {
 			cleanup();
 		}
 	});
+
+	it("given a repository with commits on a branch, when getGitSyncSummary is called with baseRef, then it returns the cumulative diff from the fork point", async () => {
+		const { path: repoPath, cleanup } = createTempDir("kanban-git-sync-summary-fork-point-");
+		try {
+			initRepository(repoPath);
+			writeFileSync(join(repoPath, "base.txt"), "base content\n", "utf8");
+			commitAll(repoPath, "first commit on main");
+
+			const defaultBranch = runGit(repoPath, ["symbolic-ref", "--short", "HEAD"]);
+
+			// Create a task/feature branch and checkout
+			runGit(repoPath, ["checkout", "-b", "feature-branch"]);
+
+			// Make first commit on branch
+			writeFileSync(join(repoPath, "first_branch.txt"), "added file 1\n", "utf8");
+			commitAll(repoPath, "first commit on feature branch");
+
+			// Make second commit on branch
+			writeFileSync(join(repoPath, "second_branch.txt"), "added file 2\n", "utf8");
+			commitAll(repoPath, "second commit on feature branch");
+
+			// Add an uncommitted edit on top of the commits
+			writeFileSync(join(repoPath, "uncommitted.txt"), "uncommitted additions\n", "utf8");
+
+			// Call getGitSyncSummary without baseRef (standard HEAD/working copy diff)
+			const headSummary = await getGitSyncSummary(repoPath);
+			expect(headSummary.changedFiles).toBe(1); // Only the untracked uncommitted.txt
+			expect(headSummary.additions).toBe(2); // countLines returns 2 for single line + trailing newline
+			expect(headSummary.deletions).toBe(0);
+
+			// Call getGitSyncSummary with baseRef
+			const summary = await getGitSyncSummary(repoPath, { baseRef: defaultBranch });
+
+			// We expect cumulative changes (from merge-base main feature-branch)
+			// Files changed in the branch commits: first_branch.txt, second_branch.txt, uncommitted.txt
+			expect(summary.changedFiles).toBe(3);
+			expect(summary.additions).toBe(4); // 1 + 1 (git diff) + 2 (untracked countLines)
+			expect(summary.deletions).toBe(0);
+		} finally {
+			cleanup();
+		}
+	});
 });
