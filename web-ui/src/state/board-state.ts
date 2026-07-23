@@ -185,6 +185,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		prUrl?: unknown;
 		prState?: unknown;
 		prNumber?: unknown;
+		prGateStatus?: unknown;
 		externalIssue?: unknown;
 		transitions?: unknown;
 		clineSettings?: unknown;
@@ -238,6 +239,12 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 			? { prState: card.prState }
 			: {}),
 		...(typeof card.prNumber === "number" && Number.isInteger(card.prNumber) ? { prNumber: card.prNumber } : {}),
+		...(card.prGateStatus === "passing" ||
+		card.prGateStatus === "failing" ||
+		card.prGateStatus === "pending" ||
+		card.prGateStatus === "none"
+			? { prGateStatus: card.prGateStatus }
+			: {}),
 		...(isExternalIssue(card.externalIssue) ? { externalIssue: card.externalIssue } : {}),
 		...(transitions ? { transitions } : {}),
 		...(clineSettings !== undefined ? { clineSettings } : {}),

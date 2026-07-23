@@ -631,6 +631,45 @@ describe("board dependency state", () => {
 		expect(card?.agentModel).toBeUndefined();
 	});
 
+	it("carries prGateStatus through normalization", () => {
+		const rawBoardWithStatus = (status: unknown) => ({
+			columns: [
+				{
+					id: "backlog",
+					cards: [
+						{
+							id: "a",
+							prompt: "Task A",
+							startInPlanMode: false,
+							baseRef: "main",
+							prGateStatus: status,
+						},
+					],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		});
+
+		for (const status of ["passing", "failing", "pending", "none"] as const) {
+			const normalized = normalizeBoardData(rawBoardWithStatus(status));
+			const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+			expect(card?.prGateStatus).toBe(status);
+		}
+
+		// Invalid status should be dropped/unset
+		const normalizedInvalid = normalizeBoardData(rawBoardWithStatus("invalid-status"));
+		const cardInvalid = normalizedInvalid?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(cardInvalid?.prGateStatus).toBeUndefined();
+
+		// Absent status should remain unset
+		const normalizedAbsent = normalizeBoardData(rawBoardWithStatus(undefined));
+		const cardAbsent = normalizedAbsent?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(cardAbsent?.prGateStatus).toBeUndefined();
+	});
+
 	it("disables auto-review settings for a task", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {
