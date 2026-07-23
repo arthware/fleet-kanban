@@ -91,7 +91,7 @@ describe("PrBadge", () => {
 		expect(failIcon).not.toBeNull();
 	});
 
-	it("given an open PR with pending gate, when PrBadge renders, then it renders an amber spinner", async () => {
+	it("given an open PR with pending gate, when PrBadge renders, then it renders an orange spinner", async () => {
 		await act(async () => {
 			root.render(
 				<PrBadge
@@ -105,7 +105,7 @@ describe("PrBadge", () => {
 			);
 		});
 
-		const pendingIcon = container.querySelector("svg.text-status-amber.animate-spin");
+		const pendingIcon = container.querySelector("svg.text-status-orange.animate-spin");
 		expect(pendingIcon).not.toBeNull();
 	});
 
@@ -123,7 +123,7 @@ describe("PrBadge", () => {
 			);
 		});
 
-		const gateIcon = container.querySelector("svg.text-status-green, svg.text-status-red, svg.text-status-amber");
+		const gateIcon = container.querySelector("svg.text-status-green, svg.text-status-red, svg.text-status-orange");
 		expect(gateIcon).toBeNull();
 	});
 });

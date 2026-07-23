@@ -72,7 +72,7 @@ export function PrBadge({ card, className }: { card: PrBadgeCard; className?: st
 						"shrink-0 ml-0.5",
 						card.prGateStatus === "passing" && "text-status-green",
 						card.prGateStatus === "failing" && "text-status-red",
-						card.prGateStatus === "pending" && "text-status-amber animate-spin",
+						card.prGateStatus === "pending" && "text-status-orange animate-spin",
 					)}
 				/>
 			)}
