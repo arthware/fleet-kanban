@@ -321,7 +321,7 @@ async function loadTaskWorkspaceMetadata(
 		) {
 			return { ...current, gitDirToken };
 		}
-		const summary = await getGitSyncSummary(pathInfo.path, { probe });
+		const summary = await getGitSyncSummary(pathInfo.path, { probe, baseRef: pathInfo.baseRef });
 		return {
 			data: {
 				taskId: task.taskId,

@@ -8,6 +8,7 @@ import type {
 	RuntimeGitSyncResponse,
 	RuntimeGitSyncSummary,
 } from "../core/api-contract";
+import { resolveTaskForkPoint } from "./get-workspace-changes";
 import { runGit } from "./git-utils";
 
 interface GitPathFingerprint {
@@ -36,15 +37,17 @@ function countLines(text: string): number {
 	return text.split("\n").length;
 }
 
-function parseNumstatTotals(output: string): { additions: number; deletions: number } {
+function parseNumstatTotals(output: string): { additions: number; deletions: number; filesCount: number } {
 	let additions = 0;
 	let deletions = 0;
+	let filesCount = 0;
 
 	for (const rawLine of output.split("\n")) {
 		const line = rawLine.trim();
 		if (!line) {
 			continue;
 		}
+		filesCount += 1;
 		const [addedRaw, deletedRaw] = line.split("\t");
 		const added = Number.parseInt(addedRaw ?? "", 10);
 		const deleted = Number.parseInt(deletedRaw ?? "", 10);
@@ -56,7 +59,7 @@ function parseNumstatTotals(output: string): { additions: number; deletions: num
 		}
 	}
 
-	return { additions, deletions };
+	return { additions, deletions, filesCount };
 }
 
 function parseAheadBehindCounts(output: string): { aheadCount: number; behindCount: number } {
@@ -235,19 +238,34 @@ async function hasGitRef(repoRoot: string, ref: string): Promise<boolean> {
 
 export async function getGitSyncSummary(
 	cwd: string,
-	options?: { probe?: GitWorkspaceProbe },
+	options?: { probe?: GitWorkspaceProbe; baseRef?: string },
 ): Promise<RuntimeGitSyncSummary> {
 	const probe = options?.probe ?? (await probeGitWorkspaceState(cwd));
-	const diffResult = await runGit(probe.repoRoot, ["diff", "--numstat", "HEAD", "--"], {
+	let diffRef = "HEAD";
+	let isForkPoint = false;
+
+	if (options?.baseRef) {
+		const forkPoint = await resolveTaskForkPoint(probe.repoRoot, options.baseRef);
+		if (forkPoint) {
+			diffRef = forkPoint;
+			isForkPoint = true;
+		}
+	}
+
+	const diffResult = await runGit(probe.repoRoot, ["diff", "--numstat", diffRef, "--"], {
 		timeoutMs: METADATA_GIT_TIMEOUT_MS,
 	});
-	const trackedTotals = diffResult.ok ? parseNumstatTotals(diffResult.stdout) : { additions: 0, deletions: 0 };
+	const trackedTotals = diffResult.ok
+		? parseNumstatTotals(diffResult.stdout)
+		: { additions: 0, deletions: 0, filesCount: 0 };
 	const untrackedAdditions = await countUntrackedAdditions(probe.repoRoot, probe.untrackedPaths);
+
+	const changedFiles = isForkPoint ? trackedTotals.filesCount + probe.untrackedPaths.length : probe.changedFiles;
 
 	return {
 		currentBranch: probe.currentBranch,
 		upstreamBranch: probe.upstreamBranch,
-		changedFiles: probe.changedFiles,
+		changedFiles,
 		additions: trackedTotals.additions + untrackedAdditions,
 		deletions: trackedTotals.deletions,
 		aheadCount: probe.aheadCount,
