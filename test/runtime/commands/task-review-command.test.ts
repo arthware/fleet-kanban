@@ -17,6 +17,10 @@ const workspaceStateMocks = vi.hoisted(() => ({
 	mutateWorkspaceState: vi.fn(),
 }));
 
+const taskWorktreeContextMocks = vi.hoisted(() => ({
+	resolveTaskWorktreeContext: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@trpc/client", () => ({
 	createTRPCProxyClient: trpcMocks.createTRPCProxyClient,
 	httpBatchLink: trpcMocks.httpBatchLink,
@@ -25,6 +29,10 @@ vi.mock("@trpc/client", () => ({
 vi.mock("../../../src/state/workspace-state.js", () => ({
 	loadWorkspaceContext: workspaceStateMocks.loadWorkspaceContext,
 	mutateWorkspaceState: workspaceStateMocks.mutateWorkspaceState,
+}));
+
+vi.mock("../../../src/workspace/task-worktree-context.js", () => ({
+	resolveTaskWorktreeContext: taskWorktreeContextMocks.resolveTaskWorktreeContext,
 }));
 
 import { reviewTask } from "../../../src/commands/task";

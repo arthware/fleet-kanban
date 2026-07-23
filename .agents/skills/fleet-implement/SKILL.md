@@ -60,4 +60,5 @@ Opening the PR is the land phase's job, not part of the build — but don't trea
 If this card also runs in **auto-PR mode** (the **fleet-pr** skill is active alongside this one), the
 two compose: build with the tests-first discipline here, and follow **fleet-pr** for its
 commit-as-you-go cadence and for opening the single idempotent PR. **Defer** PR creation to fleet-pr
-rather than contradict it. If no PR/land phase applies, stop at the committed branch, ready for review.
+rather than contradict it. If no PR/land phase applies, stop once the branch is committed and
+verified — that alone is done; the card advances on its own, so don't run a card-move command.
