@@ -1084,41 +1084,48 @@ const geminiAdapter: AgentSessionAdapter = {
 			args.push("--approval-mode=plan");
 		}
 
+		const configPath = join(getHookAgentDirectory("gemini"), "settings.json");
 		const hooks = resolveHookContext(input);
-		if (hooks) {
-			const configPath = join(getHookAgentDirectory("gemini"), "settings.json");
-			const geminiHookCommand = buildHooksCommand(["gemini-hook"]);
-
-			const config = {
-				hooks: {
-					BeforeTool: [
-						{
-							hooks: [{ type: "command", command: geminiHookCommand }],
-						},
-					],
-					AfterTool: [
-						{
-							hooks: [{ type: "command", command: geminiHookCommand }],
-						},
-					],
-					AfterAgent: [
-						{
-							hooks: [{ type: "command", command: geminiHookCommand }],
-						},
-					],
-					BeforeAgent: [
-						{
-							hooks: [{ type: "command", command: geminiHookCommand }],
-						},
-					],
-					Notification: [
-						{
-							hooks: [{ type: "command", command: geminiHookCommand }],
-						},
-					],
+		const config: { security: { folderTrust: { enabled: boolean } }; hooks?: Record<string, unknown> } = {
+			// Board worktrees are already trusted by the harness; disabling this here
+			// prevents the "Do you trust the files in this folder?" gate from hanging
+			// every fresh Gemini session (--yolo only covers tool-call approval, not this).
+			security: {
+				folderTrust: {
+					enabled: false,
 				},
+			},
+		};
+
+		if (hooks) {
+			const geminiHookCommand = buildHooksCommand(["gemini-hook"]);
+			config.hooks = {
+				BeforeTool: [
+					{
+						hooks: [{ type: "command", command: geminiHookCommand }],
+					},
+				],
+				AfterTool: [
+					{
+						hooks: [{ type: "command", command: geminiHookCommand }],
+					},
+				],
+				AfterAgent: [
+					{
+						hooks: [{ type: "command", command: geminiHookCommand }],
+					},
+				],
+				BeforeAgent: [
+					{
+						hooks: [{ type: "command", command: geminiHookCommand }],
+					},
+				],
+				Notification: [
+					{
+						hooks: [{ type: "command", command: geminiHookCommand }],
+					},
+				],
 			};
-			await ensureTextFile(configPath, JSON.stringify(config, null, 2));
 			Object.assign(
 				env,
 				createHookRuntimeEnv({
@@ -1126,8 +1133,10 @@ const geminiAdapter: AgentSessionAdapter = {
 					workspaceId: hooks.workspaceId,
 				}),
 			);
-			env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = configPath;
 		}
+
+		await ensureTextFile(configPath, JSON.stringify(config, null, 2));
+		env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = configPath;
 
 		const trimmed = input.prompt.trim();
 		if (trimmed) {
