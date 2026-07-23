@@ -417,7 +417,12 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const skillPrompt = skillName
 					? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
 					: body.prompt;
-				const withPrDirective = prependPrCardDirective(skillPrompt, body.autoReviewEnabled, body.autoReviewMode);
+				const withPrDirective = prependPrCardDirective(
+					skillPrompt,
+					body.autoReviewEnabled,
+					body.autoReviewMode,
+					body.baseRef,
+				);
 				// A build card with no explicit skill defaults to fleet-implement (skipped for plan
 				// cards and the home agent — see prependImplementCardDirective). An explicit `skill:`
 				// overrides that default rather than stacking on top of it.
