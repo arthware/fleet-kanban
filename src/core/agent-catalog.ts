@@ -3,6 +3,7 @@ import type { RuntimeAgentId } from "./api-contract";
 export interface RuntimeAgentCatalogEntry {
 	id: RuntimeAgentId;
 	label: string;
+	shortLabel?: string;
 	binary: string;
 	binaryAliases?: string[];
 	baseArgs: string[];
@@ -18,6 +19,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "claude",
 		label: "Claude Code",
+		shortLabel: "Claude",
 		binary: "claude",
 		baseArgs: [],
 		autonomousArgs: ["--permission-mode", "auto"],
@@ -27,6 +29,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "codex",
 		label: "OpenAI Codex",
+		shortLabel: "Codex",
 		binary: "codex",
 		baseArgs: [],
 		autonomousArgs: ["--dangerously-bypass-approvals-and-sandbox"],
@@ -36,6 +39,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "cursor",
 		label: "Cursor Agent",
+		shortLabel: "Cursor",
 		binary: "cursor-agent",
 		binaryAliases: ["agent"],
 		baseArgs: [],
@@ -45,6 +49,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "cline",
 		label: "Cline",
+		shortLabel: "Cline",
 		binary: "cline",
 		baseArgs: [],
 		autonomousArgs: ["--auto-approve-all"],
@@ -53,6 +58,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "opencode",
 		label: "OpenCode",
+		shortLabel: "OpenCode",
 		binary: "opencode",
 		baseArgs: [],
 		autonomousArgs: [],
@@ -61,6 +67,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "droid",
 		label: "Factory Droid",
+		shortLabel: "Droid",
 		binary: "droid",
 		baseArgs: [],
 		autonomousArgs: ["--auto", "high"],
@@ -69,6 +76,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "kiro",
 		label: "Kiro",
+		shortLabel: "Kiro",
 		binary: "kiro-cli",
 		baseArgs: ["chat"],
 		autonomousArgs: ["--trust-all-tools"],
@@ -77,6 +85,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
 		id: "gemini",
 		label: "Gemini CLI",
+		shortLabel: "Gemini",
 		binary: "gemini",
 		baseArgs: [],
 		autonomousArgs: ["--yolo"],

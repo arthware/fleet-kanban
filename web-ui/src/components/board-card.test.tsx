@@ -520,9 +520,17 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("Claude Code");
-		expect(container.textContent).toContain("Haiku 4.5");
+		expect(container.textContent).toContain("Claude Haiku 4.5");
+		expect(container.textContent).not.toContain("Claude Code");
+		expect(container.textContent).not.toContain("·");
 		expect(container.textContent).not.toContain("claude-haiku-4-5");
+
+		const agentBadge = Array.from(container.querySelectorAll("span")).find(
+			(el) => el.textContent?.trim() === "Claude Haiku 4.5",
+		);
+		expect(agentBadge).toBeDefined();
+		expect(agentBadge?.className).toContain("border-status-orange/30");
+		expect(agentBadge?.className).toContain("text-status-orange");
 	});
 
 	it("shows the raw model id when a card's agentModel override is unknown to the display-name table", async () => {
@@ -536,7 +544,8 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("gpt-5.1-codex-mini");
+		expect(container.textContent).toContain("Codex gpt-5.1-codex-mini");
+		expect(container.textContent).not.toContain("·");
 	});
 
 	it("shows the agent with a muted default model label when no override is set", async () => {
@@ -544,9 +553,16 @@ describe("BoardCard", () => {
 			root.render(<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="backlog" />);
 		});
 
-		expect(container.textContent).toContain("Claude Code");
-		expect(container.textContent).toContain("default");
-		expect(container.textContent).not.toContain("claude-haiku-4-5");
+		expect(container.textContent).toContain("Claude default");
+		expect(container.textContent).not.toContain("Claude Code");
+		expect(container.textContent).not.toContain("·");
+
+		const agentBadge = Array.from(container.querySelectorAll("span")).find(
+			(el) => el.textContent?.trim() === "Claude default",
+		);
+		expect(agentBadge).toBeDefined();
+		expect(agentBadge?.className).toContain("border-status-orange/30");
+		expect(agentBadge?.className).toContain("text-status-orange");
 	});
 
 	it("falls back to the workspace default agent when a card never set one", async () => {
@@ -554,7 +570,36 @@ describe("BoardCard", () => {
 			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" defaultAgentId="codex" />);
 		});
 
-		expect(container.textContent).toContain("OpenAI Codex");
+		expect(container.textContent).toContain("Codex default");
+		expect(container.textContent).not.toContain("OpenAI Codex");
+		expect(container.textContent).not.toContain("·");
+
+		const agentBadge = Array.from(container.querySelectorAll("span")).find(
+			(el) => el.textContent?.trim() === "Codex default",
+		);
+		expect(agentBadge).toBeDefined();
+		expect(agentBadge?.className).toContain("border-status-green/30");
+		expect(agentBadge?.className).toContain("text-status-green");
+	});
+
+	it("shows muted classes for a trashed card regardless of the agent provider", async () => {
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="trash" />
+				</TooltipProvider>,
+			);
+		});
+
+		const agentBadge = Array.from(container.querySelectorAll("span")).find(
+			(el) => el.textContent?.trim() === "Claude default",
+		);
+		expect(agentBadge).toBeDefined();
+		expect(agentBadge?.className).toContain("border-border");
+		expect(agentBadge?.className).toContain("text-text-tertiary");
+		expect(agentBadge?.className).toContain("bg-surface-1");
+		expect(agentBadge?.className).not.toContain("border-status-orange/30");
+		expect(agentBadge?.className).not.toContain("text-status-orange");
 	});
 
 	it("shows nothing agent-related for a card with neither its own agent nor a known workspace default", async () => {
