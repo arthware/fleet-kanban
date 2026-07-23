@@ -8,6 +8,8 @@
 //
 // See docs/design/architect-steering.md §3 and §5 (Cards A1, A2).
 
+import path from "node:path";
+
 import { isPathWithinRoot } from "../workspace/path-sandbox";
 import { type FleetAgentHelpResult, runFleetAgentHelp as runFleetAgentHelpViaCli } from "./fleet-cli";
 
@@ -91,6 +93,53 @@ export function resolveArchitectHomeAgentWorkspaceId(
 	activeWorkspaceId: string,
 ): string {
 	return classifyArchitectWorkspace(workspaces).architectWorkspaceId ?? activeWorkspaceId;
+}
+
+/**
+ * The scope `loadDoctrine` needs to reach architect-owned doctrine at the fleet
+ * root — empty when a repo has no overseeing architect (in-repo resolution only).
+ */
+export interface DoctrineScope {
+	/** Absolute path of the fleet root that owns per-repo doctrine. */
+	fleetRoot?: string;
+	/** Repo namespace under `<fleetRoot>/.fleet/doctrine/`. */
+	repoName?: string;
+}
+
+/**
+ * Resolve the doctrine scope for a repo — the single source of truth for the
+ * architect → repo → `.fleet/doctrine/<repo>` mapping (Constitution Article 3).
+ * Both the card path and the architect path consume this, so the root-fallback
+ * namespacing is never invented twice.
+ *
+ * When the repo is overseen by an architect (strictly contained by it), the scope
+ * is the architect's repo as `fleetRoot` and the **fleet-root-relative path** as
+ * `repoName` (collision-safe under nesting; equal to the basename in the flat
+ * `fleet-root/repo` layout). A flat/peer board, or the architect's own path, yields
+ * an empty scope — `loadDoctrine` then resolves in-repo only, exactly as before.
+ *
+ * See docs/design/architect-doctrine-placement.md § "Phase 1b".
+ */
+export function resolveDoctrineScope(repoPath: string, workspaces: RegisteredWorkspace[]): DoctrineScope {
+	const { architectWorkspaceId } = classifyArchitectWorkspace(workspaces);
+	if (architectWorkspaceId === null) {
+		return {};
+	}
+	const architect = workspaces.find((ws) => ws.workspaceId === architectWorkspaceId);
+	if (!architect) {
+		return {};
+	}
+	// Reuse the one containment predicate: the repo is overseen iff the architect
+	// strictly contains it. Fall back to a synthetic entry when the target repo is
+	// not itself registered (e.g. a card's worktree path resolved for scoping).
+	const target = workspaces.find((ws) => ws.repoPath === repoPath) ?? {
+		workspaceId: "__doctrine-scope-target__",
+		repoPath,
+	};
+	if (!strictlyContains(architect, target)) {
+		return {};
+	}
+	return { fleetRoot: architect.repoPath, repoName: path.relative(architect.repoPath, repoPath) };
 }
 
 /**
@@ -302,5 +351,6 @@ export async function resolveHomeAgentContext(
  * skips the fleet CLI (empty instructions) since the cwd never depends on it.
  */
 export async function resolveHomeAgentCwd(input: ResolveHomeAgentCwdInput): Promise<string> {
+	// cwd never depends on the fleet CLI, so skip that read.
 	return (await resolveHomeAgentContext(input, async () => ({ ok: true, instructions: "" }))).cwd;
 }

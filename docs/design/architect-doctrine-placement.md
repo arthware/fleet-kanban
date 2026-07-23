@@ -158,6 +158,76 @@ catches drift the incremental updates miss.
 - **fleet-kanban today** — the `## Prior art` SHA section is the manual precursor to prompt-priming;
   the in-repo `docs/architecture/concepts/` is the opt-in variant.
 
+## Phase 1b — scoping resolution: one helper for the architect and overseen cards
+
+Phase 1a (commit `6a0bcca`) wired constitution injection but resolved doctrine **without a notion of
+scope** — which fleet root owns a repo's doctrine, and how the repo is namespaced under it. That left
+two gaps that are really one missing piece:
+
+1. **The architect never saw the constitution** — the card-path injection excluded the home agent, so
+   the one agent that *authors cards* and must enforce Articles 1–2 was ungoverned.
+2. **Overseen cards resolved in-repo only** — `loadDoctrine` was called with `repoPath` but no
+   `fleetRoot`/`repoName`, so it could never reach the root fallback
+   (`<fleetRoot>/.fleet/doctrine/<repo>/constitution.md`). A repo that keeps its doctrine root-side
+   (the pristine-source default from §1–2) silently got nothing.
+
+Both dissolve once resolution is **scoped**. One helper is the single source of truth for the
+architect→repo→`.fleet/doctrine/<repo>` mapping (Article 3); the two paths must not invent the
+namespacing separately.
+
+### `resolveDoctrineScope(repoPath, workspaces) → { fleetRoot?, repoName? }`
+
+Wraps `classifyArchitectWorkspace` (the existing containment classifier — no second containment
+check):
+
+- **Overseen repo** (an architect exists and `repoPath` is strictly contained by it):
+  `{ fleetRoot: <architect repoPath>, repoName: <fleet-root-relative path> }`.
+- **Otherwise** (flat/peer board, no architect, or `repoPath` *is* the architect): `{}` — in-repo
+  resolution only, i.e. exactly Phase 1a's behavior. Backward compatible.
+
+**`<repo>` namespacing = fleet-root-relative path** (`path.relative(fleetRoot, repoPath)`), not the
+basename. Both agree in the flat `fleet-root/repo1` layout the design targets (both yield `repo1`),
+but the relative path is **collision-safe** under nesting: `/root/a/kanban` and `/root/b/kanban`
+namespace to `a/kanban` vs `b/kanban` instead of clobbering at `kanban/`. It is one `path.relative`
+call and mirrors the on-disk containment, so it is the simpler *correct* choice (Article 2/8).
+
+### Which constitution the architect receives, and from where
+
+The architect's home agent roots at the **parent** workspace (`resolveAgentConfigRoot` → e.g.
+`tools/`), but a constitution physically lives in a **sub-repo**
+(`fleet-kanban/docs/architecture/constitution.md`). The decision:
+
+> **The architect is governed by the constitution of the (harness) repo it oversees — resolved through
+> the same `resolveDoctrineScope` + `loadDoctrine` seam as that repo's cards — not by a constitution at
+> its own parent root.**
+
+Rationale — the *simplest correct* model that actually closes gap #1 in the live instance:
+
+- The architect must enforce the **harness core** (Articles 1–5). By the constitution's own governance
+  clause those articles are **inviolable and identical across every overseen repo** — a repo may add
+  articles, never opt out. So *any* overseen repo's constitution carries the core the architect must
+  enforce; the architect resolves the first overseen repo that has one (deterministic index order).
+- In this instance the architect (`tools/`) oversees exactly one repo, `fleet-kanban`, whose
+  `docs/architecture/constitution.md` *is* the instance's constitution (core Art 1–5 + fleet-kanban's
+  Art 6–9). Resolving it makes the architect **governed by the same doctrine as the cards it
+  dispatches** — the stated goal — and it works today, with no file that must first be planted at the
+  bare `tools/` root.
+- The alternative — resolve from the architect's own parent root (`tools/docs/architecture/` or
+  `tools/.fleet/doctrine/constitution.md`) — is the two-tier model's eventual home for an
+  extracted/shipped core, but that file does not exist in this instance, so it would leave the
+  architect ungoverned now. When a root-level instance constitution is later introduced it becomes a
+  natural higher-precedence source; until then, overseen-repo resolution is what governs the architect.
+
+### Distinct injection mechanisms, one resolution seam
+
+- **Cards** inline the constitution **per launch prompt** (`prependConstitution`) — cards are one-shot.
+- **The architect** carries it in its **durable context preamble** (`buildArchitectContextPreamble`,
+  its seeded initial-context section) alongside the sub-repo awareness it already gets — it is a
+  long-lived session, so the law belongs in seeded context, not prepended to every message.
+
+The two mechanisms stay distinct; both consume the same `resolveDoctrineScope` + `loadDoctrine`
+resolution, so there is no double-injection and one namespacing convention.
+
 ## Disposition
 
 Hand back to the architect to fan out build cards. Suggested sequence:

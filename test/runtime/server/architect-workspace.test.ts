@@ -5,6 +5,7 @@ import {
 	classifyArchitectWorkspace,
 	resolveAgentConfigRoot,
 	resolveArchitectHomeAgentWorkspaceId,
+	resolveDoctrineScope,
 	resolveHomeAgentContext,
 	resolveHomeAgentCwd,
 	selectArchitectAwareProjects,
@@ -67,6 +68,64 @@ describe("classifyArchitectWorkspace", () => {
 			architectWorkspaceId: null,
 			implWorkspaceIds: [],
 		});
+	});
+});
+
+describe("resolveDoctrineScope", () => {
+	it("given an overseen repo, when scoped, then it yields the architect root and the fleet-root-relative repo name", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/tools/fleet-kanban", workspaces);
+
+		// then
+		expect(scope).toEqual({ fleetRoot: "/home/user/code/tools", repoName: "fleet-kanban" });
+	});
+
+	it("given a repo nested below a nested container, when scoped, then repoName keeps the fleet-root-relative path", () => {
+		// given — the outermost container is the architect, so the name preserves the intermediate segment
+		const workspaces = [
+			{ workspaceId: "top", repoPath: "/root/a" },
+			{ workspaceId: "leaf", repoPath: "/root/a/b/c" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/root/a/b/c", workspaces);
+
+		// then
+		expect(scope).toEqual({ fleetRoot: "/root/a", repoName: "b/c" });
+	});
+
+	it("given a flat/peer board, when scoped, then no scope is produced (in-repo resolution only)", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "repo1", repoPath: "/home/user/code/repo1" },
+			{ workspaceId: "repo2", repoPath: "/home/user/code/repo2" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/repo1", workspaces);
+
+		// then
+		expect(scope).toEqual({});
+	});
+
+	it("given the architect's own path, when scoped, then no scope is produced (it is not an overseen repo)", () => {
+		// given
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+		];
+
+		// when
+		const scope = resolveDoctrineScope("/home/user/code/tools", workspaces);
+
+		// then
+		expect(scope).toEqual({});
 	});
 });
 
