@@ -86,6 +86,13 @@ export function classifyArchitectWorkspace(workspaces: RegisteredWorkspace[]): A
 	};
 }
 
+export function resolveArchitectHomeAgentWorkspaceId(
+	workspaces: RegisteredWorkspace[],
+	activeWorkspaceId: string,
+): string {
+	return classifyArchitectWorkspace(workspaces).architectWorkspaceId ?? activeWorkspaceId;
+}
+
 /**
  * Initial-context section that makes the architect's home agent aware of the
  * sub-repositories it oversees. Pure over the classification + workspace index:

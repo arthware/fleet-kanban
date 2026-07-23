@@ -54,9 +54,9 @@ import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { prependImplementCardDirective } from "../prompts/implement-card-directive";
 import { prependPrCardDirective } from "../prompts/pr-card-directive";
-import { resolveHomeAgentContext } from "../server/architect-workspace";
+import { resolveArchitectHomeAgentWorkspaceId, resolveHomeAgentContext } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
-import { listWorkspaceIndexEntries, loadWorkspaceState } from "../state/workspace-state";
+import { listWorkspaceIndexEntries, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { toBracketedPasteSubmission } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
@@ -207,21 +207,45 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 
-			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
-			const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+			const workspaces = await listWorkspaceIndexEntries();
+			const architectWorkspaceId = resolveArchitectHomeAgentWorkspaceId(workspaces, workspaceScope.workspaceId);
+			let architectWorkspaceScope: RuntimeTrpcWorkspaceScope;
+			if (architectWorkspaceId === workspaceScope.workspaceId) {
+				architectWorkspaceScope = workspaceScope;
+			} else {
+				const architectWorkspaceContext = await loadWorkspaceContextById(architectWorkspaceId);
+				if (!architectWorkspaceContext) {
+					return {
+						ok: true,
+						taskId: body.taskId,
+						homeAgentTaskId: null,
+						notified: false,
+						message: null,
+					};
+				}
+				architectWorkspaceScope = {
+					workspaceId: architectWorkspaceContext.workspaceId,
+					workspacePath: architectWorkspaceContext.repoPath,
+				};
+			}
+
+			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(architectWorkspaceScope);
+			const terminalManager = await deps.getScopedTerminalManager(architectWorkspaceScope);
+			// Derive liveness from the real process/transcript (Phase 1) rather than trusting the
+			// persisted lifecycle: refresh each terminal summary before the architect lookup so
+			// `isAttached` reflects a live session, not a stale hydrated `attached` record.
 			const terminalSummaries = await Promise.all(
 				terminalManager.listSummaries().map(async (summary) => {
 					return (await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
 				}),
 			);
-			const terminalSummariesByTaskId = new Map(terminalSummaries.map((summary) => [summary.taskId, summary]));
 			const homeAgentTaskId = resolveRunningHomeAgentTaskId({
-				workspaceId: workspaceScope.workspaceId,
+				architectWorkspaceId,
 				taskId: body.taskId,
 				summaries: [...clineTaskSessionService.listSummaries(), ...terminalSummaries],
-				isActive: (taskId) =>
-					clineTaskSessionService.hasActiveTaskSession(taskId) ||
-					terminalSummariesByTaskId.get(taskId)?.agentSessionLifecycle === "attached",
+				isAttached: (summary) =>
+					clineTaskSessionService.hasActiveTaskSession(summary.taskId) ||
+					summary.agentSessionLifecycle === "attached",
 			});
 
 			if (!homeAgentTaskId) {
@@ -235,7 +259,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			}
 
 			const message = buildTaskReadyForReviewMessage(task);
-			const response = await sendTaskSessionInput(workspaceScope, {
+			const response = await sendTaskSessionInput(architectWorkspaceScope, {
 				taskId: homeAgentTaskId,
 				text: message,
 				bracketedPaste: true,

@@ -1,9 +1,8 @@
 // Manages the synthetic home agent session lifecycle for the sidebar.
-// It keeps one in-memory session identity stable per workspace while the app
-// stays open and rotates it only when the selected agent configuration
-// meaningfully changes.
+// It keeps one derived session identity stable per architect workspace and
+// reloads/restarts that identity in place when the selected agent configuration changes.
 
-import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "@runtime-home-agent-session";
+import { createHomeAgentSessionId } from "@runtime-home-agent-session";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef } from "react";
 
@@ -17,7 +16,6 @@ type HomeAgentPanelMode = "chat" | "terminal";
 
 interface HomeAgentDescriptor {
 	panelMode: HomeAgentPanelMode;
-	descriptorKey: string;
 	taskId: string;
 }
 
@@ -41,53 +39,8 @@ interface HomeAgentSessionIdentity {
 	taskId: string;
 }
 
-interface HomeAgentWorkspaceDescriptor {
-	descriptorKey: string;
-	panelMode: HomeAgentPanelMode;
-	taskId: string;
-}
-
-function buildClineDescriptor(config: RuntimeConfigResponse): string {
-	const clineProviderSettings = getRuntimeClineProviderSettings(config);
-	return JSON.stringify({
-		agentId: config.selectedAgentId,
-		providerId: clineProviderSettings.providerId ?? clineProviderSettings.oauthProvider ?? "",
-		modelId: clineProviderSettings.modelId ?? "",
-		baseUrl: clineProviderSettings.baseUrl ?? "",
-		reasoningEffort: clineProviderSettings.reasoningEffort ?? null,
-	});
-}
-
-function buildTerminalDescriptor(config: RuntimeConfigResponse): string {
-	return JSON.stringify({
-		agentId: config.selectedAgentId,
-		command: config.effectiveCommand ?? "",
-	});
-}
-
 function resolveHomeAgentBaseRef(workspaceGit: RuntimeGitRepositoryInfo | null): string {
 	return workspaceGit?.currentBranch ?? workspaceGit?.defaultBranch ?? "HEAD";
-}
-
-function pruneWorkspaceHomeAgentSessions(
-	setSessionSummaries: Dispatch<SetStateAction<Record<string, RuntimeTaskSessionSummary>>>,
-	workspaceId: string,
-	keepTaskId: string | null,
-): void {
-	setSessionSummaries((currentSessions) => {
-		let didChange = false;
-		const nextSessions: Record<string, RuntimeTaskSessionSummary> = {};
-
-		for (const [taskId, summary] of Object.entries(currentSessions)) {
-			if (isHomeAgentSessionIdForWorkspace(taskId, workspaceId) && taskId !== keepTaskId) {
-				didChange = true;
-				continue;
-			}
-			nextSessions[taskId] = summary;
-		}
-
-		return didChange ? nextSessions : currentSessions;
-	});
 }
 
 function buildHomeAgentSessionKey(session: HomeAgentSessionIdentity): string {
@@ -113,15 +66,16 @@ export function useHomeAgentSession({
 	workspaceGit,
 	clineSessionContextVersion,
 	sessionSummaries,
-	setSessionSummaries,
+	setSessionSummaries: _setSessionSummaries,
 	upsertSessionSummary,
 }: UseHomeAgentSessionInput): UseHomeAgentSessionResult {
 	const latestBaseRefRef = useRef("HEAD");
-	const homeDescriptorByWorkspaceRef = useRef(new Map<string, HomeAgentWorkspaceDescriptor>());
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
 	const startedSessionKeysRef = useRef(new Set<string>());
 	const pendingStartRequestIdsRef = useRef(new Map<string, number>());
 	const previousClineSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
+	const previousClineConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
+	const previousTerminalConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
 	const nextStartRequestIdRef = useRef(0);
 	const disposedRef = useRef(false);
 	const clineProviderSettings = getRuntimeClineProviderSettings(runtimeProjectConfig);
@@ -136,52 +90,21 @@ export function useHomeAgentSession({
 		}
 
 		let panelMode: HomeAgentPanelMode;
-		let descriptorKey: string;
 		if (isNativeClineAgentSelected(runtimeProjectConfig.selectedAgentId)) {
 			panelMode = "chat";
-			descriptorKey = buildClineDescriptor(runtimeProjectConfig);
 		} else {
 			if (!runtimeProjectConfig.effectiveCommand) {
 				return null;
 			}
 			panelMode = "terminal";
-			descriptorKey = buildTerminalDescriptor(runtimeProjectConfig);
-		}
-
-		const existingDescriptor = homeDescriptorByWorkspaceRef.current.get(currentProjectId);
-		if (
-			existingDescriptor &&
-			existingDescriptor.descriptorKey === descriptorKey &&
-			existingDescriptor.panelMode === panelMode
-		) {
-			return {
-				panelMode,
-				descriptorKey,
-				taskId: existingDescriptor.taskId,
-			};
 		}
 
 		const taskId = createHomeAgentSessionId(currentProjectId, runtimeProjectConfig.selectedAgentId);
-		homeDescriptorByWorkspaceRef.current.set(currentProjectId, {
-			descriptorKey,
-			panelMode,
-			taskId,
-		});
 		return {
 			panelMode,
-			descriptorKey,
 			taskId,
 		};
-	}, [
-		currentProjectId,
-		clineProviderSettings.baseUrl,
-		clineProviderSettings.modelId,
-		clineProviderSettings.reasoningEffort,
-		clineProviderSettings.oauthProvider,
-		clineProviderSettings.providerId,
-		runtimeProjectConfig?.effectiveCommand,
-		runtimeProjectConfig?.selectedAgentId,
-	]);
+	}, [currentProjectId, runtimeProjectConfig]);
 
 	const descriptorTaskId = descriptor?.taskId ?? null;
 	const hasLoadedRuntimeProjectConfig = runtimeProjectConfig !== null;
@@ -198,7 +121,6 @@ export function useHomeAgentSession({
 				return;
 			}
 
-			homeDescriptorByWorkspaceRef.current.delete(currentProjectId);
 			desiredTaskIdByWorkspaceRef.current.delete(currentProjectId);
 			startedSessionKeysRef.current.delete(
 				buildHomeAgentSessionKey({
@@ -206,7 +128,6 @@ export function useHomeAgentSession({
 					taskId: previousTaskId,
 				}),
 			);
-			pruneWorkspaceHomeAgentSessions(setSessionSummaries, currentProjectId, null);
 			void stopHomeAgentSession({
 				workspaceId: currentProjectId,
 				taskId: previousTaskId,
@@ -219,7 +140,6 @@ export function useHomeAgentSession({
 		}
 
 		desiredTaskIdByWorkspaceRef.current.set(currentProjectId, descriptorTaskId);
-		pruneWorkspaceHomeAgentSessions(setSessionSummaries, currentProjectId, descriptorTaskId);
 
 		if (!previousTaskId) {
 			return;
@@ -235,20 +155,33 @@ export function useHomeAgentSession({
 			workspaceId: currentProjectId,
 			taskId: previousTaskId,
 		});
-	}, [currentProjectId, descriptorTaskId, hasLoadedRuntimeProjectConfig, setSessionSummaries]);
+	}, [currentProjectId, descriptorTaskId, hasLoadedRuntimeProjectConfig]);
 
 	// When MCP settings or auth change, the runtime bumps the Cline session context version.
-	// Reload the existing home chat in place so it keeps the same sidebar task id and messages,
-	// but restarts the underlying Cline session with a fresh MCP tool bundle.
+	// Cline provider/model changes do the same. Reload the existing home chat in
+	// place so it keeps the same sidebar task id and messages, but restarts the
+	// underlying Cline session with the fresh runtime config.
 	useEffect(() => {
-		if (!currentProjectId || !descriptor || descriptor.panelMode !== "chat") {
+		if (!currentProjectId || !descriptor || descriptor.panelMode !== "chat" || !runtimeProjectConfig) {
 			return;
 		}
 
 		const previousVersion = previousClineSessionContextVersionByWorkspaceRef.current.get(currentProjectId);
 		previousClineSessionContextVersionByWorkspaceRef.current.set(currentProjectId, clineSessionContextVersion);
+		const previousConfig = previousClineConfigByWorkspaceRef.current.get(currentProjectId);
+		previousClineConfigByWorkspaceRef.current.set(currentProjectId, runtimeProjectConfig);
 
-		if (previousVersion === undefined || previousVersion === clineSessionContextVersion) {
+		const configChanged =
+			previousConfig !== undefined &&
+			(previousConfig.selectedAgentId !== runtimeProjectConfig.selectedAgentId ||
+				getRuntimeClineProviderSettings(previousConfig).providerId !== clineProviderSettings.providerId ||
+				getRuntimeClineProviderSettings(previousConfig).oauthProvider !== clineProviderSettings.oauthProvider ||
+				getRuntimeClineProviderSettings(previousConfig).modelId !== clineProviderSettings.modelId ||
+				getRuntimeClineProviderSettings(previousConfig).baseUrl !== clineProviderSettings.baseUrl ||
+				getRuntimeClineProviderSettings(previousConfig).reasoningEffort !== clineProviderSettings.reasoningEffort);
+
+		const contextChanged = previousVersion !== undefined && previousVersion !== clineSessionContextVersion;
+		if (!configChanged && !contextChanged) {
 			return;
 		}
 
@@ -281,7 +214,46 @@ export function useHomeAgentSession({
 		return () => {
 			cancelled = true;
 		};
-	}, [clineSessionContextVersion, currentProjectId, descriptor, sessionSummaries, upsertSessionSummary]);
+	}, [
+		clineProviderSettings.baseUrl,
+		clineProviderSettings.modelId,
+		clineProviderSettings.oauthProvider,
+		clineProviderSettings.providerId,
+		clineProviderSettings.reasoningEffort,
+		clineSessionContextVersion,
+		currentProjectId,
+		descriptor,
+		runtimeProjectConfig,
+		sessionSummaries,
+		upsertSessionSummary,
+	]);
+
+	// The terminal home-agent identity no longer rotates on an agent/command change
+	// (the task id is derived, not suffixed with the agent). Reload it in place:
+	// clear the started/pending bookkeeping so the start effect relaunches the same
+	// task id with the fresh config, without tearing down the sidebar session entry.
+	useEffect(() => {
+		if (!currentProjectId || !descriptor || descriptor.panelMode !== "terminal" || !runtimeProjectConfig) {
+			return;
+		}
+
+		const previousConfig = previousTerminalConfigByWorkspaceRef.current.get(currentProjectId);
+		previousTerminalConfigByWorkspaceRef.current.set(currentProjectId, runtimeProjectConfig);
+		if (
+			previousConfig === undefined ||
+			(previousConfig.selectedAgentId === runtimeProjectConfig.selectedAgentId &&
+				previousConfig.effectiveCommand === runtimeProjectConfig.effectiveCommand)
+		) {
+			return;
+		}
+
+		const session = {
+			workspaceId: currentProjectId,
+			taskId: descriptor.taskId,
+		} satisfies HomeAgentSessionIdentity;
+		startedSessionKeysRef.current.delete(buildHomeAgentSessionKey(session));
+		pendingStartRequestIdsRef.current.delete(buildHomeAgentSessionKey(session));
+	}, [currentProjectId, descriptor, runtimeProjectConfig]);
 
 	useEffect(() => {
 		if (!currentProjectId || !descriptor || descriptor.panelMode !== "terminal") {
@@ -374,10 +346,11 @@ export function useHomeAgentSession({
 		return () => {
 			disposedRef.current = true;
 			desiredTaskIdByWorkspaceRef.current.clear();
-			homeDescriptorByWorkspaceRef.current.clear();
 			startedSessionKeysRef.current.clear();
 			pendingStartRequestIdsRef.current.clear();
 			previousClineSessionContextVersionByWorkspaceRef.current.clear();
+			previousClineConfigByWorkspaceRef.current.clear();
+			previousTerminalConfigByWorkspaceRef.current.clear();
 		};
 	}, []);
 

@@ -9,8 +9,8 @@ const HOME_AGENT_SESSION_NAMESPACE = "__home_agent__";
 
 export const HOME_AGENT_SESSION_PREFIX = `${HOME_AGENT_SESSION_NAMESPACE}:`;
 
-export function createHomeAgentSessionId(workspaceId: string, agentId: RuntimeAgentId): string {
-	return `${HOME_AGENT_SESSION_PREFIX}${workspaceId}:${agentId}`;
+export function createHomeAgentSessionId(workspaceId: string, _agentId?: RuntimeAgentId): string {
+	return `${HOME_AGENT_SESSION_PREFIX}${workspaceId}`;
 }
 
 export function isHomeAgentSessionId(sessionId: string): boolean {
@@ -18,22 +18,27 @@ export function isHomeAgentSessionId(sessionId: string): boolean {
 }
 
 export function isHomeAgentSessionIdForWorkspace(sessionId: string, workspaceId: string): boolean {
-	return sessionId.startsWith(`${HOME_AGENT_SESSION_PREFIX}${workspaceId}:`);
+	return (
+		sessionId === createHomeAgentSessionId(workspaceId) ||
+		sessionId.startsWith(`${HOME_AGENT_SESSION_PREFIX}${workspaceId}:`)
+	);
 }
 
 /**
- * Inverse of {@link createHomeAgentSessionId}: recover the `workspaceId` and
- * `agentId` from a home-agent session id, or null if it isn't one. Lets callers
- * re-derive a home agent's durable (deterministic) session id from its task id.
+ * Inverse of {@link createHomeAgentSessionId}: recover the `workspaceId` from a
+ * canonical home-agent session id, or from a legacy `:<agentId>`-suffixed id.
  */
-export function parseHomeAgentSessionId(sessionId: string): { workspaceId: string; agentId: string } | null {
+export function parseHomeAgentSessionId(sessionId: string): { workspaceId: string; agentId: string | null } | null {
 	if (!isHomeAgentSessionId(sessionId)) {
 		return null;
 	}
 	const rest = sessionId.slice(HOME_AGENT_SESSION_PREFIX.length);
-	const separatorIndex = rest.lastIndexOf(":");
-	if (separatorIndex <= 0 || separatorIndex >= rest.length - 1) {
+	if (!rest) {
 		return null;
+	}
+	const separatorIndex = rest.lastIndexOf(":");
+	if (separatorIndex <= 0) {
+		return { workspaceId: rest, agentId: null };
 	}
 	return { workspaceId: rest.slice(0, separatorIndex), agentId: rest.slice(separatorIndex + 1) };
 }

@@ -5,11 +5,17 @@ import { createHomeAgentSessionId, parseHomeAgentSessionId } from "../../../src/
 describe("parseHomeAgentSessionId", () => {
 	it("round-trips the id created by createHomeAgentSessionId", () => {
 		const sessionId = createHomeAgentSessionId("tools", "claude");
-		expect(parseHomeAgentSessionId(sessionId)).toEqual({ workspaceId: "tools", agentId: "claude" });
+		expect(sessionId).toBe("__home_agent__:tools");
+		expect(parseHomeAgentSessionId(sessionId)).toEqual({ workspaceId: "tools", agentId: null });
 	});
 
-	it("recovers a hyphenated workspace id", () => {
-		const sessionId = createHomeAgentSessionId("fleet-kanban", "claude");
+	it("recovers a hyphenated workspace id from the canonical id", () => {
+		const sessionId = createHomeAgentSessionId("fleet-kanban");
+		expect(parseHomeAgentSessionId(sessionId)).toEqual({ workspaceId: "fleet-kanban", agentId: null });
+	});
+
+	it("recovers a legacy agent suffix for migration", () => {
+		const sessionId = "__home_agent__:fleet-kanban:claude";
 		expect(parseHomeAgentSessionId(sessionId)).toEqual({ workspaceId: "fleet-kanban", agentId: "claude" });
 	});
 

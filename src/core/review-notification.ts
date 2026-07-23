@@ -1,5 +1,5 @@
 import type { RuntimeBoardCard, RuntimeTaskSessionSummary } from "./api-contract";
-import { isHomeAgentSessionIdForWorkspace } from "./home-agent-session";
+import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "./home-agent-session";
 import { resolveTaskTitle } from "./task-title";
 
 export function buildTaskReadyForReviewMessage(task: RuntimeBoardCard): string {
@@ -8,19 +8,18 @@ export function buildTaskReadyForReviewMessage(task: RuntimeBoardCard): string {
 }
 
 export function resolveRunningHomeAgentTaskId(input: {
-	workspaceId: string;
+	architectWorkspaceId: string;
 	taskId: string;
 	summaries: RuntimeTaskSessionSummary[];
-	isActive: (taskId: string, summary: RuntimeTaskSessionSummary) => boolean;
+	isAttached: (summary: RuntimeTaskSessionSummary) => boolean;
 }): string | null {
-	if (isHomeAgentSessionIdForWorkspace(input.taskId, input.workspaceId)) {
+	if (isHomeAgentSessionIdForWorkspace(input.taskId, input.architectWorkspaceId)) {
 		return null;
 	}
-	const homeAgentSummary = input.summaries.find(
-		(summary) =>
-			summary.taskId !== input.taskId &&
-			isHomeAgentSessionIdForWorkspace(summary.taskId, input.workspaceId) &&
-			input.isActive(summary.taskId, summary),
-	);
-	return homeAgentSummary?.taskId ?? null;
+	const architectHomeAgentTaskId = createHomeAgentSessionId(input.architectWorkspaceId);
+	const homeAgentSummary = input.summaries.find((summary) => summary.taskId === architectHomeAgentTaskId);
+	if (!homeAgentSummary || !input.isAttached(homeAgentSummary)) {
+		return null;
+	}
+	return architectHomeAgentTaskId;
 }
