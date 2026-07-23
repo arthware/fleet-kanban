@@ -339,12 +339,39 @@ describe("prepareAgentLaunch hook strategies", () => {
 		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "gemini", "settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
 			hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+			security?: { folderTrust?: { enabled?: boolean } };
 		};
 		const afterToolCommand = settings.hooks?.AfterTool?.[0]?.hooks?.[0]?.command;
 		expect(afterToolCommand).toContain("hooks");
 		expect(afterToolCommand).toContain("gemini-hook");
+		expect(settings.security?.folderTrust?.enabled).toBe(false);
 		const hookScriptPath = join(homedir(), ".cline", "kanban", "hooks", "gemini", "gemini-hook.mjs");
 		expect(existsSync(hookScriptPath)).toBe(false);
+	});
+
+	it("given a Gemini launch with no workspace/hook context, when preparing the launch, then folder-trust is still disabled via system settings", async () => {
+		// given
+		setupTempHome();
+
+		// when
+		const launch = await prepareAgentLaunch({
+			taskId: "task-gemini-no-workspace",
+			agentId: "gemini",
+			binary: "gemini",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+		});
+
+		// then
+		expect(launch.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toContain("settings.json");
+		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "gemini", "settings.json");
+		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+			hooks?: unknown;
+			security?: { folderTrust?: { enabled?: boolean } };
+		};
+		expect(settings.security?.folderTrust?.enabled).toBe(false);
+		expect(settings.hooks).toBeUndefined();
 	});
 
 	it("writes OpenCode plugin with root-session filtering and permission hooks", async () => {
