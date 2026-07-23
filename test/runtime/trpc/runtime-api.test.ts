@@ -135,8 +135,8 @@ import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
 
 function createTestRuntimeApi(
-	deps: Omit<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow"> &
-		Partial<Pick<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow">>,
+	deps: Omit<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow" | "getFleetUpdateInProgressCount"> &
+		Partial<Pick<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow" | "getFleetUpdateInProgressCount">>,
 ): RuntimeTrpcContext["runtimeApi"] {
 	return createRuntimeApi({
 		...deps,
@@ -160,6 +160,7 @@ function createTestRuntimeApi(
 				latestVersion: null,
 				message: "On-demand updates are not available in this test runtime.",
 			})),
+		getFleetUpdateInProgressCount: deps.getFleetUpdateInProgressCount ?? vi.fn(async () => 0),
 	});
 }
 

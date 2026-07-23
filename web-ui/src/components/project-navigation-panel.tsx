@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Ellipsis, ExternalLink, Info, Lightbulb, Plus, 
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { AgentBudgetReadout } from "@/components/agent-budget-readout";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
+import { FleetUpdateReadout } from "@/components/fleet-update-readout";
 import { Button } from "@/components/ui/button";
 import { ClineIcon } from "@/components/ui/cline-icon";
 import { cn } from "@/components/ui/cn";
@@ -321,7 +322,10 @@ export function ProjectNavigationPanel({
 							className="min-w-[44px] min-h-[44px] -mr-2"
 						/>
 					) : (
-						<AgentBudgetReadout budget={agentBudget ?? null} className="shrink-0" />
+						<div className="flex items-center gap-1.5 shrink-0">
+							<FleetUpdateReadout />
+							<AgentBudgetReadout budget={agentBudget ?? null} />
+						</div>
 					)}
 				</div>
 				<div className="mt-2 rounded-md bg-surface-2 border border-border p-1">

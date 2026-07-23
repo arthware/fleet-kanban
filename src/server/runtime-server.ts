@@ -47,7 +47,7 @@ import { createWorkspaceApi } from "../trpc/workspace-api";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets";
 import { handleHttpRequest, handleSocketUpgrade } from "./middleware";
 import type { RuntimeStateHub } from "./runtime-state-hub";
-import type { WorkspaceRegistry } from "./workspace-registry";
+import { sumInProgressTaskCounts, type WorkspaceRegistry } from "./workspace-registry";
 
 interface DisposeTrackedWorkspaceResult {
 	terminalManager: TerminalSessionManager | null;
@@ -206,6 +206,10 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			prepareForStateReset,
 			getUpdateStatus: deps.getUpdateStatus,
 			runUpdateNow: deps.runUpdateNow,
+			getFleetUpdateInProgressCount: async () => {
+				const payload = await deps.workspaceRegistry.buildProjectsPayload(null);
+				return sumInProgressTaskCounts(payload.projects);
+			},
 		});
 		return {
 			requestedWorkspaceId: scope.requestedWorkspaceId,

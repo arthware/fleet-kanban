@@ -62,6 +62,7 @@ import {
 	resolveHomeAgentContext,
 } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
+import { applyFleetUpdate, getFleetUpdateStatus } from "../server/fleet-update-status";
 import { listWorkspaceIndexEntries, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../terminal/agent-session-adapters";
@@ -93,6 +94,8 @@ export interface CreateRuntimeApiDependencies {
 	prepareForStateReset?: () => Promise<void>;
 	getUpdateStatus: () => RuntimeUpdateStatusResponse;
 	runUpdateNow: () => Promise<RuntimeRunUpdateResponse>;
+	/** Sums in-progress task counts across all registered projects; the fleet-update apply gate. */
+	getFleetUpdateInProgressCount: () => Promise<number>;
 	/**
 	 * Waits `ms` before the bracketed-paste submit Enter is written, so the paste
 	 * settles into its own PTY read first (see {@link SUBMIT_ENTER_DELAY_MS}).
@@ -826,6 +829,17 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		},
 		getAgentBudget: async (_workspaceScope) => {
 			return await getAgentBudget();
+		},
+		getFleetUpdateStatus: async (_workspaceScope) => {
+			const [status, inProgressCount] = await Promise.all([
+				getFleetUpdateStatus(),
+				deps.getFleetUpdateInProgressCount(),
+			]);
+			return { status, inProgressCount };
+		},
+		applyFleetUpdate: async (_workspaceScope) => {
+			const inProgressCount = await deps.getFleetUpdateInProgressCount();
+			return await applyFleetUpdate({ inProgressCount });
 		},
 		getClineAccountOrganizations: async (_workspaceScope) => {
 			return await clineProviderService.getClineAccountOrganizations();

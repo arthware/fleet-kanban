@@ -137,6 +137,7 @@ function createRuntimeApiForManager(terminalManager: TerminalSessionManager): Ru
 			latestVersion: null,
 			message: "On-demand updates are not available in this test runtime.",
 		})),
+		getFleetUpdateInProgressCount: vi.fn(async () => 0),
 	} satisfies CreateRuntimeApiDependencies);
 }
 

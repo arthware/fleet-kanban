@@ -122,6 +122,10 @@ function countTasksByColumn(board: RuntimeBoardData): RuntimeProjectTaskCounts {
 	return counts;
 }
 
+export function sumInProgressTaskCounts(projects: RuntimeProjectSummary[]): number {
+	return projects.reduce((total, project) => total + project.taskCounts.in_progress, 0);
+}
+
 export function collectProjectWorktreeTaskIdsForRemoval(board: RuntimeBoardData): Set<string> {
 	const taskIds = new Set<string>();
 	for (const column of board.columns) {
