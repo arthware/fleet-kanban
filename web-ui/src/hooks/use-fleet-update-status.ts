@@ -63,6 +63,7 @@ export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 		}
 
 		let cancelled = false;
+		let hasSeenDown = false;
 		const startedAt = Date.now();
 
 		async function pollForRestart(): Promise<void> {
@@ -71,8 +72,11 @@ export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 				if (cancelled) {
 					return;
 				}
-				window.location.reload();
+				if (hasSeenDown) {
+					window.location.reload();
+				}
 			} catch {
+				hasSeenDown = true;
 				if (cancelled) {
 					return;
 				}

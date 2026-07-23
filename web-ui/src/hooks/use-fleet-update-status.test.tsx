@@ -168,6 +168,31 @@ describe("useFleetUpdateStatus", () => {
 		expect(reloadSpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("given the board is restarting, when status polls succeed immediately without any connection failure (down-transition), then it does not reload the page", async () => {
+		// Arrange
+		vi.useFakeTimers();
+		runtimeConfigQueryMocks.fetchFleetUpdateStatus.mockResolvedValue(vendorBehind);
+		runtimeConfigQueryMocks.applyFleetUpdate.mockResolvedValue({ started: true, reason: null });
+
+		const { getState } = await renderHook();
+
+		await act(async () => {
+			getState().apply();
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+		expect(getState().phase).toBe("restarting");
+
+		// Act
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(2_000);
+		});
+
+		// Assert
+		expect(reloadSpy).not.toHaveBeenCalled();
+		expect(getState().phase).toBe("restarting");
+	});
+
 	it("given the board never comes back within the timeout, when polling during restart, then it reports a timed-out phase instead of polling forever", async () => {
 		vi.useFakeTimers();
 		runtimeConfigQueryMocks.fetchFleetUpdateStatus.mockResolvedValueOnce(vendorBehind);
