@@ -602,6 +602,205 @@ EOF
   fi
 }
 
+# Scaffold a generic doctrine skeleton (constitution + concept map) into a fresh
+# project so the architect has somewhere to ratify project-specific doctrine. Ships
+# the shared harness-level core (Articles 1-5) as real, ratifiable text — the same
+# core docs/architecture/doctrine.ts reads in-repo — while everything repo-specific
+# (articles 6+, the concept list) is left as a guided placeholder. Never clobbers
+# existing files.
+_scaffold_doctrine() {
+  local dir="$1"
+  mkdir -p "$dir/docs/architecture/concepts"
+
+  if [ ! -e "$dir/docs/architecture/constitution.md" ]; then
+    cat > "$dir/docs/architecture/constitution.md" <<'DOCEOF'
+<!-- fleet: scaffolded by `fleet init`. This ships the shared harness-level core
+     (Articles 1-5) as real, ratifiable text. Review it, append this project's own
+     repo-specific articles below the marked line, then ratify (bump the version in
+     the footer to 1.0.0). Until ratified this file is a draft, not a project law. -->
+
+<!--
+SYNC IMPACT REPORT
+==================
+Version change: (unratified draft) → 0.1.0
+Bump rationale: Scaffolded by `fleet init`. Draft only — ratify (bump to 1.0.0) once
+  the architect has reviewed the core and added this project's own articles.
+
+Principles defined:
+  1. Concepts first: reuse, extend, or abstract before you build  (NON-NEGOTIABLE)
+  2. Root cause, not duct tape                                     (NON-NEGOTIABLE)
+  3. One source of truth
+  4. Test-backed change (module tests, minimal mocking)
+  5. Verification before completion
+
+Dependent artifacts to keep in sync on amendment:
+  - AGENTS.md / CLAUDE.md (should link here, not restate principles)
+  - docs/architecture/concepts/ (Article 1 checks against this map)
+
+TODO on next amendment: architect to add repo-specific articles (numbered after
+  Article 5) and ratify (bump to 1.0.0).
+-->
+
+# Constitution
+
+The non-negotiable core for anyone changing this codebase — human or agent. Kept deliberately short
+and *normative* (MUST / SHOULD) so a plan, a review, or an analyze step can **check a change against
+it**. Articles 1-5 below are the harness-level core, shared across every fleet-managed repo and
+injected into every card session. This project extends that core with its own repo-specific
+articles — it never overrides Articles 1-5.
+
+---
+
+## Article 1 — Concepts first: reuse, extend, or abstract before you build (NON-NEGOTIABLE)
+
+**Before introducing anything new, consult the concept map (`concepts/`).** Then reason like a good
+software engineer, in this order — do not skip to the last step:
+
+1. **Do we already have something that fits?** → use it. Point at the canonical concept and its home.
+2. **Something close but not quite?** → **extend** the existing concept, don't clone it with a
+   variation.
+3. **Two or more things converging on the same idea?** → introduce the right **abstraction** and fold
+   the near-duplicates into it. Convergence is the signal to generalize.
+4. **Genuinely new?** → *only then* add a new concept — deliberately, as a new `concepts/<name>.md`
+   file in the same change.
+
+You MUST NOT reimplement a **similar** concept as a near-duplicate with minor variations. That is the
+single most expensive failure mode here: N slightly-different versions of the same idea. A new concept
+is a **decision**, recorded in the concept map — never an accident.
+
+**Rationale:** Fan-out codegen re-invents by default — each card starts cold. The concept map is the
+shared memory that turns "build something" into "extend the one thing that already does this."
+
+## Article 2 — Root cause, not duct tape (NON-NEGOTIABLE)
+
+Agents tend to duct-tape symptoms. **We don't.** Before any fix, you MUST do root-cause analysis:
+
+1. **What is the fundamental cause?** Not the surface symptom — the thing that, if removed, makes the
+   symptom impossible.
+2. **Is this local, or a design problem?** ALWAYS ask whether the current design still fits, or whether
+   the bug is a sign the model is wrong. A recurring bug means the model is wrong.
+3. **Would a better general solution remove the whole class of problem — and simplify things?** The
+   deeper fix often *removes* code, config, or special-cases rather than adding a guard. Prefer it.
+
+Two workarounds on the same surface is a **stop sign**: re-model the problem, don't patch it a third
+time. Making a broken thing *loud* (better logging, a timeout that rethrows) is diagnosis, not a fix —
+don't ship it as if the problem is solved. If while scoping a small fix you see the broader re-model
+that would dissolve it, **say so** rather than quietly shipping the workaround.
+
+**Rationale:** Patches stack into unmaintainable special-casing; the deeper fix usually removes code.
+Symptom-chasing is how a wrong model survives — naming the cause is what lets us replace it.
+
+---
+
+## Article 3 — One source of truth
+
+Every concern has exactly one owner. MUST NOT mirror state or duplicate logic across layers. If a
+change feels awkward, ownership is usually being blurred — fix the ownership, not the symptom (see
+Article 2).
+
+## Article 4 — Test-backed change (module tests, minimal mocking)
+
+MUST write tests first and watch them fail (RED) before implementing. **Prefer module tests** —
+exercise a coherent module through its **external / public API** (Given / When / Then where there's a
+user-facing surface) — over fine-grained unit tests bound to internals. When a module has external
+dependencies, define a **clean, narrow interface** for each and mock **at that seam only**. Do not use
+excessive mocking: a test drowning in mocks tests the mocks, not the behavior. The suite is the living
+spec — a failing name should point at exactly one cause.
+
+**Rationale:** Module-through-its-API tests survive refactors and read as the spec; internal-heavy
+mocking couples tests to implementation and hides real behavior.
+
+## Article 5 — Verification before completion
+
+No "done / fixed / passing" claim without **fresh command output in the same turn** that shows it. A
+change does not leave for review on a self-report — it leaves on evidence.
+
+**Rationale:** A self-reported "done" the project trusts is how broken work reaches review. Evidence,
+not confidence, gates a transition.
+
+---
+
+<!-- architect: add repo-specific articles below, numbered after Article 5 (e.g. "## Article 6 — ..."). -->
+
+## Governance
+
+This constitution supersedes ad-hoc convention where they conflict; the codebase patterns it codifies
+remain authoritative references.
+
+- **Authority.** Articles 1-5 are the harness-level binding core, injected into every card and
+  consulted by the architect; any articles this project adds are its own extensions. A plan, review,
+  or analyze gate MUST be checked against this file; a conflict with a MUST is resolved by changing
+  the design or the code, not by diluting a principle.
+- **Amendments.** A change requires a PR with rationale and a version bump per the policy below.
+- **Versioning (SemVer for governance).** MAJOR = a principle removed or redefined incompatibly;
+  MINOR = a new principle/section or materially expanded guidance; PATCH = clarifications and
+  non-semantic refinements. Update the footer and the Sync Impact Report on every change.
+- **Compliance.** Every PR and review verifies compliance. Added complexity or any deviation MUST be
+  justified in-PR; unjustified violations block merge.
+
+**Version**: 0.1.0 (draft, unratified) | **Ratified**: (pending) | **Last Amended**: (pending)
+DOCEOF
+    dim "  scaffolded $dir/docs/architecture/constitution.md"
+  fi
+
+  if [ ! -e "$dir/docs/architecture/concepts/README.md" ]; then
+    cat > "$dir/docs/architecture/concepts/README.md" <<'DOCEOF'
+<!-- fleet: scaffolded by `fleet init`. List this project's core domain concepts below,
+     one row per concept, one file per concept. Empty until the architect populates it. -->
+
+# Concept map
+
+A curated set of this project's **core domain concepts** — each one with a canonical home — so a
+change **reuses or extends** what exists instead of re-inventing a near-duplicate. This is the
+concrete thing [Constitution Article 1](../constitution.md#article-1--concepts-first-reuse-extend-or-abstract-before-you-build)
+checks against.
+
+One file per concept (`<concept>.md`). This index is the *map*: the list, and the relationships /
+**do-not-duplicate** edges you'd lose if you only read the files in isolation.
+
+## How it's used
+
+- **Architect, at card-authoring time:** identify the concepts a card touches, name them in the card,
+  and point at their canonical home. If a card would introduce something new, walk Article 1: *fits →
+  use it · close → extend it · converging → abstract it · genuinely new → new concept file.*
+- **Card agent, at start:** read the concepts your card names before writing code; extend the
+  canonical home, don't clone it.
+
+## Curation rule (in-lifecycle, not a side artifact)
+
+A stale map — names that moved, files that don't exist — is worse than no map at all. So curation is
+**part of the card lifecycle**: a card that establishes, moves, or removes a concept updates the
+relevant `concepts/*.md` file **in the same PR**. Entries point at stable module/file paths, never
+line numbers. The architect reconciles the map on merge.
+
+## Concepts
+
+<!-- architect: list concepts here, one row per concept, as they're established. -->
+
+| Concept | What | Lives in |
+| --- | --- | --- |
+
+## Concept file template
+
+```md
+# <Name>
+
+**Importance:** high | medium | low  ·  **Lives in:** `path/one.ts`, `path/two.ts`
+
+<One sentence: what this concept is.>
+
+## Domain model
+<2-4 sentences: shape + key invariants. High-level, not implementation.>
+
+## Reuse / do-not-duplicate
+- Relates to [Other concept](other.md), [Another](another.md).
+- **Do not duplicate:** <the specific near-duplicate this concept replaces>
+```
+DOCEOF
+    dim "  scaffolded $dir/docs/architecture/concepts/README.md"
+  fi
+}
+
 fleet_init() {
   local root="$PWD" name="" team="ENG" key="" port="3484" yes="" force=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -660,6 +859,10 @@ PY
   for r in "${repos[@]:-}"; do [ -n "$r" ] && repomd="${repomd}- ${r}"$'\n'; done
   [ -n "$repomd" ] || repomd="- (none yet — clone repos under this dir, then re-run 'fleet init')"$'\n'
   _scaffold_agent_docs "$root" "$name" "$port" "$repomd"
+
+  # Scaffold the doctrine skeleton (constitution + concept map) so there's somewhere
+  # for project-specific doctrine to live — the architect populates it per project.
+  _scaffold_doctrine "$root"
 
   # Make the root a thin git repo so it registers as the ARCHITECT workspace — the
   # board's agent then starts at the project root and can reach every sub-repo,
