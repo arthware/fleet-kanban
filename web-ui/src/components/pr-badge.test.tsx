@@ -33,7 +33,7 @@ describe("PrBadge", () => {
 		});
 
 		const label = container.querySelector("span");
-		expect(label?.textContent).toBe("PR #42");
+		expect(label?.textContent).toBe("#42");
 		expect(label?.className).toContain("line-through");
 	});
 
@@ -51,8 +51,43 @@ describe("PrBadge", () => {
 		});
 
 		const label = container.querySelector("span");
-		expect(label?.textContent).toBe("PR #42");
+		expect(label?.textContent).toBe("#42");
 		expect(label?.className).not.toContain("line-through");
+	});
+
+	it("given an open PR numbered 114, when PrBadge renders, then the label reads just the number without the word PR", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/114",
+						prState: "open",
+						prNumber: 114,
+					}}
+				/>,
+			);
+		});
+
+		const label = container.querySelector("span");
+		expect(label?.textContent).toBe("#114");
+		expect(container.textContent).not.toContain("PR ");
+	});
+
+	it("given a card with no PR number, when PrBadge renders, then no label span renders and only the icon shows", async () => {
+		await act(async () => {
+			root.render(
+				<PrBadge
+					card={{
+						prUrl: "https://github.com/cline/kanban/pull/1",
+						prState: "open",
+						prNumber: undefined,
+					}}
+				/>,
+			);
+		});
+
+		expect(container.querySelector("span")).toBeNull();
+		expect(container.querySelector("svg")).not.toBeNull();
 	});
 
 	it("given an open PR with passing gate, when PrBadge renders, then it renders a green check icon", async () => {
