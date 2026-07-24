@@ -29,8 +29,6 @@ import argparse, json, os, re, socket, subprocess, sys, time
 from pathlib import Path
 
 HOME = Path.home()
-KANBAN_HOME = HOME / ".cline" / "kanban"
-KANBAN_WORKTREES = HOME / ".cline" / "worktrees"
 GLOBAL_DIR = HOME / ".config" / "fleet"        # shared: vendored kanban binary, key fallback
 
 def find_fleet_dir(start=None):
@@ -43,6 +41,19 @@ def find_fleet_dir(start=None):
         if (d / ".fleet").is_dir():
             return d / ".fleet"
     return None
+
+def resolve_kanban_paths():
+    fd = find_fleet_dir()
+    cline_home_env = os.environ.get("CLINE_HOME")
+    if cline_home_env:
+        cline_home = Path(cline_home_env)
+    elif fd and fd != GLOBAL_DIR and (fd / "cline").is_dir():
+        cline_home = fd / "cline"
+    else:
+        cline_home = HOME / ".cline"
+    return cline_home / "kanban", cline_home / "worktrees"
+
+KANBAN_HOME, KANBAN_WORKTREES = resolve_kanban_paths()
 
 FLEET_DIR = find_fleet_dir()
 PROJECT_DIR = FLEET_DIR.parent if FLEET_DIR else None
@@ -801,6 +812,239 @@ def _fmt_row(r) -> str:
     return f"{dot} {col}{label[:44]:<44}{RESET} {who:<16} {src:<22} {meta}"
 
 
+# ---- epic workspace lifecycle -------------------------------------------------
+
+def git_run(repo_path, args, check=True):
+    r = subprocess.run(["git", "-C", str(repo_path)] + args, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        print(f"{RED}Git error: git {' '.join(args)}\n{r.stderr.strip()}{RESET}", file=sys.stderr)
+        sys.exit(r.returncode)
+    return r
+
+def trpc_call(cfg, path, data=None):
+    port = cfg.get("kanban_port", 3484)
+    url = f"http://127.0.0.1:{port}"
+    if data is not None:
+        req = urllib.request.Request(
+            f"{url}/api/trpc/{path}",
+            data=json.dumps(data).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+    else:
+        req = urllib.request.Request(
+            f"{url}/api/trpc/{path}",
+            method="GET"
+        )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp).get("result", {}).get("data", {})
+    except Exception as e:
+        print(f"{RED}tRPC error calling {path}: {e}{RESET}", file=sys.stderr)
+        return None
+
+def epic_create(name: str, repo: str, base: str, cfg: dict):
+    rp = _resolve_repo(repo, cfg)
+    if not rp:
+        return 1
+
+    # Resolve CLINE_HOME
+    cline_home = Path(os.environ.get("CLINE_HOME") or (FLEET_DIR / "cline" if (FLEET_DIR and FLEET_DIR != GLOBAL_DIR) else HOME / ".cline"))
+    wt_path = cline_home / "epics" / f"{rp.name}@{name}"
+
+    print(f"{BOLD}Creating epic '{name}'...{RESET}")
+    print(f"  Target repo: {rp.name}")
+    print(f"  Base branch/ref: {base}")
+
+    # 1. Ensure branch exists locally
+    exists_local = git_run(rp, ["rev-parse", "--verify", f"epic/{name}"], check=False).returncode == 0
+    if not exists_local:
+        print(f"  Creating branch epic/{name} off {base}...")
+        git_run(rp, ["branch", f"epic/{name}", base])
+
+    # 2. Push branch to origin
+    remotes = git_run(rp, ["remote"], check=False).stdout.splitlines()
+    if "origin" in remotes:
+        print(f"  Pushing epic/{name} to origin...")
+        git_run(rp, ["push", "-u", "origin", f"epic/{name}"])
+    else:
+        print(f"  (no origin remote found; skipping push)")
+
+    # 3. Add git worktree
+    if wt_path.exists():
+        print(f"  {YELLOW}Warning: Worktree directory already exists: {wt_path}{RESET}")
+    else:
+        print(f"  Adding git worktree at {wt_path}...")
+        # Create parent directories
+        wt_path.parent.mkdir(parents=True, exist_ok=True)
+        git_run(rp, ["worktree", "add", str(wt_path), f"epic/{name}"])
+
+    # 4. Register workspace via tRPC
+    # First verify if server is running
+    port = cfg.get("kanban_port", 3484)
+    running = False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", port))
+        s.close()
+        running = True
+    except Exception:
+        pass
+
+    if not running:
+        print(f"{RED}Error: Kanban board is not running on port {port}.{RESET}", file=sys.stderr)
+        print(f"       Run 'fleet kanban start' first to start the board, then retry.{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"  Registering workspace with Kanban board...")
+    add_res = trpc_call(cfg, "projects.add", {"path": str(wt_path)})
+    if not add_res or not add_res.get("ok") or not add_res.get("project"):
+        err = add_res.get("error") if add_res else "unknown error"
+        print(f"{RED}Error: Failed to register workspace: {err}{RESET}", file=sys.stderr)
+        return 1
+
+    project = add_res["project"]
+    workspace_id = project["id"]
+    print(f"  Workspace registered with ID: {workspace_id}")
+
+    # 5. Set epic meta
+    print(f"  Setting epic metadata...")
+    set_res = trpc_call(cfg, "projects.setEpic", {
+        "workspaceId": workspace_id,
+        "epic": {
+            "name": name,
+            "branch": f"epic/{name}",
+            "base": base
+        }
+    })
+    if not set_res or not set_res.get("ok"):
+        print(f"{RED}Error: Failed to set epic metadata.{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"\n{GREEN}✓ Epic '{name}' created successfully!{RESET}")
+    print(f"  Branch: epic/{name}")
+    print(f"  Worktree: {wt_path}")
+    print(f"  Open in UI: http://127.0.0.1:{port}?workspace={workspace_id}")
+    return 0
+
+def epic_complete(name: str, repo: str, cfg: dict):
+    rp = _resolve_repo(repo, cfg)
+    if not rp:
+        return 1
+
+    # Verify if server is running
+    port = cfg.get("kanban_port", 3484)
+    running = False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", port))
+        s.close()
+        running = True
+    except Exception:
+        pass
+
+    if not running:
+        print(f"{RED}Error: Kanban board is not running on port {port}.{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"Finding workspace for epic '{name}'...")
+    # Fetch projects
+    projects_res = trpc_call(cfg, "projects.list")
+    if not projects_res:
+        print(f"{RED}Error: Could not retrieve projects from board.{RESET}", file=sys.stderr)
+        return 1
+
+    projects = projects_res.get("projects", [])
+    epic_ws = None
+    for p in projects:
+        if p.get("epic") and p["epic"]["name"] == name:
+            epic_ws = p
+            break
+
+    if not epic_ws:
+        print(f"{RED}Error: No workspace found for epic '{name}' on the running board.{RESET}", file=sys.stderr)
+        return 1
+
+    workspace_id = epic_ws["id"]
+    wt_path = Path(epic_ws["path"])
+    base_branch = epic_ws["epic"].get("base") or "production-line"
+    epic_branch = epic_ws["epic"].get("branch") or f"epic/{name}"
+
+    print(f"Found epic workspace:")
+    print(f"  ID: {workspace_id}")
+    print(f"  Path: {wt_path}")
+    print(f"  Branch: {epic_branch}")
+    print(f"  Base branch: {base_branch}")
+
+    # 1. Create gh PR
+    pr_title = f"epic: merge {name} to {base_branch}"
+    pr_body = f"Epic workspace integration PR for '{name}'.\n\nThis PR integrates the epic branch {epic_branch} back into {base_branch}."
+    
+    print(f"Opening PR for {epic_branch} → {base_branch}...")
+    # Verify git status of the epic branch first to make sure it's pushed
+    git_run(rp, ["push", "origin", epic_branch], check=False)
+
+    pr_res = subprocess.run([
+        "gh", "pr", "create",
+        "--base", base_branch,
+        "--head", epic_branch,
+        "--title", pr_title,
+        "--body", pr_body
+    ], cwd=str(rp), capture_output=True, text=True)
+
+    if pr_res.returncode != 0:
+        print(f"{YELLOW}Warning: Could not create PR via gh: {pr_res.stderr.strip()}{RESET}")
+        print(f"         Make sure the branch is pushed and 'gh' is authenticated.{RESET}")
+    else:
+        print(f"{GREEN}✓ PR created successfully!{RESET}")
+        print(f"  {pr_res.stdout.strip()}")
+
+    # 2. Deregister workspace via projects.remove
+    print(f"Deregistering workspace {workspace_id} from board...")
+    remove_res = trpc_call(cfg, "projects.remove", {"projectId": workspace_id})
+    if not remove_res or not remove_res.get("ok"):
+        print(f"{RED}Error: Failed to deregister workspace.{RESET}", file=sys.stderr)
+        return 1
+    print(f"  Workspace deregistered.")
+
+    # 3. Remove git worktree
+    if wt_path.exists():
+        print(f"Removing git worktree at {wt_path}...")
+        git_run(rp, ["worktree", "remove", "--force", str(wt_path)], check=False)
+    else:
+        print(f"  (worktree path does not exist on disk; skipping deletion)")
+
+    print(f"\n{GREEN}✓ Epic '{name}' completed and cleaned up!{RESET}")
+    return 0
+
+def cmd_epic(args_list):
+    ap = argparse.ArgumentParser(description="Manage epic workspaces")
+    sub = ap.add_subparsers(dest="op", required=True)
+
+    p_create = sub.add_parser("create")
+    p_create.add_argument("name", help="Name of the epic")
+    p_create.add_argument("--repo", help="Target repository name (default: first in project)")
+    p_create.add_argument("--base", default="production-line", help="Base branch (default: production-line)")
+
+    p_complete = sub.add_parser("complete")
+    p_complete.add_argument("name", help="Name of the epic")
+    p_complete.add_argument("--repo", help="Target repository name (default: first in project)")
+
+    try:
+        parsed = ap.parse_args(args_list)
+    except SystemExit as e:
+        return e.code
+
+    cfg = load_config()
+    if parsed.op == "create":
+        return epic_create(parsed.name, parsed.repo, parsed.base, cfg)
+    elif parsed.op == "complete":
+        return epic_complete(parsed.name, parsed.repo, cfg)
+    return 1
+
+
 # ---- config / main -----------------------------------------------------------
 def load_config():
     return _read_json(CONFIG) or {}
@@ -814,6 +1058,8 @@ def resolve_roots(args, cfg) -> list[Path]:
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "epic":
+        sys.exit(cmd_epic(sys.argv[2:]))
     ap = argparse.ArgumentParser(description="Epic-grouped view of parallel agent work")
     ap.add_argument("--root", action="append", help="repo root to scan (repeatable); default = the .fleet project you're in")
     ap.add_argument("--json", action="store_true", help="machine-readable output")

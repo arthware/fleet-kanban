@@ -6,6 +6,7 @@ import type {
 	RuntimeProjectAddResponse,
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
+	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import { parseDirectoryListRequest, parseProjectAddRequest, parseProjectRemoveRequest } from "../core/api-validation";
 import {
@@ -15,6 +16,7 @@ import {
 	loadWorkspaceState,
 	removeWorkspaceIndexEntry,
 	removeWorkspaceStateFiles,
+	setWorkspaceEpic,
 } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { cloneGitRepository } from "../workspace/git-clone";
@@ -364,6 +366,9 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 							: message,
 				} satisfies RuntimeDirectoryListResponse;
 			}
+		},
+		setWorkspaceEpic: async (workspaceId, epic) => {
+			await setWorkspaceEpic(workspaceId, epic);
 		},
 	};
 }

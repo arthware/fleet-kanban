@@ -1729,6 +1729,7 @@ case "$cmd" in
       *) echo "usage: fleet agent plan|implement <ENG-ID> [--repo NAME] [--agent claude|codex] [--no-start]" >&2; exit 1;;
     esac;;
   initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
+  epic) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
   port) exec "$DIR/port-for" "$@";;
   kanban) fleet_kanban "$@";;
   service|svc) fleet_service "$@";;
