@@ -2,7 +2,7 @@
 
 **Card types** are data-defined, modular workflows that govern how task cards behave across different board lanes. A card type binds ordered operational phases to Kanban board lanes, dynamically composing the required AI agent skills and instruction directives at session start.
 
-This system replaces legacy hardcoded prompt builders with a declarative markdown manifest schema, keeping skill bodies and prompt directives unified under a single source of truth: the skill files themselves.
+Skill bodies and prompt directives are unified under a single source of truth: the skill files themselves.
 
 ---
 
@@ -29,13 +29,10 @@ A Kanban card represents a durable unit of work, while an AI agent session repre
 ```
 
 ### 1.2 Unified Central Injection (Single Source of Truth)
-Before Card Types, system directives for standard phases (such as `plan`, `implement`, and `pr`) were hardcoded in separate TypeScript files (`plan-card-directive.ts`, `implement-card-directive.ts`, and `pr-card-directive.ts`) and composed in a split, multi-layered pipeline across adapters.
-
-With Card Types:
-1. **Zero Hardcoded Prompt Files**: All legacy hardcoded `.ts` directive files are deleted.
-2. **Skill-Derived Directives**: Directives are single-sourced directly from the `directive:` YAML frontmatter field of individual skill files (e.g., `.agents/skills/fleet-implement/SKILL.md`).
-3. **Deterministic Composition**: At session start, the active phase's skills are resolved, their frontmatter directives are retrieved from the canonical skills directory, and any placeholders (e.g. `${baseRef}` in the `fleet-pr` directive) are dynamically interpolated. The result is concatenated in the declared order to construct the final system directive.
-4. **Adapter Unification**: Per-adapter directive logic is removed. Adapters only receive the unified central composition and the physical boolean flag directing whether to boot into real plan mode.
+System directives are compiled and injected centrally:
+1. **Skill-Derived Directives**: Directives are extracted from the `directive:` YAML frontmatter field of active skill files (e.g., `.agents/skills/fleet-implement/SKILL.md`).
+2. **Deterministic Composition**: At session start, the active phase's skills are resolved, and their frontmatter directives are loaded from the canonical skills directory. Placeholders (such as `${baseRef}` in the `fleet-pr` directive) are dynamically interpolated, and the resulting prompt strings are concatenated in declared order.
+3. **Unified Plan Mode Execution**: If any active phase has `planMode: true`, the session launches in real agent plan mode centrally, and adapters simply receive this unified start configuration.
 
 ---
 

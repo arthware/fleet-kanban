@@ -6,10 +6,10 @@ The mechanism that makes agent skills available in each worktree and composes th
 
 ## Domain model
 On worktree creation, the canonical `.agents/skills` dir is symlinked into the worktree so agents load
-skill bodies natively. Rather than using hardcoded TS directive functions, the runtime extracts prompt
-directives dynamically from the `directive:` YAML frontmatter field of active skills inside the canonical
-skills directory. Placeholders (such as `${baseRef}`) are interpolated, and the directives are concatenated in
-declared phase order. This ensures the prompt-directive channel and native skill-body channel never drift.
+skill bodies natively. The runtime extracts prompt directives dynamically from the `directive:` YAML
+frontmatter field of active skills inside the canonical skills directory. Placeholders (such as
+`${baseRef}`) are interpolated, and the directives are concatenated in declared phase order. This ensures
+the prompt-directive channel and native skill-body channel never drift.
 
 ## Reuse / do-not-duplicate
 - Relates to [Worktree](worktree.md), [Auto-review / PR mode](auto-review-pr-mode.md),
