@@ -10,6 +10,7 @@ import { moveTaskToColumn } from "../../../src/core/task-board-mutations";
 import {
 	getWorkspaceArchivedCardsPath,
 	getWorkspaceBoardParseCountForTests,
+	getWorkspaceEpic,
 	loadWorkspaceArchivedBoardById,
 	loadWorkspaceContext,
 	loadWorkspaceState,
@@ -19,6 +20,7 @@ import {
 	resetWorkspaceBoardCacheForTests,
 	restoreArchivedWorkspaceTask,
 	saveWorkspaceState,
+	setWorkspaceEpic,
 } from "../../../src/state/workspace-state";
 
 let previousClineHome: string | undefined;
@@ -458,5 +460,48 @@ describe.sequential("workspace agent session reconciliation", () => {
 		const afterMutation = await readSessionsJson(context.workspaceId);
 		expect(afterMutation[canonicalHomeAgentId]).toBeDefined();
 		expect(afterMutation[foreignHomeAgentId]).toBeUndefined();
+	});
+});
+
+describe("workspace epic metadata persistence", () => {
+	it("returns null when no epic metadata is defined on a workspace", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		const epic = await getWorkspaceEpic(context.workspaceId);
+		expect(epic).toBeNull();
+	});
+
+	it("saves, retrieves, and preserves epic metadata on a workspace", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+		const initialEpic = { name: "Cool Epic Feature", branch: "epic/cool-epic" };
+
+		await setWorkspaceEpic(context.workspaceId, initialEpic);
+
+		const retrieved = await getWorkspaceEpic(context.workspaceId);
+		expect(retrieved).toEqual(initialEpic);
+
+		// Mutate workspace state and ensure epic is preserved in meta.json
+		await mutateWorkspaceState(repoPath, (state) => ({
+			board: state.board,
+			value: null,
+		}));
+
+		const preservedAfterMutation = await getWorkspaceEpic(context.workspaceId);
+		expect(preservedAfterMutation).toEqual(initialEpic);
+
+		// Save workspace state and ensure epic is preserved in meta.json
+		const state = await loadWorkspaceState(repoPath);
+		await saveWorkspaceState(repoPath, {
+			board: state.board,
+			sessions: state.sessions,
+			expectedRevision: state.revision,
+		});
+
+		const preservedAfterSave = await getWorkspaceEpic(context.workspaceId);
+		expect(preservedAfterSave).toEqual(initialEpic);
+
+		// Can clear epic metadata
+		await setWorkspaceEpic(context.workspaceId, null);
+		const cleared = await getWorkspaceEpic(context.workspaceId);
+		expect(cleared).toBeNull();
 	});
 });

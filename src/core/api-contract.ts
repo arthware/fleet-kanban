@@ -467,11 +467,19 @@ export const runtimeProjectTaskCountsSchema = z.object({
 });
 export type RuntimeProjectTaskCounts = z.infer<typeof runtimeProjectTaskCountsSchema>;
 
+export const workspaceEpicDescriptorSchema = z.object({
+	name: z.string().min(1),
+	branch: z.string().min(1),
+	base: z.string().optional(),
+});
+export type WorkspaceEpicDescriptor = z.infer<typeof workspaceEpicDescriptorSchema>;
+
 export const runtimeProjectSummarySchema = z.object({
 	id: z.string(),
 	path: z.string(),
 	name: z.string(),
 	taskCounts: runtimeProjectTaskCountsSchema,
+	epic: workspaceEpicDescriptorSchema.optional(),
 });
 export type RuntimeProjectSummary = z.infer<typeof runtimeProjectSummarySchema>;
 
