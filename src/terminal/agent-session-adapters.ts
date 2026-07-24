@@ -1731,7 +1731,7 @@ const CARD_GH_REMOTE_TIMEOUT_MS = 5_000;
 // is the backstop that turns any other missing-info prompt into a visible, retryable error instead of
 // a hang. Home-agent sidebar sessions aren't card worktrees and don't run `gh pr create`, so they're
 // left untouched.
-async function resolveCardGhEnv(cwd: string): Promise<Record<string, string>> {
+export async function resolveCardGhEnv(cwd: string): Promise<Record<string, string>> {
 	const env: Record<string, string> = { GH_PROMPT_DISABLED: "1" };
 	const origin = await runGit(cwd, ["remote", "get-url", "origin"], { timeoutMs: CARD_GH_REMOTE_TIMEOUT_MS });
 	const nameWithOwner = origin.ok ? parseGithubRemoteNameWithOwner(origin.stdout) : null;
