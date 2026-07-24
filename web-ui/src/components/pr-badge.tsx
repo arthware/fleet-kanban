@@ -24,8 +24,8 @@ const PR_BADGE_STATE_CONFIG = {
 	},
 } as const;
 
-export function getPrBadgeLabel(card: PrBadgeCard): string {
-	return card.prNumber != null ? `PR #${card.prNumber}` : "PR";
+export function getPrBadgeLabel(card: PrBadgeCard): string | null {
+	return card.prNumber != null ? `#${card.prNumber}` : null;
 }
 
 export function PrBadge({ card, className }: { card: PrBadgeCard; className?: string }): ReactElement | null {
@@ -64,7 +64,7 @@ export function PrBadge({ card, className }: { card: PrBadgeCard; className?: st
 			onClick={stopPropagation}
 		>
 			<Icon size={14} className="shrink-0" />
-			<span className={cn("min-w-0 truncate", state === "closed" && "line-through")}>{label}</span>
+			{label ? <span className={cn("min-w-0 truncate", state === "closed" && "line-through")}>{label}</span> : null}
 			{showGate && GateIcon && (
 				<GateIcon
 					size={12}

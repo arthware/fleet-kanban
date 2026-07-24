@@ -349,7 +349,7 @@ describe("CardDetailView", () => {
 		expect(link).not.toBeNull();
 		expect(link?.getAttribute("target")).toBe("_blank");
 		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
-		expect(link?.textContent).toContain("PR #42");
+		expect(link?.textContent).toContain("#42");
 		expect(link?.querySelector("svg.lucide-git-merge")).toBeInstanceOf(SVGSVGElement);
 	});
 

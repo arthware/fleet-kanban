@@ -225,25 +225,15 @@ describe("BoardCard", () => {
 		}
 	});
 
-	it("shows a mode-specific cancel button and hides it after canceling auto review", async () => {
+	it("given an auto-review-enabled card, when the card renders, then it shows no Cancel Auto-PR button", async () => {
 		await act(async () => {
 			root.render(<Harness />);
 		});
 
-		const cancelButton = Array.from(container.querySelectorAll("button")).find(
-			(button) => button.textContent?.trim() === "Cancel Auto-PR",
-		);
-		expect(cancelButton).toBeDefined();
-
-		await act(async () => {
-			cancelButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			cancelButton?.click();
-		});
-
-		const nextCancelButton = Array.from(container.querySelectorAll("button")).find((button) =>
+		const cancelButton = Array.from(container.querySelectorAll("button")).find((button) =>
 			button.textContent?.includes("Cancel Auto-"),
 		);
-		expect(nextCancelButton).toBeUndefined();
+		expect(cancelButton).toBeUndefined();
 	});
 
 	it("given a review card, when its card-face button renders, then it shows the Abandon trash icon and an 'Abandon task' label", async () => {
@@ -1286,7 +1276,7 @@ describe("BoardCard", () => {
 		expect(link).not.toBeNull();
 		expect(link?.getAttribute("target")).toBe("_blank");
 		expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
-		expect(link?.textContent).toContain("PR #42");
+		expect(link?.textContent).toContain("#42");
 		expect(link?.className).toContain("inline-flex");
 		expect(link?.className).toContain("border-status-green/30");
 	});
@@ -1635,10 +1625,10 @@ describe("BoardCard", () => {
 	});
 
 	it.each([
-		["open", "PR #42", "lucide-git-pull-request-arrow", "border-status-green/30"],
-		["merged", "PR #42", "lucide-git-merge", "border-status-purple/30"],
-		["closed", "PR #42", "lucide-git-pull-request-closed", "border-status-red/30"],
-		[undefined, "PR #42", "lucide-git-pull-request", "border-border"],
+		["open", "#42", "lucide-git-pull-request-arrow", "border-status-green/30"],
+		["merged", "#42", "lucide-git-merge", "border-status-purple/30"],
+		["closed", "#42", "lucide-git-pull-request-closed", "border-status-red/30"],
+		[undefined, "#42", "lucide-git-pull-request", "border-border"],
 	] as const)("uses the %s PR badge icon, label, and tint", async (prState, label, iconClass, tintClass) => {
 		await act(async () => {
 			root.render(
@@ -1660,7 +1650,7 @@ describe("BoardCard", () => {
 		expect(link?.querySelector(`svg.${iconClass}`)).toBeInstanceOf(SVGSVGElement);
 	});
 
-	it("renders a plain PR label when the stored PR has no number", async () => {
+	it("renders the icon with no label when the stored PR has no number", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -1674,7 +1664,8 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(findPrBadge(container)?.textContent?.trim()).toBe("PR");
+		expect(findPrBadge(container)?.textContent?.trim()).toBe("");
+		expect(findPrBadge(container)?.querySelector("svg")).toBeInstanceOf(SVGSVGElement);
 		expect(container.textContent).not.toContain("View PR");
 	});
 
