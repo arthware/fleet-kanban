@@ -12,7 +12,7 @@ export interface AgentChatWorkspaceInput {
 	/** The currently selected project board. */
 	currentProjectId: string | null;
 	/** The full projects list, used to check if the current project is an active epic. */
-	projects?: Array<{ id: string; epic?: any }>;
+	projects?: Array<{ id: string; epic?: { name: string; branch: string; base?: string } | null }>;
 }
 
 export interface AgentChatWorkspace {
