@@ -1,8 +1,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentBudgetReadout } from "@/components/agent-budget-readout";
+import { AgentBudgetReadout, formatResetTime } from "@/components/agent-budget-readout";
 import type { RuntimeAgentBudgetResponse } from "@/runtime/types";
 
 function makeBudget(overrides: Partial<RuntimeAgentBudgetResponse> = {}): RuntimeAgentBudgetResponse {
@@ -35,6 +35,28 @@ function makeBudget(overrides: Partial<RuntimeAgentBudgetResponse> = {}): Runtim
 		...overrides,
 	};
 }
+
+describe("formatResetTime", () => {
+	it("given no resetsAt, when formatted, then it returns an empty string", () => {
+		expect(formatResetTime(null, 1_700_000_000)).toBe("");
+	});
+
+	it("given resetsAt in the past, when formatted, then it returns 'resets now'", () => {
+		expect(formatResetTime(1_700_000_000, 1_700_000_100)).toBe("resets now");
+	});
+
+	it("given resetsAt exactly now, when formatted, then it returns 'resets now'", () => {
+		expect(formatResetTime(1_700_000_000, 1_700_000_000)).toBe("resets now");
+	});
+
+	it("given resetsAt under an hour away, when formatted, then it shows minutes only", () => {
+		expect(formatResetTime(1_700_000_000 + 40 * 60, 1_700_000_000)).toBe("resets in 40m");
+	});
+
+	it("given resetsAt hours away, when formatted, then it shows zero-padded hours and minutes", () => {
+		expect(formatResetTime(1_700_000_000 + 2 * 3600 + 40 * 60, 1_700_000_000)).toBe("resets in 2h40m");
+	});
+});
 
 describe("AgentBudgetReadout", () => {
 	let container: HTMLDivElement;
@@ -238,5 +260,63 @@ describe("AgentBudgetReadout", () => {
 
 		const claudePill = container.querySelector('[data-testid="agent-budget-pill-claude"]');
 		expect(claudePill?.textContent).toContain("55%");
+	});
+
+	describe("reset-time tooltip", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+			vi.setSystemTime(1_700_000_000 * 1000);
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("given a claude provider with 5h and week windows, when rendered, then the value's tooltip shows the 5h reset and the week reset", () => {
+			const budget = makeBudget({
+				providers: [
+					{
+						provider: "claude",
+						plan: "max",
+						staleSeconds: 0,
+						worstRemainingPercent: 18,
+						windows: [
+							{ name: "5h", remainingPercent: 31, resetsAt: 1_700_000_000 + 2 * 3600 + 40 * 60 },
+							{ name: "week", remainingPercent: 18, resetsAt: 1_700_000_000 + 6 * 24 * 3600 },
+						],
+					},
+				],
+			});
+
+			act(() => {
+				root.render(<AgentBudgetReadout budget={budget} />);
+			});
+
+			const claudeValue = container.querySelector('[data-testid="agent-budget-pill-value-claude"]');
+			const title = claudeValue?.getAttribute("title") ?? "";
+			expect(title).toContain("5h: 31% · resets in 2h40m");
+			expect(title).toContain("week: 18% · resets in 144h00m");
+		});
+
+		it("given a window with no resetsAt, when rendered, then the tooltip omits reset info for that window", () => {
+			const budget = makeBudget({
+				providers: [
+					{
+						provider: "cursor",
+						plan: "pro",
+						staleSeconds: 0,
+						worstRemainingPercent: 100,
+						windows: [{ name: "cycle", remainingPercent: 100, resetsAt: null }],
+					},
+				],
+			});
+
+			act(() => {
+				root.render(<AgentBudgetReadout budget={budget} />);
+			});
+
+			const cursorValue = container.querySelector('[data-testid="agent-budget-pill-value-cursor"]');
+			expect(cursorValue?.getAttribute("title")).toBe("cycle: 100%");
+		});
 	});
 });
