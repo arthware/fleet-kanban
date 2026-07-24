@@ -214,6 +214,8 @@ export const runtimeBoardCardSchema = z
 		// one-line instruction naming this skill; the agent loads the body natively
 		// from .agents/skills/ in its task worktree.
 		skill: z.string().optional(),
+		// Optional Card Type / manifest pointer.
+		cardType: z.string().optional(),
 		// The GitHub PR a review/done card's branch led to. Captured once when the
 		// PR is first detected (see workspace-metadata-monitor) and persisted onto
 		// the card so the board can link to it without querying `gh` at render time
@@ -1232,6 +1234,8 @@ export const runtimeTaskSessionStartRequestSchema = z.object({
 	// Optional per-card SKILL.md pointer. This is launch guidance only; the
 	// runtime never embeds the skill body in the prompt.
 	skill: z.string().optional(),
+	// Optional Card Type / manifest pointer.
+	cardType: z.string().optional(),
 	clineSettings: runtimeTaskClineSettingsSchema.optional(),
 });
 export type RuntimeTaskSessionStartRequest = z.infer<typeof runtimeTaskSessionStartRequestSchema>;
