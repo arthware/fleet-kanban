@@ -239,13 +239,33 @@ generalization is that the *architect role* (tools + preamble + hidden-from-proj
 no longer uniquely the containment architect: an **explicit epic marker** confers the Epic-Owner
 variant of that role. Classification stays the single authority for the *Senior* Architect.
 
-### Minimal UI
+### Minimal UI — epic context lives at the board level, not on the card
 
-1. **Session dropdown** in the sidebar chat header: `Senior Architect` (default) + one row per active
-   epic. Switches which home-agent workspace the chat binds to.
-2. **Epic badge** on the epic's board (from `RuntimeProjectSummary.epic`): name + branch, so it reads
-   as an epic board, and it is **grouped/pinned** in the project selector rather than mixed with
-   consumer repos (mirrors how the architect is treated).
+Operator-confirmed shape (resolves open-Qs 2 & 5): an epic is a **context you switch into**, not a tag
+stamped on every card. Three surfaces, and — by design — **zero change to the card face**.
+
+1. **Epics nav band (left panel).** Alongside `Senior Architect` (the default/home context = mainline
+   `production-line` board) and `Projects`, add an **Epics** group listing each active epic (from
+   `RuntimeProjectSummary.epic`). Each row shows a compact **roll-up**: cards-by-column counts +
+   epic-branch CI (e.g. `card-types  3·2·1  ✓`) — so the Senior Architect sees epics in flight
+   **without switching in**. Epic workspaces stay hidden from the plain `Projects` list (reuse the
+   `selectArchitectAwareProjects` hide path). The roll-up is **not** injected as tiles into the mainline
+   Backlog/In-Progress/Review columns — mainline columns stay pure mainline.
+2. **Coupled context switch.** Selecting an epic row switches **board + chat together**: the board binds
+   to the epic workspace (its own cards) and the chat rebinds to that epic's Epic-Owner home agent. One
+   "context" concept — no split-brain where the board shows mainline while the chat talks to an epic
+   owner (so **no** separate chat-only dropdown). The top bar flips from `production-line` to
+   `epic/<name>`, showing the epic's **diff vs `production-line`** (a live "how big is this epic
+   getting" signal) + an **Epic** badge.
+3. **The card face is unchanged.** Every card on an epic board already belongs to that epic, so a
+   per-card epic badge is redundant noise (Article 3) — PR badge, branch chip, Auto-PR, model chip,
+   token footer all render exactly as today; the only difference (their PR base is `epic/<name>`) is
+   implied by the board. A per-card `epic` field is added **only** for a future unified/cross-epic board
+   that mixes contexts, and is the deferred seam that must be threaded through `normalizeCard`
+   (`board-state.ts:168`). v1 does not touch the card.
+
+**Epic graduation.** When an epic completes, its single `epic/<name> → production-line` PR appears as a
+**normal card on the mainline board** — the epic graduates as one reviewable card, no special-casing.
 
 ---
 
@@ -285,17 +305,17 @@ variant of that role. Classification stays the single authority for the *Senior*
 1. **`fleet epic create/complete` home — `fleet` dispatcher vs. a kanban CLI subcommand?** The git +
    register + meta steps straddle both; leaning `fleet` for the git/topology parts and a small kanban
    runtime addition for register+meta.
-2. **Do epic boards appear in the project selector at all, or only via the session dropdown?**
-   Recommendation: show the epic board (grouped/badged) so its columns are viewable, but keep the
-   *chat target* on the session dropdown. Confirm with the operator.
+2. **RESOLVED** — epic navigation is an **Epics nav band** in the left panel, and selecting an epic is
+   a **coupled context switch** (board **and** chat rebind together to the epic workspace / Epic Owner).
+   There is **no** separate chat-only dropdown. See "Minimal UI" above.
 3. **Roll-up cadence.** On-demand (architect pulls via `fleet task ls`/`kanban status` scoped to the
    epic) vs. Epic-Owner-pushed on state change. v1: on-demand + a manual push; a scheduler is the
    deferred seam.
 4. **Multiple epics of the *same* repo simultaneously** — basename collision handling
    (`createWorkspaceId` suffix) works, but the epic **name** should drive the workspace id for
    legibility (e.g. label the worktree dir `<repo>@<epic-name>`). Decide the naming scheme.
-5. **CI/integration signal** in the roll-up summary — is branch ahead/behind + last CI conclusion
-   enough for v1, or does the operator want per-card gate status aggregated?
+5. **RESOLVED (v1)** — the left-panel epic roll-up shows **cards-by-column counts + epic-branch CI
+   conclusion** (e.g. `card-types  3·2·1  ✓`). Per-card gate-status aggregation is deferred.
 
 ---
 
@@ -310,10 +330,15 @@ small and upstreamable; the machinery is deliberately thin.
   the **Epic Owner** role (fleet tools + epic preamble) to an epic-marked workspace and to list active
   epics in the Senior Architect preamble; hide epic workspaces from the plain project list.
   *Module tests through the public resolvers.*
-- **Card 2 — Session dropdown (web-ui).** Generalize `resolveAgentChatWorkspace` to expose
-  `[Senior Architect] + [epics]`; add a Radix `Select` in the sidebar chat header that rebinds the
-  existing `use-home-agent-session` hook to the chosen home-agent workspace; badge the epic board.
-  *Given/When/Then on the resolver + hook.*
+- **Card 2 — Epics nav band + coupled context switch (web-ui).** Add an **Epics** group to the left
+  panel listing active epics (from `RuntimeProjectSummary.epic`) with a compact per-row roll-up
+  (cards-by-column counts + epic-branch CI); hide epic workspaces from the plain `Projects` list.
+  Selecting an epic **couples board + chat**: bind the board to the epic workspace and rebind the chat
+  via `resolveAgentChatWorkspace` / `use-home-agent-session` (both already per-workspace) to that epic's
+  Epic-Owner home agent — **no** separate chat-only dropdown. Flip the top bar to `epic/<name>` with the
+  diff-vs-`production-line` and an **Epic** badge. **Do not alter the card face** — no per-card epic
+  field in v1 (that seam, threaded through `normalizeCard`, is deferred to a future cross-epic view).
+  *Given/When/Then on the resolver + hook + the projects-payload epic grouping.*
 - **Card 3 — `fleet epic create` / `fleet epic complete` helpers.** `create`: branch `epic/<name>` off
   `production-line`, push, `git worktree add` under `<CLINE_HOME>/epics/`, register + set epic meta,
   boot the Epic Owner. `complete`: open the `epic → production-line` PR, then deregister + `git
