@@ -67,24 +67,62 @@ describe("AgentBudgetReadout", () => {
 		expect(cursorPill?.textContent).toContain("100%");
 	});
 
-	it("given a provider under the critical threshold, when rendered, then its pill carries the critical color class", () => {
+	it("given a provider label, when rendered, then the label is muted and not colored by health", () => {
 		act(() => {
 			root.render(<AgentBudgetReadout budget={makeBudget()} />);
+		});
+
+		const codexLabel = container.querySelector('[data-testid="agent-budget-pill-label-codex"]');
+
+		expect(codexLabel?.textContent).toBe("Codex");
+		expect(codexLabel?.className).toContain("text-text-secondary");
+		expect(codexLabel?.className).not.toContain("text-status-red");
+	});
+
+	it("given a provider under the critical threshold, when rendered, then only its percentage span carries the critical color class", () => {
+		act(() => {
+			root.render(<AgentBudgetReadout budget={makeBudget()} />);
+		});
+
+		const codexValue = container.querySelector('[data-testid="agent-budget-pill-value-codex"]');
+		const codexLabel = container.querySelector('[data-testid="agent-budget-pill-label-codex"]');
+
+		expect(codexValue?.className).toContain("text-status-red");
+		expect(codexValue?.className).toContain("tabular-nums");
+		expect(codexLabel?.className).not.toContain("text-status-red");
+	});
+
+	it("given a healthy provider, when rendered, then its percentage span carries the healthy color class", () => {
+		act(() => {
+			root.render(<AgentBudgetReadout budget={makeBudget()} />);
+		});
+
+		const cursorValue = container.querySelector('[data-testid="agent-budget-pill-value-cursor"]');
+
+		expect(cursorValue?.className).toContain("text-status-green");
+	});
+
+	it("given a stale provider read, when rendered, then it shows a subtle dot cue instead of a trailing tilde", () => {
+		const budget = makeBudget({
+			providers: [
+				{
+					provider: "codex",
+					plan: "plus",
+					staleSeconds: 60 * 60 + 1,
+					worstRemainingPercent: 40,
+					windows: [{ name: "week", remainingPercent: 40, resetsAt: 1_700_100_000 }],
+				},
+			],
+		});
+
+		act(() => {
+			root.render(<AgentBudgetReadout budget={budget} />);
 		});
 
 		const codexPill = container.querySelector('[data-testid="agent-budget-pill-codex"]');
 
-		expect(codexPill?.className).toContain("text-status-red");
-	});
-
-	it("given a healthy provider, when rendered, then its pill carries the healthy color class", () => {
-		act(() => {
-			root.render(<AgentBudgetReadout budget={makeBudget()} />);
-		});
-
-		const cursorPill = container.querySelector('[data-testid="agent-budget-pill-cursor"]');
-
-		expect(cursorPill?.className).toContain("text-status-green");
+		expect(container.querySelector('[data-testid="agent-budget-pill-stale-codex"]')).not.toBeNull();
+		expect(codexPill?.textContent).not.toContain("~");
 	});
 
 	it("given the budget is unavailable, when rendered, then it renders nothing instead of an error", () => {

@@ -14,7 +14,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 const CRITICAL_THRESHOLD_PERCENT = 10;
 const LOW_THRESHOLD_PERCENT = 25;
 // A stale local read (e.g. Codex only refreshes on its own turns) still shows a
-// number, but a "~" flags it as possibly out of date past this age.
+// number, but a dot flags it as possibly out of date past this age.
 const STALE_THRESHOLD_SECONDS = 60 * 60;
 
 function providerLabel(provider: string): string {
@@ -56,11 +56,25 @@ function AgentBudgetPill({ provider }: { provider: RuntimeAgentBudgetProvider })
 	return (
 		<span
 			data-testid={`agent-budget-pill-${provider.provider}`}
-			title={title}
-			className={cn("font-medium whitespace-nowrap", agentBudgetHealthClassName(displayPercent))}
+			title={isStale ? `${title} (stale)` : title}
+			className="inline-flex items-baseline gap-1 whitespace-nowrap"
 		>
-			{providerLabel(provider.provider)} {displayPercent === null ? "?" : Math.round(displayPercent)}%{weekSuffix}
-			{isStale ? <span className="text-text-tertiary">~</span> : null}
+			<span data-testid={`agent-budget-pill-label-${provider.provider}`} className="text-text-secondary">
+				{providerLabel(provider.provider)}
+			</span>
+			<span
+				data-testid={`agent-budget-pill-value-${provider.provider}`}
+				className={cn("font-medium tabular-nums", agentBudgetHealthClassName(displayPercent))}
+			>
+				{displayPercent === null ? "?" : Math.round(displayPercent)}%{weekSuffix}
+			</span>
+			{isStale ? (
+				<span
+					data-testid={`agent-budget-pill-stale-${provider.provider}`}
+					aria-hidden="true"
+					className="h-1 w-1 self-center rounded-full bg-text-tertiary"
+				/>
+			) : null}
 		</span>
 	);
 }
@@ -77,13 +91,10 @@ export function AgentBudgetReadout({
 	}
 
 	return (
-		<div
-			data-testid="agent-budget-readout"
-			className={cn("flex items-center gap-1.5 text-xs text-text-secondary", className)}
-		>
+		<div data-testid="agent-budget-readout" className={cn("flex items-center gap-2 text-xs", className)}>
 			{budget.providers.map((provider, index) => (
-				<span key={provider.provider} className="flex items-center gap-1.5">
-					{index > 0 ? <span className="text-text-tertiary">·</span> : null}
+				<span key={provider.provider} className="flex items-center gap-2">
+					{index > 0 ? <span aria-hidden="true" className="h-3 border-l border-border" /> : null}
 					<AgentBudgetPill provider={provider} />
 				</span>
 			))}
