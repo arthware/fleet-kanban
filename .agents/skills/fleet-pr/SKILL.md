@@ -1,6 +1,8 @@
 ---
 name: fleet-pr
 description: use when working an auto-review PR card - commit as you go, push, and open one idempotent PR against the card base
+directive: >-
+  You are working an auto-review PR card. Use the fleet-pr skill: the card is your authorization to commit and push — never pause to ask whether to commit, push, or open the PR; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch `${baseRef}` non-interactively — `gh pr create --base ${baseRef} --title <subject> --body <summary>` (never a bare or interactive `gh pr create`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.
 ---
 
 The **fleet-pr** skill defines when the card is done. Done = committed + branch pushed + PR open (or its absence explained) — nothing less. You are not done until the PR exists (or you've said exactly why it can't).

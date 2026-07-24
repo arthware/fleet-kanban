@@ -1,6 +1,8 @@
 ---
 name: fleet-plan
 description: use when working a plan/design card — investigate and produce a design doc, do not implement
+directive: >-
+  You are working a plan card. Use the fleet-plan skill: investigate and write a design doc; do not implement.
 ---
 
 You are working a plan card. Do not modify product code or implement anything. Use write tools only
