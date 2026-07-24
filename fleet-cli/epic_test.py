@@ -178,5 +178,233 @@ class TestEpicCommand(unittest.TestCase):
         # Assert
         self.assertEqual(res, 1)
 
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    def test_given_diverged_epic_when_epic_sync_then_merges_and_pushes_and_reports_commits(
+        self, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Behavior: Given a diverged epic workspace, when syncing, we fetch origin/base, perform ff merge (which fails), then a real merge (succeeds), push, and report commits."""
+        # Arrange (Given)
+        mock_resolve.return_value = self.repo_path
+        mock_socket.return_value = MagicMock()
+        
+        # Mock projects list
+        mock_projects_payload = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        mock_trpc.return_value = mock_projects_payload
+
+        # Mock git commands
+        # 1. symbolic-ref -> epic/cool-feature
+        # 2. fetch -> OK
+        # 3. rev-parse (old sha) -> "sha1"
+        # 4. merge --ff-only -> fails (returncode = 1)
+        # 5. merge --no-edit -> succeeds (returncode = 0)
+        # 6. rev-parse (new sha) -> "sha2"
+        # 7. log -> some commits
+        # 8. push -> OK
+        mock_git_symbolic_ref = MagicMock(returncode=0, stdout="epic/cool-feature\n")
+        mock_git_rev_parse_old = MagicMock(returncode=0, stdout="sha1\n")
+        mock_git_ff = MagicMock(returncode=1)
+        mock_git_merge = MagicMock(returncode=0)
+        mock_git_rev_parse_new = MagicMock(returncode=0, stdout="sha2\n")
+        mock_git_log = MagicMock(returncode=0, stdout="sha2 feat: some commit\n")
+        
+        wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
+
+        def git_run_side_effect(repo_path, args, check=True):
+            self.assertEqual(repo_path, wt_path)
+            if args[0] == "symbolic-ref":
+                return mock_git_symbolic_ref
+            elif args[0] == "rev-parse":
+                if mock_git_ff.called:
+                    return mock_git_rev_parse_new
+                return mock_git_rev_parse_old
+            elif args[0] == "merge" and "--ff-only" in args:
+                mock_git_ff.called = True
+                return mock_git_ff
+            elif args[0] == "merge" and "--no-edit" in args:
+                return mock_git_merge
+            elif args[0] == "log":
+                return mock_git_log
+            else:
+                return MagicMock(returncode=0, stdout="")
+
+        mock_git_ff.called = False
+        mock_git.side_effect = git_run_side_effect
+
+        # Act (When)
+        res = fleet.epic_sync("cool-feature", "my-repo", self.cfg)
+
+        # Assert (Then)
+        self.assertEqual(res, 0)
+        mock_git.assert_any_call(wt_path, ["fetch", "origin", "production-line"])
+        mock_git.assert_any_call(wt_path, ["merge", "--ff-only", "origin/production-line"], check=False)
+        mock_git.assert_any_call(wt_path, ["merge", "--no-edit", "origin/production-line"], check=False)
+        mock_git.assert_any_call(wt_path, ["push", "origin", "epic/cool-feature"])
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    def test_given_up_to_date_epic_when_epic_sync_then_does_not_commit_and_reports_up_to_date(
+        self, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When syncing an up-to-date epic workspace, ff merge succeeds and old_sha == new_sha, so we print already up to date without push."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_socket.return_value = MagicMock()
+        mock_trpc.return_value = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        
+        wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
+        mock_git_symbolic_ref = MagicMock(returncode=0, stdout="epic/cool-feature\n")
+        mock_git_rev_parse = MagicMock(returncode=0, stdout="sha1\n")
+        mock_git_ff = MagicMock(returncode=0)
+
+        def git_run_side_effect(repo_path, args, check=True):
+            self.assertEqual(repo_path, wt_path)
+            if args[0] == "symbolic-ref":
+                return mock_git_symbolic_ref
+            elif args[0] == "rev-parse":
+                return mock_git_rev_parse
+            elif args[0] == "merge" and "--ff-only" in args:
+                return mock_git_ff
+            else:
+                return MagicMock(returncode=0, stdout="")
+
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_sync("cool-feature", "my-repo", self.cfg)
+
+        # Assert
+        self.assertEqual(res, 0)
+        mock_git.assert_any_call(wt_path, ["merge", "--ff-only", "origin/production-line"], check=False)
+        # Verify push was NOT called since shas matched
+        for call in mock_git.call_args_list:
+            args = call[0][1]
+            self.assertNotIn("push", args)
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    def test_given_conflicting_epic_when_epic_sync_then_aborts_merge_and_reports_conflicting_files(
+        self, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When syncing results in a conflict, we diff conflicting files, abort the merge, and return non-zero."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_socket.return_value = MagicMock()
+        mock_trpc.return_value = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        
+        wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
+        mock_git_symbolic_ref = MagicMock(returncode=0, stdout="epic/cool-feature\n")
+        mock_git_rev_parse = MagicMock(returncode=0, stdout="sha1\n")
+        mock_git_ff = MagicMock(returncode=1)
+        mock_git_merge = MagicMock(returncode=1)
+        mock_git_diff = MagicMock(returncode=0, stdout="src/conflict.txt\n")
+
+        def git_run_side_effect(repo_path, args, check=True):
+            self.assertEqual(repo_path, wt_path)
+            if args[0] == "symbolic-ref":
+                return mock_git_symbolic_ref
+            elif args[0] == "rev-parse":
+                return mock_git_rev_parse
+            elif args[0] == "merge" and "--ff-only" in args:
+                return mock_git_ff
+            elif args[0] == "merge" and "--no-edit" in args:
+                return mock_git_merge
+            elif args[0] == "diff":
+                return mock_git_diff
+            else:
+                return MagicMock(returncode=0, stdout="")
+
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_sync("cool-feature", "my-repo", self.cfg)
+
+        # Assert
+        self.assertEqual(res, 1)
+        mock_git.assert_any_call(wt_path, ["merge", "--abort"])
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    def test_given_wrong_head_branch_when_epic_sync_then_returns_error(
+        self, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When worktree HEAD is on a different branch, epic sync fails to prevent unintended changes."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_socket.return_value = MagicMock()
+        mock_trpc.return_value = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        
+        wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
+        mock_git_symbolic_ref = MagicMock(returncode=0, stdout="main\n")
+
+        def git_run_side_effect(repo_path, args, check=True):
+            if args[0] == "symbolic-ref":
+                return mock_git_symbolic_ref
+            return MagicMock(returncode=0, stdout="")
+
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_sync("cool-feature", "my-repo", self.cfg)
+
+        # Assert
+        self.assertEqual(res, 1)
+
 if __name__ == "__main__":
     unittest.main()
