@@ -176,6 +176,7 @@ function TopBarGitStatusSection({
 	onGitFetch,
 	onGitPull,
 	onGitPush,
+	isEpic = false,
 }: {
 	showHomeGitSummary: boolean;
 	selectedTaskId: string | null;
@@ -186,6 +187,7 @@ function TopBarGitStatusSection({
 	onGitFetch?: () => void;
 	onGitPull?: () => void;
 	onGitPush?: () => void;
+	isEpic?: boolean;
 }): React.ReactElement | null {
 	const homeGitSummary = useHomeGitSummaryValue();
 	const taskWorkspaceInfo = useTaskWorkspaceInfoValue(selectedTaskId, selectedTaskBaseRef);
@@ -206,6 +208,11 @@ function TopBarGitStatusSection({
 		return (
 			<>
 				<div className="w-px h-5 bg-border mx-1" />
+				{isEpic ? (
+					<span className="inline-flex items-center rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent uppercase tracking-wider mr-1.5 shrink-0 select-none">
+						Epic
+					</span>
+				) : null}
 				<GitBranchStatusControl
 					branchLabel={branchLabel}
 					changedFiles={homeGitSummary.changedFiles ?? 0}
@@ -313,6 +320,7 @@ export function TopBar({
 	canOpenWorkspace,
 	isOpeningWorkspace,
 	hideProjectDependentActions = false,
+	isEpic = false,
 }: {
 	onToggleSidebar?: () => void;
 	onBack?: () => void;
@@ -348,6 +356,7 @@ export function TopBar({
 	canOpenWorkspace: boolean;
 	isOpeningWorkspace: boolean;
 	hideProjectDependentActions?: boolean;
+	isEpic?: boolean;
 }): React.ReactElement {
 	const isMobile = useIsMobile();
 	const displayWorkspacePath = workspacePath ? formatPathForDisplay(workspacePath) : null;
@@ -511,6 +520,7 @@ export function TopBar({
 									onGitFetch={onGitFetch}
 									onGitPull={onGitPull}
 									onGitPush={onGitPush}
+									isEpic={isEpic}
 								/>
 							) : null}
 						</>

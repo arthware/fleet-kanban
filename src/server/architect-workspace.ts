@@ -231,12 +231,16 @@ export function selectArchitectAwareProjects(
 	input: SelectArchitectAwareProjectsInput,
 ): ArchitectAwareProjectsSelection {
 	const { architectWorkspaceId } = classifyArchitectWorkspace(input.workspaces);
-	const selectable = input.workspaces.filter((ws) => ws.workspaceId !== architectWorkspaceId && !ws.epic);
+	// We want all workspaces except the architect to be selectable.
+	// Epics are selectable boards, so we should include them, but we filter them
+	// from fallbackProjectId so the board doesn't default to an epic on start.
+	const selectable = input.workspaces.filter((ws) => ws.workspaceId !== architectWorkspaceId);
 	const selectableWorkspaceIds = selectable.map((ws) => ws.workspaceId);
 
+	const nonEpicSelectable = selectable.filter((ws) => !ws.epic);
 	const fallbackProjectId =
-		selectable.find((ws) => ws.workspaceId === input.activeWorkspaceId)?.workspaceId ??
-		selectableWorkspaceIds[0] ??
+		nonEpicSelectable.find((ws) => ws.workspaceId === input.activeWorkspaceId)?.workspaceId ??
+		nonEpicSelectable.map((ws) => ws.workspaceId)[0] ??
 		null;
 	const currentProjectId =
 		(input.preferredCurrentProjectId &&

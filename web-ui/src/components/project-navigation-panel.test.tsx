@@ -243,4 +243,60 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.textContent).toContain("fleet production line");
 		expect(container.textContent).toContain("abc1234");
 	});
+
+	it("renders active epics with their roll-up and hides them from the plain Projects list", () => {
+		const projectsWithEpic: RuntimeProjectSummary[] = [
+			{
+				id: "project-1",
+				name: "My App",
+				path: "/tmp/myapp",
+				taskCounts: {
+					backlog: 5,
+					in_progress: 3,
+					review: 2,
+					done: 0,
+					trash: 1,
+				},
+			},
+			{
+				id: "epic-1",
+				name: "Epic Card Refactor",
+				path: "/tmp/epic-1",
+				taskCounts: {
+					backlog: 3,
+					in_progress: 2,
+					review: 1,
+					done: 0,
+					trash: 0,
+				},
+				epic: {
+					name: "Card Refactor Epic",
+					branch: "epic/card-refactor",
+				},
+			},
+		];
+
+		renderPanel({ projects: projectsWithEpic });
+
+		// It should render "Senior Architect" header & row
+		expect(container.textContent).toContain("Senior Architect");
+		expect(container.textContent).toContain("Senior Architect Chat");
+
+		// It should render "Epics" header and the epic's roll-up: counts (3·2·1) and CI checkmark (✓)
+		expect(container.textContent).toContain("Epics");
+		expect(container.textContent).toContain("Card Refactor Epic");
+		expect(container.textContent).toContain("3·2·1");
+		expect(container.textContent).toContain("✓");
+
+		// It should render "Projects" header and the plain project
+		expect(container.textContent).toContain("Projects");
+		expect(container.textContent).toContain("My App");
+	});
+
+	it("renders no Epics section if there are no epics", () => {
+		renderPanel({ projects: PROJECTS });
+		expect(container.textContent).not.toContain("Epics");
+		expect(container.textContent).toContain("Projects");
+		expect(container.textContent).toContain("Kanban");
+	});
 });

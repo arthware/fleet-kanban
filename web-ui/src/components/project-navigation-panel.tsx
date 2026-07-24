@@ -1,6 +1,6 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, ChevronUp, Ellipsis, ExternalLink, Info, Lightbulb, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Command, Ellipsis, ExternalLink, Info, Lightbulb, Plus, X } from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { AgentBudgetReadout } from "@/components/agent-budget-readout";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
@@ -231,32 +231,67 @@ export function ProjectNavigationPanel({
 						className="absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10"
 					/>
 				)}
-				{sortedProjects.map((project) => {
-					const isCurrent = currentProjectId === project.id;
-					const letter = project.name.charAt(0).toUpperCase();
-					return (
-						<button
-							key={project.id}
-							type="button"
-							title={project.name}
-							onClick={() => {
-								if (isMobile) {
-									setCollapsed(false);
-								}
-								onSelectProject(project.id);
-							}}
-							className={cn(
-								"rounded-md text-xs font-semibold shrink-0 border-0 cursor-pointer flex items-center justify-center",
-								isMobile ? "w-11 h-11" : "w-8 h-8",
-								isCurrent
-									? "bg-accent text-accent-fg"
-									: "bg-surface-3 text-text-secondary hover:text-text-primary hover:bg-surface-4",
-							)}
-						>
-							{letter}
-						</button>
-					);
-				})}
+				{sortedProjects
+					.filter((p) => !p.epic)
+					.map((project) => {
+						const isCurrent = currentProjectId === project.id;
+						const letter = project.name.charAt(0).toUpperCase();
+						return (
+							<button
+								key={project.id}
+								type="button"
+								title={project.name}
+								onClick={() => {
+									if (isMobile) {
+										setCollapsed(false);
+									}
+									onSelectProject(project.id);
+								}}
+								className={cn(
+									"rounded-md text-xs font-semibold shrink-0 border-0 cursor-pointer flex items-center justify-center",
+									isMobile ? "w-11 h-11" : "w-8 h-8",
+									isCurrent
+										? "bg-accent text-accent-fg"
+										: "bg-surface-3 text-text-secondary hover:text-text-primary hover:bg-surface-4",
+								)}
+							>
+								{letter}
+							</button>
+						);
+					})}
+				{sortedProjects.filter((p) => p.epic).length > 0 ? (
+					<>
+						<div className="w-4 h-px bg-border my-1 shrink-0" />
+						{sortedProjects
+							.filter((p) => p.epic)
+							.map((project) => {
+								const isCurrent = currentProjectId === project.id;
+								const letter = (project.epic?.name ?? project.name).charAt(0).toUpperCase();
+								return (
+									<button
+										key={project.id}
+										type="button"
+										title={project.epic?.name ?? project.name}
+										onClick={() => {
+											if (isMobile) {
+												setCollapsed(false);
+											}
+											onSelectProject(project.id);
+										}}
+										className={cn(
+											"rounded-md text-xs font-semibold shrink-0 border-0 cursor-pointer flex items-center justify-center relative",
+											isMobile ? "w-11 h-11" : "w-8 h-8",
+											isCurrent
+												? "bg-accent text-accent-fg"
+												: "bg-accent/15 text-accent hover:text-accent hover:bg-accent/25 border border-accent/20",
+										)}
+									>
+										{letter}
+									</button>
+								);
+							})}
+					</>
+				) : null}
 				<button
 					type="button"
 					title="Add project"
@@ -378,32 +413,174 @@ export function ProjectNavigationPanel({
 							</div>
 						) : null}
 
-						{sortedProjects.map((project) => (
-							<ProjectRow
-								key={project.id}
-								project={project}
-								isCurrent={currentProjectId === project.id}
-								removingProjectId={removingProjectId}
-								onSelect={(projectId) => {
-									onSelectProject(projectId);
-									if (isMobile) {
-										setCollapsed(true);
-									}
-								}}
-								onRemove={(projectId) => {
-									const found = sortedProjects.find((item) => item.id === projectId);
-									if (!found) {
-										return;
-									}
-									setPendingProjectRemoval(found);
-								}}
-							/>
-						))}
+						{(() => {
+							const plainProjects = sortedProjects.filter((p) => !p.epic);
+							const epicProjects = sortedProjects.filter((p) => p.epic);
+							const isSeniorArchitectActive = plainProjects.some((p) => p.id === currentProjectId);
+
+							return (
+								<>
+									{/* Senior Architect */}
+									<div className="flex flex-col gap-1 mb-2">
+										<div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-2 py-1 select-none">
+											Senior Architect
+										</div>
+										<div
+											role="button"
+											tabIndex={0}
+											onClick={() => {
+												const mainlineProject = plainProjects[0];
+												if (mainlineProject) {
+													onSelectProject(mainlineProject.id);
+													if (isMobile) {
+														setCollapsed(true);
+													}
+												}
+											}}
+											onKeyDown={(e) => {
+												if (e.key === "Enter" || e.key === " ") {
+													e.preventDefault();
+													const mainlineProject = plainProjects[0];
+													if (mainlineProject) {
+														onSelectProject(mainlineProject.id);
+														if (isMobile) {
+															setCollapsed(true);
+														}
+													}
+												}
+											}}
+											className={cn(
+												"kb-project-row cursor-pointer rounded-md flex items-center gap-2",
+												isSeniorArchitectActive && "kb-project-row-selected",
+											)}
+											style={{ padding: "6px 8px" }}
+										>
+											<Command
+												size={14}
+												className={cn(
+													"shrink-0",
+													isSeniorArchitectActive ? "text-accent-fg" : "text-text-secondary",
+												)}
+											/>
+											<div className="flex-1 min-w-0">
+												<div
+													className={cn(
+														"font-medium text-sm whitespace-nowrap overflow-hidden text-ellipsis",
+														isSeniorArchitectActive ? "text-accent-fg" : "text-text-primary",
+													)}
+												>
+													Senior Architect Chat
+												</div>
+												<div
+													className={cn(
+														"text-[10px] whitespace-nowrap overflow-hidden text-ellipsis font-mono",
+														isSeniorArchitectActive ? "text-accent-fg/60" : "text-text-secondary",
+													)}
+												>
+													production-line
+												</div>
+											</div>
+										</div>
+									</div>
+
+									{/* Epics Group */}
+									{epicProjects.length > 0 ? (
+										<div className="flex flex-col gap-1 mb-2">
+											<div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-2 py-1 select-none">
+												Epics
+											</div>
+											{epicProjects.map((epicProject) => {
+												const isCurrent = currentProjectId === epicProject.id;
+												const counts = `${epicProject.taskCounts.backlog}·${epicProject.taskCounts.in_progress}·${epicProject.taskCounts.review}`;
+
+												return (
+													<div
+														key={epicProject.id}
+														role="button"
+														tabIndex={0}
+														onClick={() => {
+															onSelectProject(epicProject.id);
+															if (isMobile) {
+																setCollapsed(true);
+															}
+														}}
+														onKeyDown={(e) => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																onSelectProject(epicProject.id);
+																if (isMobile) {
+																	setCollapsed(true);
+																}
+															}
+														}}
+														className={cn(
+															"kb-project-row cursor-pointer rounded-md flex items-center justify-between",
+															isCurrent && "kb-project-row-selected",
+														)}
+														style={{ padding: "6px 8px" }}
+													>
+														<div className="flex-1 min-w-0 flex items-center gap-1.5 justify-between w-full">
+															<span
+																className={cn(
+																	"font-medium text-sm truncate",
+																	isCurrent ? "text-accent-fg" : "text-text-primary",
+																)}
+															>
+																{epicProject.epic?.name ?? epicProject.name}
+															</span>
+															<span
+																className={cn(
+																	"font-mono text-xs shrink-0 flex items-center gap-1.5",
+																	isCurrent ? "text-accent-fg/80" : "text-text-secondary",
+																)}
+															>
+																<span className="opacity-75">{counts}</span>
+																<span className="text-status-green font-bold">✓</span>
+															</span>
+														</div>
+													</div>
+												);
+											})}
+										</div>
+									) : null}
+
+									{/* Plain Projects Group */}
+									{plainProjects.length > 0 ? (
+										<div className="flex flex-col gap-1">
+											<div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-2 py-1 select-none">
+												Projects
+											</div>
+											{plainProjects.map((project) => (
+												<ProjectRow
+													key={project.id}
+													project={project}
+													isCurrent={currentProjectId === project.id}
+													removingProjectId={removingProjectId}
+													onSelect={(projectId) => {
+														onSelectProject(projectId);
+														if (isMobile) {
+															setCollapsed(true);
+														}
+													}}
+													onRemove={(projectId) => {
+														const found = plainProjects.find((item) => item.id === projectId);
+														if (!found) {
+															return;
+														}
+														setPendingProjectRemoval(found);
+													}}
+												/>
+											))}
+										</div>
+									) : null}
+								</>
+							);
+						})()}
 
 						{!isLoadingProjects ? (
 							<button
 								type="button"
-								className="kb-project-row flex cursor-pointer items-center gap-1.5 rounded-md text-text-secondary hover:text-text-primary"
+								className="kb-project-row flex cursor-pointer items-center gap-1.5 rounded-md text-text-secondary hover:text-text-primary mt-2"
 								style={{ padding: "6px 8px" }}
 								onClick={onAddProject}
 								disabled={removingProjectId !== null}

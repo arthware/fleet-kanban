@@ -11,6 +11,8 @@ export interface AgentChatWorkspaceInput {
 	architectWorkspaceId: string | null;
 	/** The currently selected project board. */
 	currentProjectId: string | null;
+	/** The full projects list, used to check if the current project is an active epic. */
+	projects?: Array<{ id: string; epic?: any }>;
 }
 
 export interface AgentChatWorkspace {
@@ -26,8 +28,12 @@ export interface AgentChatWorkspace {
 export function resolveAgentChatWorkspace({
 	architectWorkspaceId,
 	currentProjectId,
+	projects = [],
 }: AgentChatWorkspaceInput): AgentChatWorkspace {
-	const agentChatWorkspaceId = architectWorkspaceId ?? currentProjectId;
+	const currentProject = projects.find((p) => p.id === currentProjectId);
+	const isCurrentEpic = Boolean(currentProject?.epic);
+
+	const agentChatWorkspaceId = isCurrentEpic ? currentProjectId : (architectWorkspaceId ?? currentProjectId);
 	const isArchitectChatDetached = agentChatWorkspaceId !== null && agentChatWorkspaceId !== currentProjectId;
 	return { agentChatWorkspaceId, isArchitectChatDetached };
 }

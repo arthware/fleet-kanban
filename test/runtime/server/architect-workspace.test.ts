@@ -202,7 +202,27 @@ describe("selectArchitectAwareProjects", () => {
 		expect(selection.currentProjectId).toBe("tools");
 	});
 
-	it("hides epic workspaces from the selectable projects list", () => {
+	it("includes epic workspaces in selectableWorkspaceIds but excludes them from fallback currentProjectId", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: [
+				{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+				{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+				{
+					workspaceId: "epic-cool-feature",
+					repoPath: "/home/user/code/tools/epics/cool-feature",
+					epic: { name: "Cool Feature", branch: "epic/cool-feature" },
+				},
+			],
+			activeWorkspaceId: "tools",
+			preferredCurrentProjectId: null,
+		});
+
+		expect(selection.architectWorkspaceId).toBe("tools");
+		expect(selection.selectableWorkspaceIds).toEqual(["fleet-kanban", "epic-cool-feature"]);
+		expect(selection.currentProjectId).toBe("fleet-kanban");
+	});
+
+	it("allows explicitly selecting an epic workspace as currentProjectId", () => {
 		const selection = selectArchitectAwareProjects({
 			workspaces: [
 				{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
@@ -214,12 +234,12 @@ describe("selectArchitectAwareProjects", () => {
 				},
 			],
 			activeWorkspaceId: "fleet-kanban",
-			preferredCurrentProjectId: null,
+			preferredCurrentProjectId: "epic-cool-feature",
 		});
 
 		expect(selection.architectWorkspaceId).toBe("tools");
-		expect(selection.selectableWorkspaceIds).toEqual(["fleet-kanban"]);
-		expect(selection.currentProjectId).toBe("fleet-kanban");
+		expect(selection.selectableWorkspaceIds).toEqual(["fleet-kanban", "epic-cool-feature"]);
+		expect(selection.currentProjectId).toBe("epic-cool-feature");
 	});
 });
 

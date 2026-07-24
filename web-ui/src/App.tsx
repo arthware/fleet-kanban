@@ -151,6 +151,7 @@ export default function App(): ReactElement {
 	const { agentChatWorkspaceId, isArchitectChatDetached } = resolveAgentChatWorkspace({
 		architectWorkspaceId,
 		currentProjectId,
+		projects,
 	});
 	// When the architect is a different workspace than the selected board, its live
 	// chat can't ride the board's per-workspace stream, so open a dedicated one.
@@ -968,6 +969,7 @@ export default function App(): ReactElement {
 						selectedTaskBaseRef={selectedCard?.card.baseRef ?? null}
 						showHomeGitSummary={!hasNoProjects && !selectedCard}
 						runningGitAction={selectedCard || hasNoProjects ? null : runningGitAction}
+						isEpic={Boolean(projects.find((p) => p.id === currentProjectId)?.epic)}
 						onGitFetch={
 							selectedCard
 								? undefined

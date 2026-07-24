@@ -7,8 +7,10 @@ import type {
 	RuntimeGitSyncSummary,
 	RuntimeTaskWorkspaceMetadata,
 	RuntimeWorkspaceMetadata,
+	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import { deriveTaskBranchName } from "../core/task-ref";
+import { getWorkspaceEpic } from "../state/workspace-state";
 import type { CardPrRef } from "../workspace/card-pr-url";
 import { listRepoCardPrsByHead } from "../workspace/card-pr-url";
 import { computeGitDirToken } from "../workspace/git-dir-token";
@@ -67,6 +69,7 @@ interface WorkspaceMetadataEntry {
 	// Last `gh` state refresh per task id (epoch ms), keeping stored open PR
 	// re-resolution to at most once per PR_STATE_REFRESH_MIN_MS.
 	lastPrCheckedAtByTaskId: Map<string, number>;
+	epic?: WorkspaceEpicDescriptor | null;
 }
 
 export interface WorkspaceMetadataCardPrCapture {
@@ -241,7 +244,11 @@ async function loadHomeGitMetadata(entry: WorkspaceMetadataEntry): Promise<Cache
 			// State unchanged but refresh the mtime token so the next tick can short-circuit.
 			return { ...entry.homeGit, gitDirToken };
 		}
-		const summary = await getGitSyncSummary(entry.workspacePath, { probe });
+		const epic = entry.epic;
+		const summary = await getGitSyncSummary(entry.workspacePath, {
+			probe,
+			...(epic ? { baseRef: epic.base ?? "production-line" } : {}),
+		});
 		return {
 			summary,
 			stateToken: probe.stateToken,
@@ -538,6 +545,20 @@ export function createWorkspaceMetadataMonitor(
 			const entry = updateWorkspaceEntry({ workspaceId, workspacePath, board });
 			entry.subscriberCount += 1;
 			ensureWorkspaceTimer(workspaceId, entry);
+
+			if (entry.epic === undefined) {
+				// Lazily load epic descriptor once in a non-blocking way
+				getWorkspaceEpic(workspaceId)
+					.then((epic) => {
+						entry.epic = epic;
+						// Trigger a refresh after cached epic resolves so we can recalculate the epic-base diff
+						void refreshWorkspace(workspaceId).catch(() => {});
+					})
+					.catch(() => {
+						entry.epic = null;
+					});
+			}
+
 			// Do NOT block the board's first render on a full git scan of every worktree plus
 			// a sequential gh PR sweep — on a large board that can exceed the snapshot deadline
 			// and leave the client looping on a blank loader. Return the cached snapshot now;
