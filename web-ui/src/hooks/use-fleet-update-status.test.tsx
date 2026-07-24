@@ -18,6 +18,7 @@ interface UseFleetUpdateStatusResult {
 	status: RuntimeFleetUpdateStatusResponse | null;
 	phase: FleetUpdatePhase;
 	apply: () => void;
+	lastCheckedAt: number | null;
 }
 
 const vendorUpToDate: RuntimeFleetUpdateStatusResponse = {
@@ -222,5 +223,21 @@ describe("useFleetUpdateStatus", () => {
 
 		expect(getState().status).toBeNull();
 		expect(getState().phase).toBe("idle");
+	});
+
+	it("given a successful status check, when it mounts, then it records lastCheckedAt", async () => {
+		runtimeConfigQueryMocks.fetchFleetUpdateStatus.mockResolvedValue(vendorBehind);
+
+		const { getState } = await renderHook();
+
+		expect(getState().lastCheckedAt).toEqual(expect.any(Number));
+	});
+
+	it("given the initial status query rejects, when it mounts, then lastCheckedAt stays null", async () => {
+		runtimeConfigQueryMocks.fetchFleetUpdateStatus.mockRejectedValue(new Error("offline"));
+
+		const { getState } = await renderHook();
+
+		expect(getState().lastCheckedAt).toBeNull();
 	});
 });
