@@ -112,6 +112,7 @@ import type {
 	RuntimeWorktreeDeleteResponse,
 	RuntimeWorktreeEnsureRequest,
 	RuntimeWorktreeEnsureResponse,
+	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import {
 	runtimeAgentBudgetResponseSchema,
@@ -220,6 +221,7 @@ import {
 	runtimeWorktreeDeleteResponseSchema,
 	runtimeWorktreeEnsureRequestSchema,
 	runtimeWorktreeEnsureResponseSchema,
+	workspaceEpicDescriptorSchema,
 } from "../core/api-contract";
 
 export interface RuntimeTrpcWorkspaceScope {
@@ -432,6 +434,7 @@ export interface RuntimeTrpcContext {
 			preferredWorkspaceId: string | null,
 			input: RuntimeDirectoryListRequest,
 		) => Promise<RuntimeDirectoryListResponse>;
+		setWorkspaceEpic: (workspaceId: string, epic: WorkspaceEpicDescriptor | null) => Promise<void>;
 	};
 	hooksApi: {
 		ingest: (input: RuntimeHookIngestRequest) => Promise<RuntimeHookIngestResponse>;
@@ -834,6 +837,18 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeDirectoryListResponseSchema)
 			.query(async ({ ctx, input }) => {
 				return await ctx.projectsApi.listDirectoryContents(ctx.requestedWorkspaceId, input);
+			}),
+		setEpic: t.procedure
+			.input(
+				z.object({
+					workspaceId: z.string(),
+					epic: workspaceEpicDescriptorSchema.nullable(),
+				}),
+			)
+			.output(z.object({ ok: z.boolean() }))
+			.mutation(async ({ ctx, input }) => {
+				await ctx.projectsApi.setWorkspaceEpic(input.workspaceId, input.epic);
+				return { ok: true };
 			}),
 	}),
 	hooks: t.router({
