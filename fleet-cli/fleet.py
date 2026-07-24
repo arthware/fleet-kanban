@@ -1019,6 +1019,101 @@ def epic_complete(name: str, repo: str, cfg: dict):
     print(f"\n{GREEN}✓ Epic '{name}' completed and cleaned up!{RESET}")
     return 0
 
+def epic_sync(name: str, repo: str, cfg: dict):
+    rp = _resolve_repo(repo, cfg)
+    if not rp:
+        return 1
+
+    # Verify if server is running
+    port = cfg.get("kanban_port", 3484)
+    running = False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", port))
+        s.close()
+        running = True
+    except Exception:
+        pass
+
+    if not running:
+        print(f"{RED}Error: Kanban board is not running on port {port}.{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"Finding workspace for epic '{name}'...")
+    # Fetch projects
+    projects_res = trpc_call(cfg, "projects.list")
+    if not projects_res:
+        print(f"{RED}Error: Could not retrieve projects from board.{RESET}", file=sys.stderr)
+        return 1
+
+    projects = projects_res.get("projects", [])
+    epic_ws = None
+    for p in projects:
+        if p.get("epic") and p["epic"]["name"] == name:
+            epic_ws = p
+            break
+
+    if not epic_ws:
+        print(f"{RED}Error: No workspace found for epic '{name}' on the running board.{RESET}", file=sys.stderr)
+        return 1
+
+    workspace_id = epic_ws["id"]
+    wt_path = Path(epic_ws["path"])
+    base_branch = epic_ws["epic"].get("base") or "production-line"
+    epic_branch = epic_ws["epic"].get("branch") or f"epic/{name}"
+
+    print(f"Found epic workspace:")
+    print(f"  ID: {workspace_id}")
+    print(f"  Path: {wt_path}")
+    print(f"  Branch: {epic_branch}")
+    print(f"  Base branch: {base_branch}")
+
+    # Confirm HEAD is on the epic branch
+    head_res = git_run(wt_path, ["symbolic-ref", "--short", "HEAD"], check=False)
+    current_branch = head_res.stdout.strip() if head_res.returncode == 0 else ""
+    if current_branch != epic_branch:
+        print(f"{RED}Error: HEAD in worktree is at '{current_branch or 'DETACHED'}', expected '{epic_branch}'. Never repointing HEAD automatically.{RESET}", file=sys.stderr)
+        return 1
+
+    # Fetch origin base branch
+    print(f"Fetching origin {base_branch}...")
+    git_run(wt_path, ["fetch", "origin", base_branch])
+
+    # Record HEAD before merge
+    old_sha = git_run(wt_path, ["rev-parse", "HEAD"]).stdout.strip()
+
+    # Try fast-forward only merge
+    print(f"Trying fast-forward merge of origin/{base_branch}...")
+    ff_res = git_run(wt_path, ["merge", "--ff-only", f"origin/{base_branch}"], check=False)
+
+    if ff_res.returncode != 0:
+        print(f"Diverged; performing a real merge...")
+        merge_res = git_run(wt_path, ["merge", "--no-edit", f"origin/{base_branch}"], check=False)
+        if merge_res.returncode != 0:
+            # Conflict detected! Get the conflicting files.
+            conflicts = git_run(wt_path, ["diff", "--name-only", "--diff-filter=U"], check=False).stdout.strip()
+            # Abort merge
+            git_run(wt_path, ["merge", "--abort"])
+            print(f"{RED}Error: Merge conflicts detected in the following files:\n{conflicts}\nMerge aborted.{RESET}", file=sys.stderr)
+            return 1
+
+    # Push updated branch to origin if we actually brought in new changes
+    new_sha = git_run(wt_path, ["rev-parse", "HEAD"]).stdout.strip()
+    if old_sha == new_sha:
+        print(f"{GREEN}✓ Already up to date.{RESET}")
+    else:
+        print(f"Pushing updated '{epic_branch}' to origin...")
+        git_run(wt_path, ["push", "origin", epic_branch])
+        
+        log_res = git_run(wt_path, ["log", "--oneline", f"{old_sha}..{new_sha}"])
+        commits_list = log_res.stdout.strip().splitlines()
+        print(f"\n{GREEN}✓ Synced successfully! {len(commits_list)} commit(s) integrated.{RESET}")
+        for c in commits_list:
+            print(f"  {c}")
+
+    return 0
+
 def cmd_epic(args_list):
     ap = argparse.ArgumentParser(description="Manage epic workspaces")
     sub = ap.add_subparsers(dest="op", required=True)
@@ -1032,6 +1127,10 @@ def cmd_epic(args_list):
     p_complete.add_argument("name", help="Name of the epic")
     p_complete.add_argument("--repo", help="Target repository name (default: first in project)")
 
+    p_sync = sub.add_parser("sync")
+    p_sync.add_argument("name", help="Name of the epic")
+    p_sync.add_argument("--repo", help="Target repository name (default: first in project)")
+
     try:
         parsed = ap.parse_args(args_list)
     except SystemExit as e:
@@ -1042,6 +1141,8 @@ def cmd_epic(args_list):
         return epic_create(parsed.name, parsed.repo, parsed.base, cfg)
     elif parsed.op == "complete":
         return epic_complete(parsed.name, parsed.repo, cfg)
+    elif parsed.op == "sync":
+        return epic_sync(parsed.name, parsed.repo, cfg)
     return 1
 
 
