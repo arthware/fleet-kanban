@@ -70,6 +70,22 @@ Object.defineProperty(globalThis, "IntersectionObserver", {
 	value: MockIntersectionObserver,
 });
 
+// jsdom does not implement ResizeObserver, which @radix-ui/react-popper (used by
+// Popover/DropdownMenu/Select content positioning) requires to mount.
+class MockResizeObserver implements ResizeObserver {
+	disconnect(): void {}
+
+	observe(_target: Element): void {}
+
+	unobserve(_target: Element): void {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+	writable: true,
+	configurable: true,
+	value: MockResizeObserver,
+});
+
 // jsdom does not implement window.matchMedia. Provide a minimal stub so that
 // hooks like useIsMobile and react-use's useMedia work during tests.
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {

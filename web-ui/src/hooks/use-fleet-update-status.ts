@@ -13,6 +13,8 @@ interface UseFleetUpdateStatusResult {
 	status: RuntimeFleetUpdateStatusResponse | null;
 	phase: FleetUpdatePhase;
 	apply: () => void;
+	/** Client-side timestamp of the last successful status check (the wire response carries no timestamp). */
+	lastCheckedAt: number | null;
 }
 
 /**
@@ -25,6 +27,7 @@ interface UseFleetUpdateStatusResult {
 export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 	const [status, setStatus] = useState<RuntimeFleetUpdateStatusResponse | null>(null);
 	const [phase, setPhase] = useState<FleetUpdatePhase>("idle");
+	const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 	const phaseRef = useRef<FleetUpdatePhase>("idle");
 	phaseRef.current = phase;
 
@@ -41,6 +44,7 @@ export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 					return;
 				}
 				setStatus(nextStatus);
+				setLastCheckedAt(Date.now());
 			} catch {
 				// Best-effort read; keep serving the last known status.
 			}
@@ -109,6 +113,7 @@ export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 				try {
 					const nextStatus = await fetchFleetUpdateStatus(null);
 					setStatus(nextStatus);
+					setLastCheckedAt(Date.now());
 				} catch {
 					// Best-effort refresh; keep the previous status.
 				}
@@ -118,5 +123,5 @@ export function useFleetUpdateStatus(): UseFleetUpdateStatusResult {
 		})();
 	}, []);
 
-	return { status, phase, apply };
+	return { status, phase, apply, lastCheckedAt };
 }
