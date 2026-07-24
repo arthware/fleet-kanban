@@ -897,48 +897,44 @@ export function BoardCard({
 										</p>
 									</div>
 								) : null}
-								{isPlanCard || badgeInfo || completionPolicyBadgeLabel ? (
-									<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
-										{isPlanCard ? (
-											<span
-												className={cn(
-													"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
-													isTrashCard
-														? "border-border text-text-tertiary bg-surface-1"
-														: "border-status-purple/30 bg-status-purple/10 text-status-purple",
-												)}
-											>
-												Plan
+								<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
+									<span
+										className={cn(
+											"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+											isTrashCard
+												? "border-border text-text-tertiary bg-surface-1"
+												: "border-status-purple/30 bg-status-purple/10 text-status-purple",
+										)}
+									>
+										{card.cardType ?? "feature"}
+									</span>
+									{badgeInfo ? (
+										<span
+											className={cn(
+												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+												badgeInfo.colorClasses,
+											)}
+										>
+											<Bot size={12} className="shrink-0" />
+											<span className="truncate">
+												{badgeInfo.shortLabel}
+												{badgeInfo.modelText ? (
+													<>
+														{badgeInfo.shortLabel && " "}
+														<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
+															{badgeInfo.modelText}
+														</span>
+													</>
+												) : null}
 											</span>
-										) : null}
-										{badgeInfo ? (
-											<span
-												className={cn(
-													"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-													badgeInfo.colorClasses,
-												)}
-											>
-												<Bot size={12} className="shrink-0" />
-												<span className="truncate">
-													{badgeInfo.shortLabel}
-													{badgeInfo.modelText ? (
-														<>
-															{badgeInfo.shortLabel && " "}
-															<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
-																{badgeInfo.modelText}
-															</span>
-														</>
-													) : null}
-												</span>
-											</span>
-										) : null}
-										{completionPolicyBadgeLabel ? (
-											<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
-												{completionPolicyBadgeLabel}
-											</span>
-										) : null}
-									</div>
-								) : null}
+										</span>
+									) : null}
+									{completionPolicyBadgeLabel ? (
+										<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+											{completionPolicyBadgeLabel}
+										</span>
+									) : null}
+								</div>
 								{!isDoneCard && sessionActivity ? (
 									<div
 										className="flex gap-1.5 items-start mt-[6px]"

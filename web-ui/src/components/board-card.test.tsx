@@ -617,23 +617,26 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("default");
 	});
 
-	it("shows a purple Plan badge for start-in-plan-mode cards", async () => {
+	it("shows a purple card-type badge on a card", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ startInPlanMode: true })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ cardType: "bugfix" })} index={0} columnId="backlog" />);
 		});
 
-		const planBadge = findSpanByExactText(container, "Plan");
-		expect(planBadge).toBeDefined();
-		expect(planBadge?.className).toContain("border-status-purple/30");
-		expect(planBadge?.className).toContain("text-status-purple");
+		const badge = findSpanByExactText(container, "bugfix");
+		expect(badge).toBeDefined();
+		expect(badge?.className).toContain("border-status-purple/30");
+		expect(badge?.className).toContain("text-status-purple");
 	});
 
-	it("does not show a kind badge for build cards", async () => {
+	it("defaults the card-type badge to feature when unset", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ startInPlanMode: false })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ cardType: undefined })} index={0} columnId="backlog" />);
 		});
 
-		expect(findSpanByExactText(container, "Plan")).toBeUndefined();
+		const badge = findSpanByExactText(container, "feature");
+		expect(badge).toBeDefined();
+		expect(badge?.className).toContain("border-status-purple/30");
+		expect(badge?.className).toContain("text-status-purple");
 	});
 
 	it("shows an Auto-PR completion-policy badge for build cards configured to self-open a PR", async () => {
