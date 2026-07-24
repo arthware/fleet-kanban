@@ -14,7 +14,6 @@ import { buildKanbanCommandParts } from "../core/kanban-command";
 import { quoteShellArg } from "../core/shell";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
-import { prependPlanCardDirective } from "../prompts/plan-card-directive";
 import { getRuntimeHomePath } from "../state/workspace-state";
 import { runGit } from "../workspace/git-utils";
 import { parseGithubRemoteNameWithOwner } from "../workspace/repo-name";
@@ -902,11 +901,7 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--append-system-prompt", appendedSystemPrompt);
 		}
 
-		const withPromptLaunch = withPrompt(
-			args,
-			prependPlanCardDirective(input.prompt, input.startInPlanMode),
-			"append",
-		);
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -958,7 +953,7 @@ const cursorAdapter: AgentSessionAdapter = {
 				architectContextPreamble: input.architectContextPreamble,
 			}),
 		);
-		const withPromptLaunch = withPrompt(args, prependPlanCardDirective(prompt, input.startInPlanMode), "append");
+		const withPromptLaunch = withPrompt(args, prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -1044,7 +1039,7 @@ const codexAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const prompt = prependPlanCardDirective(input.prompt, input.startInPlanMode);
+		const prompt = input.prompt;
 		const trimmed = prompt.trim();
 		if (trimmed) {
 			codexArgs.push(trimmed);
@@ -1697,11 +1692,7 @@ const clineAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const withPromptLaunch = withPrompt(
-			args,
-			prependPlanCardDirective(input.prompt, input.startInPlanMode),
-			"append",
-		);
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {

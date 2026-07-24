@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
-import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
@@ -241,7 +240,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		// then
 		expect(launch.args).not.toContain("--plan");
 		expect(launch.args).toContain("--force");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design Cursor plan handling`);
+		expect(launch.args.at(-1)).toBe("Design Cursor plan handling");
 	});
 
 	it("given cursor-agent starts a normal card, then Cursor launch args are unchanged", async () => {
@@ -576,7 +575,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 			startInPlanMode: true,
 		});
 
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Audit the deployment pipeline`);
+		expect(launch.args.at(-1)).toBe("Audit the deployment pipeline");
 		expect(launch.args.join(" ")).not.toContain("/plan");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
@@ -679,7 +678,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		});
 
 		expect(launch.args).not.toContain("--plan");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design native Cline plan handling`);
+		expect(launch.args.at(-1)).toBe("Design native Cline plan handling");
 	});
 
 	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
@@ -926,7 +925,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).not.toContain("plan");
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--allow-dangerously-skip-permissions");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design the migration path`);
+		expect(launch.args.at(-1)).toBe("Design the migration path");
 		expect(launch.deferredStartupInput).toBeUndefined();
 		expect(launch.env.CLAUDE_CODE_ENABLE_AUTO_MODE).toBe("1");
 	});
@@ -946,7 +945,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 
 		const permissionModeIndex = launch.args.indexOf("--permission-mode");
 		expect(launch.args[permissionModeIndex + 1]).not.toBe("plan");
-		expect(launch.args.at(-1)).toBe(PLAN_CARD_PROMPT_DIRECTIVE.trim());
+		expect(launch.args.at(-1)).toBe("auto");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
@@ -965,7 +964,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--permission-mode");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Document the approach`);
+		expect(launch.args.at(-1)).toBe("Document the approach");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
@@ -1412,7 +1411,7 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 			expect(launch.args).not.toContain("--permission-mode");
 			expect(launch.args).not.toContain("plan");
 			expect(launch.args).toContain("--dangerously-skip-permissions");
-			expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Write the rollout design`);
+			expect(launch.args.at(-1)).toBe("Write the rollout design");
 			expect(launch.deferredStartupInput).toBeUndefined();
 			expect(findBashGuardHook(readClaudeSettings())).toBeDefined();
 		} finally {
