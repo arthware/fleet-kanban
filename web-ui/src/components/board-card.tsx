@@ -35,7 +35,6 @@ import { useTaskDesignDoc } from "@/hooks/use-task-design-doc";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
-import { getTaskAutoReviewCancelButtonLabel } from "@/types";
 import { cardKind, getTaskCompletionPolicyBadgeLabel } from "@/utils/card-completion-policy";
 import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
@@ -533,8 +532,6 @@ export function BoardCard({
 	const designDoc = useTaskDesignDoc({ card, workspaceId: workspaceId ?? null, workspacePath });
 	const showImplementHere =
 		columnId === "review" && Boolean(onImplementHere) && Boolean(designDoc.data?.exists && designDoc.data.path);
-	const cancelAutomaticActionLabel =
-		!isTrashCard && card.autoReviewEnabled ? getTaskAutoReviewCancelButtonLabel(card.autoReviewMode) : null;
 	const trashRestoreLabel =
 		sessionSummary?.agentSessionLifecycle === "gone"
 			? "Start fresh"
@@ -1077,20 +1074,6 @@ export function BoardCard({
 											Open PR
 										</Button>
 									</div>
-								) : null}
-								{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
-									<Button
-										size="sm"
-										fill
-										style={{ marginTop: 12 }}
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onCancelAutomaticAction(card.id);
-										}}
-									>
-										{cancelAutomaticActionLabel}
-									</Button>
 								) : null}
 							</div>
 						</div>
