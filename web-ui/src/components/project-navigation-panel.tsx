@@ -323,7 +323,11 @@ export function ProjectNavigationPanel({
 						/>
 					) : (
 						<div className="flex items-center gap-1.5 shrink-0">
-							<FleetUpdateReadout />
+							{/* Fixed-size slot: keeps the budget readout's position stable whether or
+							    not an update icon is currently rendered inside it. */}
+							<div className="flex h-7 w-7 shrink-0 items-center justify-center">
+								<FleetUpdateReadout />
+							</div>
 							<AgentBudgetReadout budget={agentBudget ?? null} />
 						</div>
 					)}
