@@ -283,6 +283,82 @@ describe("createHooksApi", () => {
 		});
 	});
 
+	describe("given an auto-PR card reaches review", () => {
+		it("when the hook is ingested, then it fires the PR-ensure step and the ACK returns ok even if that step rejects", async () => {
+			// given
+			const transitionedSummary = createSummary({ state: "awaiting_review", reviewReason: "hook" });
+			const manager = {
+				getSummary: vi.fn(() => createSummary({ state: "running" })),
+				transitionToReview: vi.fn(() => transitionedSummary),
+				transitionToRunning: vi.fn(),
+				applyHookActivity: vi.fn(),
+				applyTurnCheckpoint: vi.fn(),
+			} as unknown as TerminalSessionManager;
+
+			const ensureAutoReviewPrForTask = vi.fn(async () => {
+				throw new Error("push/PR failed");
+			});
+
+			const api = createHooksApi({
+				getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+				ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+				broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+				broadcastTaskReadyForReview: vi.fn(),
+				ensureAutoReviewPrForTask,
+			});
+
+			// when
+			const response = await api.ingest({
+				taskId: "task-1",
+				workspaceId: "workspace-1",
+				event: "to_review",
+			});
+
+			// then
+			expect(response).toEqual({ ok: true });
+			await vi.waitFor(() => {
+				expect(ensureAutoReviewPrForTask).toHaveBeenCalledWith({
+					workspaceId: "workspace-1",
+					taskId: "task-1",
+					cwd: "/tmp/worktree",
+				});
+			});
+		});
+
+		it("when the PR-ensure step hangs, then the response resolves without waiting for it", async () => {
+			// given
+			const transitionedSummary = createSummary({ state: "awaiting_review", reviewReason: "hook" });
+			const manager = {
+				getSummary: vi.fn(() => createSummary({ state: "running" })),
+				transitionToReview: vi.fn(() => transitionedSummary),
+				transitionToRunning: vi.fn(),
+				applyHookActivity: vi.fn(),
+				applyTurnCheckpoint: vi.fn(),
+			} as unknown as TerminalSessionManager;
+
+			const ensureAutoReviewPrForTask = vi.fn(() => new Promise<void>(() => {}));
+
+			const api = createHooksApi({
+				getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+				ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+				broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+				broadcastTaskReadyForReview: vi.fn(),
+				ensureAutoReviewPrForTask,
+			});
+
+			// when
+			const response = await api.ingest({
+				taskId: "task-1",
+				workspaceId: "workspace-1",
+				event: "to_review",
+			});
+
+			// then
+			expect(response).toEqual({ ok: true });
+			expect(ensureAutoReviewPrForTask).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe("given the turn checkpoint capture is slow", () => {
 		it("when a to_review hook is ingested, then the response resolves without waiting for the checkpoint", async () => {
 			// given

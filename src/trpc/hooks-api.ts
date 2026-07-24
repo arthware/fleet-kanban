@@ -23,6 +23,11 @@ export interface CreateHooksApiDependencies {
 		turn: number;
 	}) => Promise<RuntimeTaskTurnCheckpoint>;
 	deleteTaskTurnCheckpointRef?: (input: { cwd: string; ref: string }) => Promise<void>;
+	// System backstop that guarantees an `autoReview=pr` card reaches Review with its
+	// branch pushed and a PR open, independent of whether the agent opened one itself.
+	// Fired fire-and-forget on `to_review`; a no-op for non-auto-PR cards and the home
+	// agent. Optional so lightweight test contexts can omit or stub it.
+	ensureAutoReviewPrForTask?: (input: { workspaceId: string; taskId: string; cwd: string }) => Promise<unknown>;
 }
 
 function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event: RuntimeHookEvent): boolean {
@@ -121,6 +126,21 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 						})
 						.catch(() => {
 							// Best effort checkpointing only.
+						});
+
+					// Fire-and-forget, mirroring the checkpoint above: the review transition
+					// already happened, so the hook ACK must not block on push+PR. This is the
+					// system backstop that makes commit-but-no-PR structurally impossible for an
+					// auto-PR card — it no-ops for every other card. A push/PR failure resolves
+					// as a structured result (never a throw), so it can never crash the hook.
+					void deps
+						.ensureAutoReviewPrForTask?.({
+							workspaceId,
+							taskId,
+							cwd: checkpointCwd,
+						})
+						.catch(() => {
+							// Best effort PR backstop only.
 						});
 				}
 

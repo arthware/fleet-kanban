@@ -45,6 +45,7 @@ import { createProjectsApi } from "../trpc/projects-api";
 import { createRuntimeApi } from "../trpc/runtime-api";
 import { createWorkspaceApi } from "../trpc/workspace-api";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets";
+import { ensureAutoReviewPrForReview } from "./ensure-auto-review-pr";
 import { handleHttpRequest, handleSocketUpgrade } from "./middleware";
 import type { RuntimeStateHub } from "./runtime-state-hub";
 import { sumInProgressTaskCounts, type WorkspaceRegistry } from "./workspace-registry";
@@ -253,6 +254,8 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				notifyTaskReadyForReview: async ({ workspaceId, workspacePath, taskId }) => {
 					await runtimeApi.notifyTaskReadyForReview({ workspaceId, workspacePath }, { taskId });
 				},
+				ensureAutoReviewPrForTask: ({ workspaceId, taskId, cwd }) =>
+					ensureAutoReviewPrForReview({ workspaceId, taskId, cwd }),
 			}),
 		};
 	};
