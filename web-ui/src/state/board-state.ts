@@ -23,6 +23,7 @@ export interface TaskDraft {
 	title?: string;
 	prompt: string;
 	startInPlanMode?: boolean;
+	cardType?: string;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
@@ -175,6 +176,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		title?: unknown;
 		prompt?: unknown;
 		startInPlanMode?: unknown;
+		cardType?: unknown;
 		autoReviewEnabled?: unknown;
 		autoReviewMode?: unknown;
 		images?: unknown;
@@ -227,6 +229,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		title,
 		prompt,
 		startInPlanMode: typeof card.startInPlanMode === "boolean" ? card.startInPlanMode : false,
+		cardType: typeof card.cardType === "string" ? card.cardType : undefined,
 		autoReviewEnabled,
 		...(autoReviewEnabled ? { autoReviewMode } : {}),
 		images: normalizeTaskImages(card.images),

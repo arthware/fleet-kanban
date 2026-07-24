@@ -51,6 +51,7 @@ export interface BoardCard {
 	title: string;
 	prompt: string;
 	startInPlanMode: boolean;
+	cardType?: string;
 	autoReviewEnabled: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
