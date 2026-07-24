@@ -1,13 +1,15 @@
 # Cards are typed; a card type is a per-lane skill pipeline
 
+> **Shipped** — see [`docs/card-types.md`](../card-types.md) for the authoritative user and authoring guide.
+
 **Ref / slug:** This card set no external issue ref and dictated the deliverable path explicitly:
 `docs/design/card-types-skill-pipeline.md` (ref-less descriptive slug `card-types-skill-pipeline`).
 If a Linear/GitHub issue is later attached, rename to `<ISSUE>-card-types-skill-pipeline.md`.
 
-**Status:** design (no implementation in this card) · **Epic branch:** `epic/card-types` (off
-`production-line`) · **Implementation agent:** Gemini (Codex budget exhausted).
+**Status:** implemented (via PRs #127, #128, #129, #131) · **Epic branch:** `epic/card-types` (off
+`production-line`) · **Implementation agent:** Gemini.
 
-This doc **replaces** the seed note at the same path. The architectural direction and every open
+This doc was the initial spec and build plan for the feature. The architectural direction and every open
 decision (D1–D5) are **locked** — see [Locked decisions](#locked-decisions). This doc turns them into
 a buildable spec + a file-by-file build plan. It does **not** implement the feature.
 

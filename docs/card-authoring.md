@@ -43,6 +43,7 @@ title: Add the widget            # optional — see "Title" below
 agent: codex                     # codex | claude (any configured agent id, or `default`)
 model: claude-haiku-4-5          # optional per-card model override
 skill: fleet-smoke               # optional Agent Skills / SKILL.md pointer
+card-type: feature               # optional card workflow type (defaults to `feature`)
 base-ref: main                   # optional — defaults to the current branch
 auto-review: pr                  # pr | off — DEFAULT pr (see below)
 plan: false                      # optional — start in plan mode (default false)
@@ -69,6 +70,7 @@ frontmatter is treated as a bare prompt.
 | `agent`           | `--agent-id`                     | `default` clears the override (workspace default). |
 | `model`           | `--agent-model`                  | Per-card model for the CLI agent. |
 | `skill`           | `--skill`                        | Per-card Agent Skills / `SKILL.md` pointer; only the skill name is injected into the launch prompt. |
+| `card-type`       | `--card-type`                    | Workflow card type; alias: `cardType` (defaults to `feature`). |
 | `base-ref`        | `--base-ref`                     | Defaults to the current branch. |
 | `auto-review`     | `--auto-review-enabled` + `--auto-review-mode` | `pr` / `off`. Legacy `commit` is treated as off. |
 | `plan`            | `--start-in-plan-mode`           | Boolean. |
