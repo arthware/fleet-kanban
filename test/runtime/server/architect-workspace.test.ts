@@ -201,6 +201,26 @@ describe("selectArchitectAwareProjects", () => {
 		expect(selection.selectableWorkspaceIds).toEqual(["tools"]);
 		expect(selection.currentProjectId).toBe("tools");
 	});
+
+	it("hides epic workspaces from the selectable projects list", () => {
+		const selection = selectArchitectAwareProjects({
+			workspaces: [
+				{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+				{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+				{
+					workspaceId: "epic-cool-feature",
+					repoPath: "/home/user/code/tools/epics/cool-feature",
+					epic: { name: "Cool Feature", branch: "epic/cool-feature" },
+				},
+			],
+			activeWorkspaceId: "fleet-kanban",
+			preferredCurrentProjectId: null,
+		});
+
+		expect(selection.architectWorkspaceId).toBe("tools");
+		expect(selection.selectableWorkspaceIds).toEqual(["fleet-kanban"]);
+		expect(selection.currentProjectId).toBe("fleet-kanban");
+	});
 });
 
 describe("resolveArchitectHomeAgentWorkspaceId", () => {
@@ -373,6 +393,25 @@ describe("buildArchitectContextPreamble", () => {
 		expect(preamble).toContain("fleet-kanban (/home/user/code/tools/fleet-kanban)");
 		expect(preamble).not.toContain("fleet task ls");
 	});
+
+	it("lists active epics in the preamble when present", () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+			{
+				workspaceId: "epic-foo",
+				repoPath: "/home/user/code/tools/epics/foo",
+				epic: { name: "Foo Feature", branch: "epic/foo" },
+			},
+		];
+
+		const preamble = buildArchitectContextPreamble(classifyArchitectWorkspace(workspaces), workspaces, null);
+
+		expect(preamble).toContain("# Active Epics");
+		expect(preamble).toContain(
+			"- Foo Feature (branch: epic/foo, workspace: epic-foo, path: /home/user/code/tools/epics/foo)",
+		);
+	});
 });
 
 describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
@@ -467,5 +506,58 @@ describe("resolveHomeAgentContext (home-agent initial-context seam)", () => {
 		expect(context.cwd).toBe("/home/user/code/tools");
 		expect(context.architectContextPreamble).toBe("");
 		expect(context.fleetToolsWarning).toBeNull();
+	});
+
+	it("seeds an epic-marked workspace's home agent with the Epic-Owner preamble and fleet tools", async () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+			{
+				workspaceId: "epic-feature",
+				repoPath: "/home/user/code/tools/epics/feature",
+				epic: { name: "My Epic Feature", branch: "epic/feature" },
+			},
+		];
+
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "epic-feature",
+				workspacePath: "/home/user/code/tools/epics/feature",
+				listWorkspaces: async () => workspaces,
+			},
+			provideFleetTools,
+		);
+
+		expect(context.cwd).toBe("/home/user/code/tools/epics/feature");
+		expect(context.architectContextPreamble).toContain("# Epic Owner Workspace");
+		expect(context.architectContextPreamble).toContain('You are the Epic Owner for the epic "My Epic Feature"');
+		expect(context.architectContextPreamble).toContain("epic/feature");
+		expect(context.architectContextPreamble).toContain("fleet task ls");
+		expect(context.fleetToolsWarning).toBeNull();
+	});
+
+	it("seeds an epic-marked workspace's home agent with the Epic-Owner preamble and a warning when the fleet CLI is unavailable", async () => {
+		const workspaces = [
+			{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+			{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+			{
+				workspaceId: "epic-feature",
+				repoPath: "/home/user/code/tools/epics/feature",
+				epic: { name: "My Epic Feature", branch: "epic/feature" },
+			},
+		];
+
+		const context = await resolveHomeAgentContext(
+			{
+				workspaceId: "epic-feature",
+				workspacePath: "/home/user/code/tools/epics/feature",
+				listWorkspaces: async () => workspaces,
+			},
+			fleetUnavailable,
+		);
+
+		expect(context.architectContextPreamble).toContain("# Epic Owner Workspace");
+		expect(context.architectContextPreamble).not.toContain("fleet task ls");
+		expect(context.fleetToolsWarning).toContain("the fleet CLI was not found on PATH");
 	});
 });

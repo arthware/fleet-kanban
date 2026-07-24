@@ -9,13 +9,14 @@
 // See docs/design/architect-steering.md §3 and §5 (Cards A1, A2).
 
 import path from "node:path";
-
+import type { WorkspaceEpicDescriptor } from "../core/api-contract";
 import { isPathWithinRoot } from "../workspace/path-sandbox";
 import { type FleetAgentHelpResult, runFleetAgentHelp as runFleetAgentHelpViaCli } from "./fleet-cli";
 
 export interface RegisteredWorkspace {
 	workspaceId: string;
 	repoPath: string;
+	epic?: WorkspaceEpicDescriptor;
 }
 
 export interface ArchitectClassification {
@@ -180,8 +181,21 @@ ${list}
 
 They live as subdirectories of your workspace, so you can read across them with your normal file tools.`;
 
+	const activeEpics = workspaces.filter((ws) => ws.epic);
+	let epicsSection = "";
+	if (activeEpics.length > 0) {
+		const epicList = activeEpics
+			.map(
+				(ws) =>
+					`- ${ws.epic!.name} (branch: ${ws.epic!.branch}, workspace: ${ws.workspaceId}, path: ${ws.repoPath})`,
+			)
+			.join("\n");
+		epicsSection = `\n\n# Active Epics\n\nThere are active epics running on integration branches in the workspace:\n${epicList}`;
+	}
+
 	const tools = fleetToolsHelp?.trim();
-	return tools ? `${subRepos}\n\n${tools}` : subRepos;
+	const body = tools ? `${subRepos}\n\n${tools}` : subRepos;
+	return epicsSection ? `${body}${epicsSection}` : body;
 }
 
 export interface SelectArchitectAwareProjectsInput {
@@ -217,7 +231,7 @@ export function selectArchitectAwareProjects(
 	input: SelectArchitectAwareProjectsInput,
 ): ArchitectAwareProjectsSelection {
 	const { architectWorkspaceId } = classifyArchitectWorkspace(input.workspaces);
-	const selectable = input.workspaces.filter((ws) => ws.workspaceId !== architectWorkspaceId);
+	const selectable = input.workspaces.filter((ws) => ws.workspaceId !== architectWorkspaceId && !ws.epic);
 	const selectableWorkspaceIds = selectable.map((ws) => ws.workspaceId);
 
 	const fallbackProjectId =
@@ -330,6 +344,32 @@ export async function resolveHomeAgentContext(
 		repoPath: input.workspacePath,
 		classification,
 	});
+
+	const currentWorkspace = workspaces.find((ws) => ws.workspaceId === input.workspaceId);
+	if (currentWorkspace?.epic) {
+		const fleet = await runFleetAgentHelp(cwd);
+		const epic = currentWorkspace.epic;
+		const baseBranch = epic.base ?? "production-line";
+
+		const epicPreamble = `# Epic Owner Workspace
+
+You are the Epic Owner for the epic "${epic.name}".
+You are scoped to this epic's integration workspace (path: ${currentWorkspace.repoPath}).
+
+Your mandate is to:
+1. Decompose the epic requirements into smaller, high-quality implementation cards.
+2. Steer, build, and verify these cards, ensuring they are branched off and targeted to the epic branch: \`${epic.branch}\`.
+3. Land completed cards into the epic branch (\`${epic.branch}\`) using \`fleet xtools land\`.
+4. Keep the epic branch integrated, compiled, and green.
+5. Once the entire epic is complete, open the final integration PR: \`${epic.branch} → ${baseBranch}\`.
+
+Hard Invariant: The epic workspace MUST stay checked out on the epic branch \`${epic.branch}\`. Do not repoint this workspace checkout.`;
+
+		const tools = fleet.ok ? fleet.instructions : null;
+		const architectContextPreamble = tools ? `${epicPreamble}\n\n${tools}` : epicPreamble;
+		const fleetToolsWarning = fleet.ok ? null : describeMissingFleetTools(fleet.error);
+		return { cwd, architectContextPreamble, fleetToolsWarning };
+	}
 
 	if (input.workspaceId !== classification.architectWorkspaceId) {
 		return { cwd, architectContextPreamble: "", fleetToolsWarning: null };

@@ -63,7 +63,12 @@ import {
 } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { applyFleetUpdate, getFleetUpdateStatus } from "../server/fleet-update-status";
-import { listWorkspaceIndexEntries, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
+import {
+	getWorkspaceEpic,
+	listWorkspaceIndexEntries,
+	loadWorkspaceContextById,
+	loadWorkspaceState,
+} from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
@@ -395,7 +400,16 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const readDoctrineFile = deps.readDoctrineFile ?? readFileIfExists;
 				let workspaceIndex: RegisteredWorkspace[];
 				try {
-					workspaceIndex = await listWorkspaces();
+					const rawWorkspaces = await listWorkspaces();
+					workspaceIndex = await Promise.all(
+						rawWorkspaces.map(async (ws) => {
+							const epic = await getWorkspaceEpic(ws.workspaceId);
+							return {
+								...ws,
+								epic: epic ?? undefined,
+							};
+						}),
+					);
 				} catch {
 					workspaceIndex = [];
 				}

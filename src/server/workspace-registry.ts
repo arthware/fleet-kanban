@@ -7,10 +7,12 @@ import type {
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
 	RuntimeWorkspaceStateResponse,
+	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import type { GitRepositoryProbe } from "../core/git-repository-probe";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
 import {
+	getWorkspaceEpic,
 	listWorkspaceIndexEntries,
 	loadWorkspaceBoardById,
 	loadWorkspaceContext,
@@ -18,6 +20,7 @@ import {
 	migrateAllWorkspaceAgentSessions,
 	migrateAllWorkspaceTrashToArchive,
 	type RuntimeWorkspaceIndexEntry,
+	setWorkspaceEpic,
 } from "../state/workspace-state";
 import { locateAgentTranscript } from "../terminal/agent-transcript-locator";
 import { deriveHomeAgentClaudeSessionId } from "../terminal/home-agent-session-id";
@@ -71,6 +74,7 @@ export interface WorkspaceRegistry {
 		workspaceId: string;
 		repoPath: string;
 		taskCounts: RuntimeProjectTaskCounts;
+		epic?: WorkspaceEpicDescriptor;
 	}) => RuntimeProjectSummary;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
 	buildProjectsPayload: (preferredCurrentProjectId: string | null) => Promise<{
@@ -78,6 +82,8 @@ export interface WorkspaceRegistry {
 		projects: RuntimeProjectSummary[];
 		architectWorkspaceId: string | null;
 	}>;
+	getWorkspaceEpic: (workspaceId: string) => Promise<WorkspaceEpicDescriptor | null>;
+	setWorkspaceEpic: (workspaceId: string, epic: WorkspaceEpicDescriptor | null) => Promise<void>;
 	resolveWorkspaceForStream: (requestedWorkspaceId: string | null) => Promise<ResolvedWorkspaceStreamTarget>;
 	isWorkspaceUnavailable: (workspaceId: string) => boolean;
 	listManagedWorkspaces: () => Array<{
@@ -175,6 +181,7 @@ function toProjectSummary(project: {
 	workspaceId: string;
 	repoPath: string;
 	taskCounts: RuntimeProjectTaskCounts;
+	epic?: WorkspaceEpicDescriptor;
 }): RuntimeProjectSummary {
 	const normalized = project.repoPath.replaceAll("\\", "/").replace(/\/+$/g, "");
 	const segments = normalized.split("/").filter((segment) => segment.length > 0);
@@ -184,6 +191,7 @@ function toProjectSummary(project: {
 		path: project.repoPath,
 		name,
 		taskCounts: project.taskCounts,
+		...(project.epic ? { epic: project.epic } : {}),
 	};
 }
 
@@ -389,10 +397,12 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			selection.selectableWorkspaceIds.map(async (workspaceId) => {
 				const repoPath = repoPathById.get(workspaceId) ?? "";
 				const taskCounts = await summarizeProjectTaskCounts(workspaceId, repoPath);
+				const epic = await getWorkspaceEpic(workspaceId);
 				return toProjectSummary({
 					workspaceId,
 					repoPath,
 					taskCounts,
+					epic: epic ?? undefined,
 				});
 			}),
 		);
@@ -496,6 +506,8 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		createProjectSummary: toProjectSummary,
 		buildWorkspaceStateSnapshot,
 		buildProjectsPayload,
+		getWorkspaceEpic,
+		setWorkspaceEpic,
 		resolveWorkspaceForStream,
 		isWorkspaceUnavailable: (workspaceId: string) => unavailableWorkspaceIds.has(workspaceId),
 		listManagedWorkspaces: () => {

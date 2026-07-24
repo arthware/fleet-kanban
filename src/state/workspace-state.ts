@@ -18,6 +18,8 @@ import {
 	runtimeBoardDataSchema,
 	runtimeTaskSessionSummarySchema,
 	runtimeWorkspaceStateSaveRequestSchema,
+	type WorkspaceEpicDescriptor,
+	workspaceEpicDescriptorSchema,
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
@@ -63,6 +65,7 @@ interface WorkspaceIndexFile {
 interface WorkspaceStateMeta {
 	revision: number;
 	updatedAt: number;
+	epic?: WorkspaceEpicDescriptor;
 }
 
 interface WorkspaceBoardCacheEntry {
@@ -73,6 +76,7 @@ interface WorkspaceBoardCacheEntry {
 const workspaceStateMetaSchema = z.object({
 	revision: z.number().int().nonnegative(),
 	updatedAt: z.number(),
+	epic: workspaceEpicDescriptorSchema.optional(),
 });
 
 const workspaceBoardCacheByPath = new Map<string, WorkspaceBoardCacheEntry>();
@@ -1021,6 +1025,7 @@ export async function saveWorkspaceState(
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
 			updatedAt: Date.now(),
+			...(currentMeta.epic ? { epic: currentMeta.epic } : {}),
 		};
 
 		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, archivedBoard.board);
@@ -1073,6 +1078,7 @@ export async function mutateWorkspaceState<T>(
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
 			updatedAt: Date.now(),
+			...(currentMeta.epic ? { epic: currentMeta.epic } : {}),
 		};
 
 		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, nextBoard);
@@ -1147,6 +1153,7 @@ export async function restoreArchivedWorkspaceTask(
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
 			updatedAt: now,
+			...(currentMeta.epic ? { epic: currentMeta.epic } : {}),
 		};
 
 		await writeWorkspaceBoardAndUpdateCache(context.workspaceId, nextBoard);
@@ -1164,5 +1171,28 @@ export async function restoreArchivedWorkspaceTask(
 		});
 
 		return toWorkspaceStateResponse(context, nextBoard, currentSessions, nextRevision);
+	});
+}
+
+export async function getWorkspaceEpic(workspaceId: string): Promise<WorkspaceEpicDescriptor | null> {
+	try {
+		const meta = await readWorkspaceMeta(workspaceId);
+		return meta.epic ?? null;
+	} catch {
+		return null;
+	}
+}
+
+export async function setWorkspaceEpic(workspaceId: string, epic: WorkspaceEpicDescriptor | null): Promise<void> {
+	const metaPath = getWorkspaceMetaPath(workspaceId);
+	const currentMeta = await readWorkspaceMeta(workspaceId);
+	const nextRevision = currentMeta.revision + 1;
+	const nextMeta: WorkspaceStateMeta = {
+		revision: nextRevision,
+		updatedAt: Date.now(),
+		...(epic ? { epic } : {}),
+	};
+	await lockedFileSystem.writeJsonFileAtomic(metaPath, nextMeta, {
+		lock: null,
 	});
 }
