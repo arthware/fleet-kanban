@@ -485,6 +485,7 @@ export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepo
 		...(created.agentId ? { agentId: created.agentId } : {}),
 		...(created.agentModel ? { agentModel: created.agentModel } : {}),
 		...(created.skill ? { skill: created.skill } : {}),
+		...(created.cardType ? { cardType: created.cardType } : {}),
 		...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
 		...formatTaskClineSettings(created.clineSettings),
 	};
@@ -664,6 +665,7 @@ async function createTask(input: {
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
+	cardType?: string;
 	externalIssueRef?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
@@ -695,6 +697,7 @@ async function createTask(input: {
 				agentId: input.agentId,
 				agentModel: input.agentModel,
 				skill: input.skill,
+				cardType: input.cardType,
 				externalIssue,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
@@ -1685,6 +1688,7 @@ export function registerTaskCommand(program: Command): void {
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
 		.option("--skill <name>", "Per-card Agent Skills / SKILL.md pointer.")
+		.option("--card-type <name>", "Card Type / manifest pointer.")
 		.option("--quiet", "Print only the created task id.")
 		.option("--id-only", "Alias for --quiet.")
 		.option(
@@ -1718,6 +1722,7 @@ export function registerTaskCommand(program: Command): void {
 				agentId?: string;
 				agentModel?: string;
 				skill?: string;
+				cardType?: string;
 				quiet?: boolean;
 				idOnly?: boolean;
 				externalIssue?: string;
@@ -1741,6 +1746,7 @@ export function registerTaskCommand(program: Command): void {
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							skill: parseOptionalStringOrDefault(options.skill),
+							cardType: parseOptionalStringOrDefault(options.cardType),
 							externalIssueRef: options.externalIssue ?? options.issue,
 						});
 						const created = await createTask({
@@ -1755,6 +1761,7 @@ export function registerTaskCommand(program: Command): void {
 							agentId: resolved.agentId,
 							agentModel: resolved.agentModel,
 							skill: resolved.skill,
+							cardType: resolved.cardType,
 							externalIssueRef: resolved.externalIssueRef,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,

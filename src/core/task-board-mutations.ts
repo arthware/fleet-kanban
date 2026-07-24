@@ -28,6 +28,7 @@ export interface RuntimeCreateTaskInput {
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
+	cardType?: string;
 	externalIssue?: RuntimeExternalIssue;
 	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
@@ -359,6 +360,7 @@ export function addTaskToColumn(
 		...(input.agentId ? { agentId: input.agentId } : {}),
 		...(input.agentModel?.trim() ? { agentModel: input.agentModel.trim() } : {}),
 		...(input.skill?.trim() ? { skill: input.skill.trim() } : {}),
+		...(input.cardType?.trim() ? { cardType: input.cardType.trim() } : {}),
 		...(externalIssue ? { externalIssue } : {}),
 		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,

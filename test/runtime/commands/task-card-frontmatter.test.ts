@@ -70,6 +70,14 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		const card = parseTaskCardDocument(["---", "agent: default", "---", "body"].join("\n"));
 		expect(card.agentId).toBeNull();
 	});
+
+	it("maps card-type and cardType to cardType", () => {
+		const card1 = parseTaskCardDocument(["---", "card-type: bugfix", "---", "body"].join("\n"));
+		expect(card1.cardType).toBe("bugfix");
+
+		const card2 = parseTaskCardDocument(["---", "cardType: feature-request", "---", "body"].join("\n"));
+		expect(card2.cardType).toBe("feature-request");
+	});
 });
 
 describe("title derivation", () => {
@@ -234,6 +242,26 @@ describe("resolveTaskCardCreate precedence", () => {
 		expect(resolved.agentId).toBe("claude");
 		expect(resolved.skill).toBe("other-skill");
 		expect(resolved.baseRef).toBe("flag-branch");
+	});
+
+	it("correctly propagates and overrides cardType", () => {
+		const card = {
+			prompt: "some body",
+			cardType: "bugfix",
+			links: [],
+			codeReferences: [],
+		};
+		// uses card value when flag is omitted
+		const res1 = resolveTaskCardCreate(card, {});
+		expect(res1.cardType).toBe("bugfix");
+
+		// overrides card value when flag is provided
+		const res2 = resolveTaskCardCreate(card, { cardType: "feature" });
+		expect(res2.cardType).toBe("feature");
+
+		// null flag clears card value
+		const res3 = resolveTaskCardCreate(card, { cardType: null });
+		expect(res3.cardType).toBeUndefined();
 	});
 
 	it("collapses an explicit default (null) agent override to undefined", () => {
