@@ -1,19 +1,17 @@
-# Skill injection & card directives
+# Skill injection & directives
 
-**Importance:** medium  ·  **Lives in:** `src/prompts/implement-card-directive.ts`, `src/prompts/pr-card-directive.ts`, `src/prompts/plan-card-directive.ts`, `src/prompts/append-system-prompt.ts`, `src/workspace/task-worktree.ts`
+**Importance:** medium  ·  **Lives in:** `src/prompts/compose-card-directive.ts`, `src/prompts/append-system-prompt.ts`, `src/workspace/task-worktree.ts`, `.agents/skills/*/SKILL.md`
 
-The mechanism that makes agent skills available in each worktree and prepends one-line directives
-naming which skill to use.
+The mechanism that makes agent skills available in each worktree and composes their prompt directives from the skill frontmatter.
 
 ## Domain model
 On worktree creation, the canonical `.agents/skills` dir is symlinked into the worktree so agents load
-skill bodies natively. The runtime injects only a one-line directive (never restating skill internals,
-to avoid drift): build cards get the fleet-implement directive, PR cards the fleet-pr directive, plan
-cards the plan directive. A card's `skill` field points to an optional extra skill. Home agent and
-plan-mode cards are exempt from the implement directive.
+skill bodies natively. Rather than using hardcoded TS directive functions, the runtime extracts prompt
+directives dynamically from the `directive:` YAML frontmatter field of active skills inside the canonical
+skills directory. Placeholders (such as `${baseRef}`) are interpolated, and the directives are concatenated in
+declared phase order. This ensures the prompt-directive channel and native skill-body channel never drift.
 
 ## Reuse / do-not-duplicate
 - Relates to [Worktree](worktree.md), [Auto-review / PR mode](auto-review-pr-mode.md),
-  [Home / architect agent session](home-agent-session.md).
-- **Do not duplicate:** directives name a skill only — put behavior in the skill body, not the
-  directive string.
+  [Home / architect agent session](home-agent-session.md), [Card type / skill pipeline](card-types.md).
+- **Do not duplicate:** directives guide the agent on how to use the skill — put actual tool and implementation execution details in the skill body, not the directive string.
