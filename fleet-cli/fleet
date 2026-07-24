@@ -979,6 +979,7 @@ fleet_task() {
         --model) extra+=(--agent-model "$2"); shift 2;;
         --external-issue|--issue) extra+=(--external-issue "$2"); shift 2;;
         --base-ref) extra+=(--base-ref "$2"); shift 2;;
+        --type) extra+=(--card-type "$2"); shift 2;;
         --plan) extra+=(--start-in-plan-mode true); shift;;
         --auto-review) case "$2" in
             pr) extra+=(--auto-review-enabled true --auto-review-mode pr);;
@@ -1695,6 +1696,121 @@ fleet_xtools() {
   esac
 }
 
+# --- card-types: workflows defining phases and skills -----------------------
+_card_type_dirs() {  # tracked project dir first, then built-in repo fallback
+  if [ "${IN_PROJECT:-0}" = 1 ] && [ "$CFG_DIR" != "$GLOBAL_DIR" ]; then
+    local project_root
+    project_root="$(dirname "$CFG_DIR")"
+    printf '%s\n' "$project_root/fleet/card-types"
+  fi
+  if [ -n "${FLEET_REPO:-}" ] && [ -d "$FLEET_REPO/fleet/card-types" ]; then
+    printf '%s\n' "$FLEET_REPO/fleet/card-types"
+  fi
+  return 0
+}
+_card_type_find() {  # print path of first matching card-type manifest, or fail
+  local name="${1:-}" d f
+  _xtools_valid_name "$name" || return 1
+  while IFS= read -r d; do
+    f="$d/$name.md"
+    [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }
+  done < <(_card_type_dirs)
+  return 1
+}
+card_type_list() {
+  local d f name desc seen=" " found=0
+  say "card-types — workflows defining phases and skills (run: fleet card-type show <name>)"
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*.md; do
+      [ -f "$f" ] || continue
+      name="$(basename "$f" .md)"
+      case "$seen" in *" $name "*) continue;; esac
+      seen="$seen$name "
+      desc="$(sed -n 's/^description: *//p' "$f" | sed "s/^['\"]//;s/['\"]$//" | head -1)"
+      printf '  %-20s %s\n' "$name" "${desc:-}"
+      found=1
+    done
+  done < <(_card_type_dirs)
+  [ "$found" = 1 ] || dim "  (none yet — create one: fleet card-type new <name>)"
+}
+card_type_new() {
+  local name="${1:-}"
+  _xtools_valid_name "$name" || { dim "usage: fleet card-type new <name>  (name: letters/digits/_/-)"; return 1; }
+  local existing dir f
+  existing="$(_card_type_find "$name")" && { dim "already exists: $existing"; return 1; }
+  dir="$(dirname "$CFG_DIR")/fleet/card-types"
+  mkdir -p "$dir"
+  f="$dir/$name.md"
+  [ -e "$f" ] && { dim "already exists: $f"; return 1; }
+  cat >"$f" <<EOF
+---
+name: $name
+description: A custom card workflow for $name tasks.
+phases:
+  - name: design
+    lane: backlog
+    skills: [fleet-plan]
+    activation: plan-flag
+    planMode: true
+  - name: build
+    lane: in_progress
+    skills: [fleet-implement]
+    activation: default
+---
+
+# $name
+
+Prose description and documentation for the $name card type.
+EOF
+  say "created $f"
+  dim "  edit it, then run: fleet card-type show $name"
+}
+card_type_path() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name'"; return 1; }
+  printf '%s\n' "$f"
+}
+card_type_show() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name' — list: fleet card-type ls"; return 1; }
+  cat "$f"
+}
+card_type_edit() {
+  local f; f="$(_card_type_find "${1:-}")" || { dim "no card-type '${1:-}' — create: fleet card-type new ${1:-<name>}"; return 1; }
+  "${EDITOR:-vi}" "$f"
+}
+card_type_rm() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name'"; return 1; }
+  local project_root project_file
+  project_root="$(dirname "$CFG_DIR")"
+  project_file="$project_root/fleet/card-types/$name.md"
+  if [ "$f" = "$project_file" ]; then
+    rm -f "$f" && say "removed $f"
+  else
+    dim "cannot remove built-in card-type '$name' at $f"
+    return 1
+  fi
+}
+fleet_card_type() {
+  case "${1:-}" in
+    ''|ls|list|-h|--help|help) card_type_list;;
+    new|create) shift; card_type_new "$@";;
+    path|which) shift; card_type_path "$@";;
+    show|cat) shift; card_type_show "$@";;
+    edit) shift; card_type_edit "$@";;
+    rm|remove|delete) shift; card_type_rm "$@";;
+    *)
+      dim "unknown card-type command '${1:-}' (try: ls, new, show, path, edit, rm)"
+      return 1
+      ;;
+  esac
+}
+
 cmd="${1:-status}"; shift || true
 
 # fleet is project-scoped: nearly every command reads/writes a project's .fleet
@@ -1734,9 +1850,10 @@ case "$cmd" in
   kanban) fleet_kanban "$@";;
   service|svc) fleet_service "$@";;
   task) fleet_task "$@";;
+  card-type|card-types|ct) fleet_card_type "$@";;
   xtools|xtool|x) fleet_xtools "$@";;
   init) fleet_init "$@";;
   update) fleet_update "$@";;
   budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
-  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task xtools)" >&2; exit 1;;
+  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools)" >&2; exit 1;;
 esac
