@@ -2,52 +2,40 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
-import { parseCardTypeManifest, resolveActiveSkillsForLane } from "../../../src/core/card-type";
+import { parseCardTypeManifest, resolveLaneEntrySkills, resolveStartActiveSkills } from "../../../src/core/card-type";
 
 describe("Card Type Schema & Logic", () => {
-	it("should parse feature.md successfully", async () => {
-		const featurePath = join(process.cwd(), "fleet/card-types/feature.md");
-		const rawContent = await readFile(featurePath, "utf-8");
+	it("should parse build.md successfully", async () => {
+		const buildPath = join(process.cwd(), "fleet/card-types/build.md");
+		const rawContent = await readFile(buildPath, "utf-8");
 		const parsed = matter(rawContent);
 
 		const manifest = parseCardTypeManifest({
-			name: "feature",
+			name: "build",
 			...parsed.data,
 		});
 
-		expect(manifest.name).toBe("feature");
+		expect(manifest.name).toBe("build");
 		expect(manifest.description).toBe(
-			"The default card workflow — design → build → ship, with a dormant verify lane.",
+			"The default card workflow — implement, then ship a PR when auto-review is on.",
 		);
-		expect(manifest.phases).toHaveLength(4);
+		expect(manifest.phases).toHaveLength(3);
 
-		// phase: design
 		expect(manifest.phases[0]).toEqual({
-			name: "design",
-			lane: "backlog",
-			skills: ["fleet-plan"],
-			activation: "plan-flag",
-			planMode: true,
-		});
-
-		// phase: build
-		expect(manifest.phases[1]).toEqual({
 			name: "build",
 			lane: "in_progress",
 			skills: ["fleet-implement"],
 			activation: "default",
 		});
 
-		// phase: ship
-		expect(manifest.phases[2]).toEqual({
+		expect(manifest.phases[1]).toEqual({
 			name: "ship",
 			lane: "in_progress",
 			skills: ["fleet-pr"],
 			activation: "auto-review-pr",
 		});
 
-		// phase: verify
-		expect(manifest.phases[3]).toEqual({
+		expect(manifest.phases[2]).toEqual({
 			name: "verify",
 			lane: "review",
 			skills: ["fleet-review"],
@@ -55,60 +43,99 @@ describe("Card Type Schema & Logic", () => {
 		});
 	});
 
-	it("should resolve active skills for lane feature combo table correctly", async () => {
-		const featurePath = join(process.cwd(), "fleet/card-types/feature.md");
-		const rawContent = await readFile(featurePath, "utf-8");
+	it("should parse plan.md successfully", async () => {
+		const planPath = join(process.cwd(), "fleet/card-types/plan.md");
+		const rawContent = await readFile(planPath, "utf-8");
 		const parsed = matter(rawContent);
+
 		const manifest = parseCardTypeManifest({
-			name: "feature",
+			name: "plan",
 			...parsed.data,
 		});
 
-		// Case 1: bare card in in_progress lane
-		const bareInProgress = resolveActiveSkillsForLane(manifest, {
+		expect(manifest.name).toBe("plan");
+		expect(manifest.phases).toHaveLength(2);
+
+		expect(manifest.phases[0]).toEqual({
+			name: "design",
 			lane: "in_progress",
-			startInPlanMode: false,
-			autoReviewEnabled: false,
+			skills: ["fleet-plan"],
+			activation: "default",
 		});
-		expect(bareInProgress.skills).toEqual(["fleet-implement"]);
-		expect(bareInProgress.planMode).toBe(false);
 
-		// Case 2: --plan card in backlog lane
-		const planBacklog = resolveActiveSkillsForLane(manifest, {
-			lane: "backlog",
-			startInPlanMode: true,
-			autoReviewEnabled: false,
-		});
-		expect(planBacklog.skills).toEqual(["fleet-plan"]);
-		expect(planBacklog.planMode).toBe(true);
-
-		// Case 3: --plan card in in_progress lane
-		const planInProgress = resolveActiveSkillsForLane(manifest, {
-			lane: "in_progress",
-			startInPlanMode: true,
-			autoReviewEnabled: false,
-		});
-		expect(planInProgress.skills).toEqual(["fleet-implement"]);
-		expect(planInProgress.planMode).toBe(false);
-
-		// Case 4: --auto-review pr card in in_progress lane
-		const prInProgress = resolveActiveSkillsForLane(manifest, {
-			lane: "in_progress",
-			startInPlanMode: false,
-			autoReviewEnabled: true,
-			autoReviewMode: "pr",
-		});
-		expect(prInProgress.skills).toEqual(["fleet-implement", "fleet-pr"]);
-		expect(prInProgress.planMode).toBe(false);
-
-		// Case 5: any card in review lane (verify phase is dormant)
-		const anyReview = resolveActiveSkillsForLane(manifest, {
+		expect(manifest.phases[1]).toEqual({
+			name: "verify",
 			lane: "review",
-			startInPlanMode: false,
+			skills: ["fleet-review"],
+			activation: "dormant",
+		});
+	});
+
+	it("should resolve start active skills correctly (lane-free)", async () => {
+		const buildPath = join(process.cwd(), "fleet/card-types/build.md");
+		const buildRawContent = await readFile(buildPath, "utf-8");
+		const buildParsed = matter(buildRawContent);
+		const buildManifest = parseCardTypeManifest({
+			name: "build",
+			...buildParsed.data,
+		});
+
+		// Case 1: bare card
+		const bare = resolveStartActiveSkills(buildManifest, {});
+		expect(bare).toEqual(["fleet-implement"]);
+
+		// Case 2: --auto-review pr card
+		const pr = resolveStartActiveSkills(buildManifest, {
 			autoReviewEnabled: true,
 			autoReviewMode: "pr",
 		});
-		expect(anyReview.skills).toEqual([]);
-		expect(anyReview.planMode).toBe(false);
+		expect(pr).toEqual(["fleet-implement", "fleet-pr"]);
+
+		const planPath = join(process.cwd(), "fleet/card-types/plan.md");
+		const planRawContent = await readFile(planPath, "utf-8");
+		const planParsed = matter(planRawContent);
+		const planManifest = parseCardTypeManifest({
+			name: "plan",
+			...planParsed.data,
+		});
+
+		// Case 3: --type plan card
+		const plan = resolveStartActiveSkills(planManifest, {});
+		expect(plan).toEqual(["fleet-plan"]);
+	});
+
+	it("should resolve lane entry skills correctly", async () => {
+		const buildPath = join(process.cwd(), "fleet/card-types/build.md");
+		const buildRawContent = await readFile(buildPath, "utf-8");
+		const buildParsed = matter(buildRawContent);
+		const buildManifest = parseCardTypeManifest({
+			name: "build",
+			...buildParsed.data,
+		});
+
+		const planPath = join(process.cwd(), "fleet/card-types/plan.md");
+		const planRawContent = await readFile(planPath, "utf-8");
+		const planParsed = matter(planRawContent);
+		const planManifest = parseCardTypeManifest({
+			name: "plan",
+			...planParsed.data,
+		});
+
+		expect(resolveLaneEntrySkills(buildManifest, "review")).toEqual(["fleet-review"]);
+		expect(resolveLaneEntrySkills(planManifest, "review")).toEqual(["fleet-review"]);
+
+		const mockManifest = {
+			name: "mock",
+			description: "mock",
+			phases: [
+				{
+					name: "test",
+					lane: "review" as const,
+					skills: ["fleet-test"],
+					activation: "dormant" as const,
+				},
+			],
+		};
+		expect(resolveLaneEntrySkills(mockManifest, "review")).toEqual(["fleet-test"]);
 	});
 });
