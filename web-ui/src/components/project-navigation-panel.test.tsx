@@ -299,4 +299,53 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.textContent).toContain("Projects");
 		expect(container.textContent).toContain("Kanban");
 	});
+
+	it("renders 'Architect Agent' for a root workspace (no epic marker) and 'Epic Agent' when the active project is an epic workspace", () => {
+		const projectsWithEpic: RuntimeProjectSummary[] = [
+			{
+				id: "project-1",
+				name: "My App",
+				path: "/tmp/myapp",
+				taskCounts: {
+					backlog: 5,
+					in_progress: 3,
+					review: 2,
+					done: 0,
+					trash: 1,
+				},
+			},
+			{
+				id: "epic-1",
+				name: "Epic Card Refactor",
+				path: "/tmp/epic-1",
+				taskCounts: {
+					backlog: 3,
+					in_progress: 2,
+					review: 1,
+					done: 0,
+					trash: 0,
+				},
+				epic: {
+					name: "Card Refactor Epic",
+					branch: "epic/card-refactor",
+				},
+			},
+		];
+
+		// Case 1: Root workspace (project-1 has no epic) is active
+		renderPanel({
+			projects: projectsWithEpic,
+			currentProjectId: "project-1",
+		});
+		expect(container.textContent).toContain("Architect Agent");
+		expect(container.textContent).not.toContain("Epic Agent");
+
+		// Case 2: Epic workspace (epic-1 has epic marker) is active
+		renderPanel({
+			projects: projectsWithEpic,
+			currentProjectId: "epic-1",
+		});
+		expect(container.textContent).toContain("Epic Agent");
+		expect(container.textContent).not.toContain("Architect Agent");
+	});
 });
