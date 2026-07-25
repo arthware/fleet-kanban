@@ -628,15 +628,35 @@ describe("BoardCard", () => {
 		expect(badge?.className).toContain("text-status-purple");
 	});
 
-	it("defaults the card-type badge to feature when unset", async () => {
+	it("defaults the card-type badge to build when unset", async () => {
 		await act(async () => {
 			root.render(<BoardCard card={createCard({ cardType: undefined })} index={0} columnId="backlog" />);
 		});
 
-		const badge = findSpanByExactText(container, "feature");
+		const badge = findSpanByExactText(container, "build");
 		expect(badge).toBeDefined();
 		expect(badge?.className).toContain("border-status-purple/30");
 		expect(badge?.className).toContain("text-status-purple");
+	});
+
+	it("shows the active phase chip for a started card", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ cardType: "plan" })} index={0} columnId="in_progress" />);
+		});
+
+		const phaseChip = findSpanByExactText(container, "design");
+		expect(phaseChip).toBeDefined();
+		expect(phaseChip?.className).toContain("border-status-blue/30");
+		expect(phaseChip?.className).toContain("text-status-blue");
+	});
+
+	it("does not show an active phase chip for an unstarted card in backlog", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ cardType: "plan" })} index={0} columnId="backlog" />);
+		});
+
+		const phaseChip = container.querySelector('[data-testid="board-card-phase-chip"]');
+		expect(phaseChip).toBeNull();
 	});
 
 	it("shows an Auto-PR completion-policy badge for build cards configured to self-open a PR", async () => {
