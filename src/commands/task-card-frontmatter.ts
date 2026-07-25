@@ -50,7 +50,6 @@ export interface ParsedTaskCard {
 	agentModel?: string;
 	skill?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	cardType?: string;
@@ -229,9 +228,6 @@ export function parseTaskCardDocument(source: string): ParsedTaskCard {
 	if (data["base-ref"] !== undefined) {
 		card.baseRef = expectString("base-ref", data["base-ref"]);
 	}
-	if (data.plan !== undefined) {
-		card.startInPlanMode = parseBooleanValue("plan", data.plan);
-	}
 	if (data["card-type"] !== undefined) {
 		card.cardType = expectString("card-type", data["card-type"]);
 	} else if (data.cardType !== undefined) {
@@ -310,7 +306,6 @@ export interface TaskCardCreateFlags {
 	title?: string;
 	prompt?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId | null;
@@ -324,7 +319,6 @@ export interface ResolvedTaskCardCreate {
 	title?: string;
 	prompt: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId;
@@ -362,7 +356,6 @@ export function resolveTaskCardCreate(
 		title: pick(flags.title, card?.title),
 		prompt,
 		baseRef: pick(flags.baseRef, card?.baseRef),
-		startInPlanMode: pick(flags.startInPlanMode, card?.startInPlanMode),
 		autoReviewEnabled: pick(flags.autoReviewEnabled, card?.autoReviewEnabled),
 		autoReviewMode: pick(flags.autoReviewMode, card?.autoReviewMode),
 		agentId,

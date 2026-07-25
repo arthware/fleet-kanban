@@ -1262,4 +1262,112 @@ describe("source task commands", () => {
 			cleanupHome();
 		}
 	});
+
+	it("task promote command flips cardType, moves to in_progress, and ensures worktree reuse", async () => {
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("fleet-kanban-project-");
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("fleet-home-");
+
+		initGitRepository(projectPath);
+
+		try {
+			const port = String(await getAvailablePort());
+			const fakeAgentBinDir = join(homeDir, "agent-bin");
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+				PATH: `${fakeAgentBinDir}:${process.env.PATH ?? ""}`,
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			const started = await waitForServerStart(serverProcess);
+			if (!started) {
+				serverProcess.kill();
+				throw new Error("Server failed to start");
+			}
+
+			try {
+				env.KANBAN_RUNTIME_PORT = port.toString();
+
+				// 1. Create a plan card
+				const createOut = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"create",
+						"--prompt",
+						"Plan the widget",
+						"--card-type",
+						"plan",
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(createOut.exitCode, createOut.stderr || createOut.stdout).toBe(0);
+				const createPayload = JSON.parse(createOut.stdout) as { task: { id: string; cardType: string } };
+				const taskId = createPayload.task.id;
+				expect(createPayload.task.cardType).toBe("plan");
+
+				// 2. Start it (moves to in_progress, creates worktree)
+				const startOut = await runCliCommandAndCollectOutput({
+					args: ["task", "start", "--task-id", taskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(startOut.exitCode).toBe(0);
+
+				// 3. Move to review
+				const reviewOut = await runCliCommandAndCollectOutput({
+					args: ["task", "done", "--task-id", taskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(reviewOut.exitCode).toBe(0);
+
+				// 4. Promote it to build
+				const promoteOut = await runCliCommandAndCollectOutput({
+					args: ["task", "promote", taskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(promoteOut.exitCode).toBe(0);
+				const promotePayload = JSON.parse(promoteOut.stdout) as { task: { cardType: string; column: string } };
+
+				// Assertions
+				expect(promotePayload.task.cardType).toBe("build");
+				expect(promotePayload.task.column).toBe("in_progress");
+
+				// Verify worktree reuse: checkout should succeed
+				const wtOut = spawnSync("git", ["worktree", "list"], { cwd: projectPath, env });
+				expect(wtOut.stdout.toString()).toContain(taskId);
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
 });

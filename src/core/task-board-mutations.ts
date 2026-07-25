@@ -21,7 +21,6 @@ export interface RuntimeCreateTaskInput {
 	taskId?: string;
 	title?: string;
 	prompt: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
@@ -37,13 +36,13 @@ export interface RuntimeCreateTaskInput {
 export interface RuntimeUpdateTaskInput {
 	title?: string;
 	prompt: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
 	skill?: string | null;
+	cardType?: string | null;
 	externalIssue?: RuntimeExternalIssue | null;
 	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
@@ -354,7 +353,6 @@ export function addTaskToColumn(
 		id: explicitTaskId || createUniqueTaskId(existingIds, randomUuid),
 		title: resolveTaskTitle(input.title, prompt),
 		prompt,
-		startInPlanMode: Boolean(input.startInPlanMode),
 		...normalizeTaskAutoReview({ enabled: input.autoReviewEnabled, mode: input.autoReviewMode }),
 		images: cloneTaskImages(input.images),
 		...(input.agentId ? { agentId: input.agentId } : {}),
@@ -695,12 +693,12 @@ export function updateTask(
 				...card,
 				title: resolveTaskTitle(input.title, prompt),
 				prompt,
-				startInPlanMode: Boolean(input.startInPlanMode),
 				...normalizeTaskAutoReview({ enabled: input.autoReviewEnabled, mode: input.autoReviewMode }),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: input.agentId === undefined ? card.agentId : (input.agentId ?? undefined),
 				agentModel: input.agentModel === undefined ? card.agentModel : input.agentModel?.trim() || undefined,
 				skill: input.skill === undefined ? card.skill : input.skill?.trim() || undefined,
+				cardType: input.cardType === undefined ? card.cardType : input.cardType?.trim() || undefined,
 				externalIssue:
 					input.externalIssue === undefined
 						? cloneExternalIssue(card.externalIssue)
