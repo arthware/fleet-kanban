@@ -94,6 +94,8 @@ export function ProjectNavigationPanel({
 	setSidebarCollapsed: (collapsed: boolean, persist?: boolean) => void;
 }): React.ReactElement {
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
+	const activeProject = sortedProjects.find((p) => p.id === currentProjectId);
+	const agentTabLabel = activeProject?.epic ? "Epic Agent" : "Architect Agent";
 	const shouldShowFeaturebaseFeedback = canShowFeaturebaseFeedbackButton({
 		selectedAgentId,
 		clineProviderSettings,
@@ -393,7 +395,7 @@ export function ProjectNavigationPanel({
 								!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
 							)}
 						>
-							Kanban Agent
+							{agentTabLabel}
 						</button>
 					</div>
 				</div>
