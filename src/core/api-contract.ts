@@ -200,7 +200,7 @@ export const runtimeBoardCardSchema = z
 		id: z.string(),
 		title: z.string().optional(),
 		prompt: z.string(),
-		startInPlanMode: z.boolean(),
+		startInPlanMode: z.boolean().optional(),
 		autoReviewEnabled: z.boolean().optional(),
 		autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
 		images: z.array(runtimeTaskImageSchema).optional(),

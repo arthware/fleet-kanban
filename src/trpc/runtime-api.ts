@@ -47,10 +47,9 @@ import {
 	parseTaskTokenUsageRequest,
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
-import { resolveActiveSkillsForLane } from "../core/card-type";
+import { resolveStartActiveSkills } from "../core/card-type";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
-import { getTaskColumnId } from "../core/task-board-mutations";
 import { resolveTaskTitle } from "../core/task-title.js";
 import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadCardTypeManifest } from "../prompts/card-type-discovery";
@@ -436,7 +435,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const skillName = body.skill?.trim();
 
 				let withDirectives = body.prompt;
-				let computedPlanMode = body.startInPlanMode ?? false;
 
 				if (isHome) {
 					withDirectives = skillName
@@ -466,22 +464,17 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						// Fallback safely when workspace state or git detection fails (e.g. in resume routing unit tests)
 					}
 
-					const cardType = body.cardType?.trim() || boardCardType?.trim() || "feature";
+					const cardType = body.cardType?.trim() || boardCardType?.trim() || "build";
 
-					const manifest = await loadCardTypeManifest(cardType, {
-						workspacePath: workspaceScope.workspacePath,
-					});
+					const manifest =
+						(await loadCardTypeManifest(cardType, { workspacePath: workspaceScope.workspacePath })) ??
+						(await loadCardTypeManifest("build", { workspacePath: workspaceScope.workspacePath }));
 
 					if (manifest) {
-						const lane = getTaskColumnId(board as any, body.taskId) || "in_progress";
-						const { skills: orderedSkills, planMode } = resolveActiveSkillsForLane(manifest, {
-							startInPlanMode: body.startInPlanMode,
+						const orderedSkills = resolveStartActiveSkills(manifest, {
 							autoReviewEnabled: body.autoReviewEnabled,
 							autoReviewMode: body.autoReviewMode,
-							lane,
 						});
-
-						computedPlanMode = planMode;
 
 						const directive = composeCardDirective(orderedSkills, { baseRef: body.baseRef });
 						withDirectives = directive ? `${directive}${body.prompt}` : body.prompt;
@@ -567,7 +560,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						providerId: clineLaunchConfig.providerId,
 						modelId: clineLaunchConfig.modelId,
 						mode: requestedClineTaskMode,
-						startInPlanMode: computedPlanMode,
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
 						reasoningEffort: clineLaunchConfig.reasoningEffort,
@@ -625,7 +617,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					prompt: finalPrompt,
 					agentModel: body.agentModel,
 					images: body.images,
-					startInPlanMode: computedPlanMode,
 					resumeFromTrash: body.resumeFromTrash,
 					resumeMode,
 					cols: body.cols,

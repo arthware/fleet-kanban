@@ -885,7 +885,7 @@ describe("createRuntimeApi startTaskSession", () => {
 						mimeType: "image/png",
 					},
 				],
-				startInPlanMode: true,
+				cardType: "plan",
 			},
 		);
 
@@ -905,7 +905,6 @@ describe("createRuntimeApi startTaskSession", () => {
 				providerId: "anthropic",
 				apiKey: "anthropic-api-key",
 				mode: "act",
-				startInPlanMode: true,
 				resumeFromTrash: undefined,
 			}),
 		);
@@ -3629,14 +3628,13 @@ describe("card-types centralized composition (Card C)", () => {
 				taskId: "task-1",
 				baseRef: "main",
 				prompt: "My Prompt",
-				startInPlanMode: true,
+				cardType: "plan",
 			},
 		);
 
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				prompt: expect.stringMatching(/^You are working a plan card\..*My Prompt/s),
-				startInPlanMode: true,
 			}),
 		);
 	});
