@@ -6,6 +6,7 @@ import type {
 	RuntimeAgentId,
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
+	RuntimeBoardData,
 	RuntimeBoardDependency,
 	RuntimeClineReasoningEffort,
 	RuntimeExternalIssue,
@@ -29,7 +30,12 @@ import {
 } from "../core/task-board-mutations";
 import { resolveTaskTitle } from "../core/task-title";
 import { resolveProjectInputPath } from "../projects/project-path";
-import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
+import {
+	listWorkspaceIndexEntries,
+	loadWorkspaceBoardById,
+	loadWorkspaceContext,
+	mutateWorkspaceState,
+} from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
 import { resolveRepoNameWithOwner } from "../workspace/repo-name";
 import { resolveTaskWorktreeContext } from "../workspace/task-worktree-context";
@@ -318,6 +324,60 @@ function createRuntimeTrpcClient(workspaceId: string | null) {
 			}),
 		],
 	});
+}
+
+async function findWorkspaceForTaskId(
+	taskId: string,
+	defaultWorkspaceRepoPath: string,
+): Promise<{ workspaceId: string; repoPath: string } | null> {
+	const trimmedTaskId = taskId?.trim();
+	if (!trimmedTaskId) {
+		return null;
+	}
+
+	const hasTaskInBoard = (board: RuntimeBoardData, id: string): boolean => {
+		for (const column of board.columns) {
+			for (const card of column.cards) {
+				if (card.id === id || card.externalIssue?.key === id) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	try {
+		const defaultContext = await loadWorkspaceContext(defaultWorkspaceRepoPath, { autoCreateIfMissing: false });
+		if (defaultContext) {
+			const board = await loadWorkspaceBoardById(defaultContext.workspaceId);
+			if (hasTaskInBoard(board, trimmedTaskId)) {
+				return { workspaceId: defaultContext.workspaceId, repoPath: defaultContext.repoPath };
+			}
+		}
+	} catch {
+		// Ignore and proceed
+	}
+
+	try {
+		const entries = await listWorkspaceIndexEntries();
+		for (const entry of entries) {
+			if (entry.repoPath === defaultWorkspaceRepoPath) {
+				continue;
+			}
+			try {
+				const board = await loadWorkspaceBoardById(entry.workspaceId);
+				if (hasTaskInBoard(board, trimmedTaskId)) {
+					return { workspaceId: entry.workspaceId, repoPath: entry.repoPath };
+				}
+			} catch {
+				// Ignore errors on specific workspaces
+			}
+		}
+	} catch {
+		// Ignore registry errors
+	}
+
+	return null;
 }
 
 async function resolveRuntimeWorkspace(
@@ -1000,7 +1060,9 @@ async function sendTaskInput(input: {
 	projectPath?: string;
 	submit: boolean;
 }): Promise<JsonRecord> {
-	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const defaultWorkspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const foundWorkspace = await findWorkspaceForTaskId(input.taskId, defaultWorkspaceRepoPath);
+	const workspaceRepoPath = foundWorkspace?.repoPath ?? defaultWorkspaceRepoPath;
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 
@@ -1066,7 +1128,11 @@ async function tailTask(input: {
 	// Read-only: resolve the workspace without registering it (mirrors `list`),
 	// then derive the tail from the agent CLI's own transcript via the existing
 	// reader/locator — the board never re-streams or re-persists the session.
-	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd);
+	const defaultWorkspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd);
+	const foundWorkspace = await findWorkspaceForTaskId(input.taskId, defaultWorkspace.repoPath);
+	const workspace = foundWorkspace
+		? await loadWorkspaceContext(foundWorkspace.repoPath, { autoCreateIfMissing: true })
+		: defaultWorkspace;
 	const runtimeClient = createRuntimeTrpcClient(workspace.workspaceId);
 
 	const transcript = await runtimeClient.runtime.getTaskTranscript.query({ taskId: input.taskId });
