@@ -409,7 +409,7 @@ export function addTaskToColumnWithResult(
 		{
 			title: draft.title,
 			prompt,
-			startInPlanMode: draft.startInPlanMode,
+			cardType: draft.startInPlanMode ? "plan" : "build",
 			autoReviewEnabled: draft.autoReviewEnabled,
 			autoReviewMode: draft.autoReviewMode,
 			images: draft.images,

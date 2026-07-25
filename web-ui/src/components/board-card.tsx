@@ -15,8 +15,9 @@ import {
 	Trash2,
 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { notifyError, showAppToast } from "@/components/app-toaster";
 import { DesignDocBadge } from "@/components/design-doc-badge";
 import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
 import {
@@ -32,10 +33,12 @@ import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useTaskDesignDoc } from "@/hooks/use-task-design-doc";
+import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { cardKind, getTaskCompletionPolicyBadgeLabel } from "@/utils/card-completion-policy";
+import { resolvePhaseLabelForLane } from "@/utils/card-phase";
 import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
@@ -377,6 +380,37 @@ export function BoardCard({
 	const isDoneCard = columnId === "done";
 	const isTrashCard = columnId === "trash";
 	const isCardInteractive = !isTrashCard;
+
+	const [isPromoting, setIsPromoting] = useState(false);
+	const phaseLabel = useMemo(() => resolvePhaseLabelForLane(card, columnId), [card, columnId]);
+
+	const handlePromoteToBuild = useCallback(() => {
+		if (isPromoting || !workspaceId) {
+			return;
+		}
+		setIsPromoting(true);
+		void (async () => {
+			try {
+				const trpcClient = getRuntimeTrpcClient(workspaceId);
+				const payload = await trpcClient.runtime.runCommand.mutate({
+					command: `fleet task promote ${card.id}`,
+				});
+				if (payload.exitCode === 0) {
+					showAppToast({
+						intent: "success",
+						message: `✓ promoted ${card.id} to build`,
+					});
+				} else {
+					notifyError(`Failed to promote task: ${payload.combinedOutput || "Unknown error"}`);
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				notifyError(`Failed to promote task to build: ${message}`);
+			} finally {
+				setIsPromoting(false);
+			}
+		})();
+	}, [card.id, workspaceId, isPromoting]);
 	const descriptionWidth = descriptionRect.width > 0 ? descriptionRect.width : descriptionWidthFallback;
 	const rawSessionActivity = useMemo(() => getCardSessionActivity(sessionSummary), [sessionSummary]);
 	const lastSessionActivityRef = useRef<CardSessionActivity | null>(null);
@@ -740,18 +774,36 @@ export function BoardCard({
 											}}
 										/>
 									) : columnId === "review" ? (
-										<Button
-											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
-											variant="ghost"
-											size="sm"
-											disabled={isMoveToTrashLoading}
-											aria-label="Abandon task"
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onMoveToTrash?.(card.id);
-											}}
-										/>
+										<>
+											{card.cardType === "plan" ? (
+												<Button
+													icon={isPromoting ? <Spinner size={13} /> : <Hammer size={13} />}
+													variant="default"
+													size="sm"
+													disabled={isPromoting}
+													aria-label="Promote task to build"
+													onMouseDown={stopEvent}
+													onClick={(event) => {
+														stopEvent(event);
+														handlePromoteToBuild();
+													}}
+												>
+													Promote to build
+												</Button>
+											) : null}
+											<Button
+												icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+												variant="ghost"
+												size="sm"
+												disabled={isMoveToTrashLoading}
+												aria-label="Abandon task"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													onMoveToTrash?.(card.id);
+												}}
+											/>
+										</>
 									) : isDoneCard ? (
 										<Button
 											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
@@ -906,8 +958,19 @@ export function BoardCard({
 												: "border-status-purple/30 bg-status-purple/10 text-status-purple",
 										)}
 									>
-										{card.cardType ?? "feature"}
+										{card.cardType ?? "build"}
 									</span>
+									{phaseLabel ? (
+										<span
+											className={cn(
+												"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+												"border-status-blue/30 bg-status-blue/10 text-status-blue",
+											)}
+											data-testid="board-card-phase-chip"
+										>
+											{phaseLabel}
+										</span>
+									) : null}
 									{badgeInfo ? (
 										<span
 											className={cn(
