@@ -422,7 +422,6 @@ export class TerminalSessionManager implements TerminalSessionService {
 			prompt: homeAgentSessionId ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
 			agentModel: request.agentModel,
 			images: request.images,
-			startInPlanMode: request.startInPlanMode,
 			resumeFromTrash: request.resumeFromTrash,
 			agentSessionId: launchSessionId,
 			resumeSession,

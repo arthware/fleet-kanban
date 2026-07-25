@@ -60,7 +60,6 @@ export interface StartClineTaskSessionRequest {
 	taskId: string;
 	cwd: string;
 	prompt: string;
-	startInPlanMode?: boolean;
 	/** Normalized Kanban task title; written to SDK session metadata (best-effort). */
 	taskTitle?: string;
 	initialMessages?: ClineSdkPersistedMessage[];
@@ -150,9 +149,6 @@ function formatStartWarnings(warnings: readonly string[] | undefined): string | 
 	return `${normalized[0]} (+${normalized.length - 1} more MCP warning${normalized.length === 2 ? "" : "s"})`;
 }
 
-function buildClineStartPrompt(prompt: string, startInPlanMode?: boolean): string {
-	return prompt;
-}
 export class InMemoryClineTaskSessionService implements ClineTaskSessionService {
 	private readonly pendingTurnCancelTaskIds = new Set<string>();
 	private readonly providerIdByTaskId = new Map<string, string>();
@@ -325,7 +321,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		const providerId = request.providerId?.trim().toLowerCase() || SDK_DEFAULT_PROVIDER_ID;
 		this.providerIdByTaskId.set(request.taskId, providerId);
 		const modelId = request.modelId?.trim() || SDK_DEFAULT_MODEL_ID;
-		const resolvedMode: RuntimeTaskSessionMode = request.startInPlanMode ? "act" : (request.mode ?? "act");
+		const resolvedMode: RuntimeTaskSessionMode = request.mode ?? "act";
 		const normalizedPrompt = request.prompt.trim();
 		const hasRequestImages = Boolean(request.images && request.images.length > 0);
 		const initialReviewReason = request.resumeFromTrash ? "attention" : null;
@@ -393,9 +389,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			const assistantCountBeforeStart = entry.messages.filter((message) => message.role === "assistant").length;
 			try {
 				const runtimeSetup = await this.ensureRuntimeSetup(request.cwd);
-				const startupPrompt = isResumingExistingTranscript
-					? ""
-					: buildClineStartPrompt(request.prompt, request.startInPlanMode);
+				const startupPrompt = isResumingExistingTranscript ? "" : request.prompt;
 				const runtimePrompt = runtimeSetup.resolvePrompt(startupPrompt);
 				let systemPrompt =
 					request.systemPrompt?.trim() ||

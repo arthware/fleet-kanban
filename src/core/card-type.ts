@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const cardTypePhaseActivationSchema = z.enum(["default", "plan-flag", "auto-review-pr", "dormant"]);
+export const cardTypePhaseActivationSchema = z.enum(["default", "auto-review-pr", "dormant"]);
 export type CardTypePhaseActivation = z.infer<typeof cardTypePhaseActivationSchema>;
 
 export const cardTypePhaseLaneSchema = z.enum(["backlog", "in_progress", "review", "done"]);
@@ -11,7 +11,6 @@ export const cardTypePhaseSchema = z.object({
 	lane: cardTypePhaseLaneSchema,
 	skills: z.array(z.string()),
 	activation: cardTypePhaseActivationSchema,
-	planMode: z.boolean().optional(),
 });
 export type CardTypePhase = z.infer<typeof cardTypePhaseSchema>;
 
@@ -26,38 +25,26 @@ export function parseCardTypeManifest(raw: unknown): CardTypeManifest {
 	return cardTypeManifestSchema.parse(raw);
 }
 
-export function resolveActiveSkillsForLane(
+export function resolveStartActiveSkills(
 	manifest: CardTypeManifest,
-	options: {
-		startInPlanMode?: boolean;
-		autoReviewEnabled?: boolean;
-		autoReviewMode?: string | null;
-		lane: string;
-	},
-): { skills: string[]; planMode: boolean } {
-	const { startInPlanMode = false, autoReviewEnabled = false, autoReviewMode, lane } = options;
+	flags: { autoReviewEnabled?: boolean; autoReviewMode?: string | null },
+): string[] {
+	return manifest.phases
+		.filter((phase) => {
+			switch (phase.activation) {
+				case "default":
+					return true;
+				case "auto-review-pr":
+					return flags.autoReviewEnabled === true && flags.autoReviewMode === "pr";
+				case "dormant":
+					return false;
+				default:
+					return false;
+			}
+		})
+		.flatMap((phase) => phase.skills);
+}
 
-	const activePhasesInLane = manifest.phases.filter((phase) => {
-		if (phase.lane !== lane) {
-			return false;
-		}
-
-		switch (phase.activation) {
-			case "default":
-				return true;
-			case "plan-flag":
-				return startInPlanMode === true;
-			case "auto-review-pr":
-				return autoReviewEnabled === true && autoReviewMode === "pr";
-			case "dormant":
-				return false;
-			default:
-				return false;
-		}
-	});
-
-	const skills = activePhasesInLane.flatMap((phase) => phase.skills);
-	const planMode = activePhasesInLane.some((phase) => phase.planMode === true);
-
-	return { skills, planMode };
+export function resolveLaneEntrySkills(manifest: CardTypeManifest, lane: string): string[] {
+	return manifest.phases.filter((p) => p.lane === lane && p.activation === "dormant").flatMap((p) => p.skills);
 }

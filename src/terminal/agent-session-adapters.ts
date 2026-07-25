@@ -42,7 +42,6 @@ export interface AgentAdapterLaunchInput {
 	// with `--model <agentModel>` so mechanical cards can run a cheaper model.
 	agentModel?: string;
 	images?: RuntimeTaskImage[];
-	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
 	// The agent CLI's own session id. On a fresh start Claude launches under it
 	// (`--session-id`); on a resume it identifies which session to reopen.
@@ -1082,10 +1081,6 @@ const geminiAdapter: AgentSessionAdapter = {
 			args.push("--resume", "latest");
 		}
 
-		if (input.startInPlanMode) {
-			args.push("--approval-mode=plan");
-		}
-
 		const configPath = join(getHookAgentDirectory("gemini"), "settings.json");
 		const hooks = resolveHookContext(input);
 		const config: { security: { folderTrust: { enabled: boolean } }; hooks?: Record<string, unknown> } = {
@@ -1392,13 +1387,6 @@ const opencodeAdapter: AgentSessionAdapter = {
 			args.push("--continue");
 		}
 
-		if (input.startInPlanMode) {
-			env.OPENCODE_EXPERIMENTAL_PLAN_MODE = "true";
-			if (!hasOpenCodeAgentArg(args)) {
-				args.push("--agent", "plan");
-			}
-		}
-
 		const hooks = resolveHookContext(input);
 		if (hooks) {
 			const pluginPath = join(getHookAgentDirectory("opencode"), "kanban.js");
@@ -1460,11 +1448,11 @@ const droidAdapter: AgentSessionAdapter = {
 		}
 
 		const hooks = resolveHookContext(input);
-		const shouldWriteSettings = Boolean(hooks) || input.startInPlanMode || input.autonomousModeEnabled !== undefined;
+		const shouldWriteSettings = Boolean(hooks) || input.autonomousModeEnabled !== undefined;
 		if (shouldWriteSettings) {
 			const settingsPath = join(getHookAgentDirectory("droid"), "settings.json");
 			const settings: Record<string, unknown> = {
-				autonomyMode: input.startInPlanMode ? "spec" : input.autonomousModeEnabled ? "auto-high" : "normal",
+				autonomyMode: input.autonomousModeEnabled ? "auto-high" : "normal",
 			};
 
 			if (hooks) {
@@ -1628,18 +1616,7 @@ const kiroAdapter: AgentSessionAdapter = {
 			}
 		}
 
-		const trimmedPrompt = input.prompt.trim();
-		const planPrompt = input.startInPlanMode
-			? [
-					"First, inspect the codebase and produce a clear implementation plan only.",
-					"Do not modify files, do not use write tools, and do not implement anything yet.",
-					"After you present the plan, ask for approval before making changes.",
-					trimmedPrompt
-						? `\n\nTask:\n${trimmedPrompt}`
-						: " Ask the user what they want planned if the task is unclear.",
-				].join(" ")
-			: input.prompt;
-		const withPromptLaunch = withPrompt(args, planPrompt, "append");
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {

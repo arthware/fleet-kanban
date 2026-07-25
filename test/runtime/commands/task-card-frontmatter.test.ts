@@ -19,7 +19,6 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 				"skill: fleet-smoke",
 				"base-ref: feature/x",
 				"auto-review: pr",
-				"plan: true",
 				"issue: ENG-123",
 				"---",
 				"Build the widget end to end.",
@@ -33,7 +32,6 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		expect(card.baseRef).toBe("feature/x");
 		expect(card.autoReviewEnabled).toBe(true);
 		expect(card.autoReviewMode).toBe("pr");
-		expect(card.startInPlanMode).toBe(true);
 		expect(card.externalIssueRef).toBe("ENG-123");
 		expect(card.prompt).toBe("Build the widget end to end.");
 	});
@@ -162,12 +160,6 @@ describe("invalid frontmatter", () => {
 	it("rejects a bad auto-review value", () => {
 		expect(() => parseTaskCardDocument(["---", "auto-review: sometimes", "---", "body"].join("\n"))).toThrow(
 			/"auto-review" must be one of: pr, off/,
-		);
-	});
-
-	it("rejects a non-boolean plan value", () => {
-		expect(() => parseTaskCardDocument(["---", "plan: yes-please", "---", "body"].join("\n"))).toThrow(
-			/"plan" must be a boolean/,
 		);
 	});
 
