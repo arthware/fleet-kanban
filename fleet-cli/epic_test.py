@@ -108,10 +108,10 @@ class TestEpicCommand(unittest.TestCase):
     @patch("socket.socket")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
-    def test_given_running_board_and_epic_when_epic_complete_then_creates_pr_and_deregisters_and_removes_worktree(
+    def test_given_running_board_and_epic_when_epic_complete_then_creates_pr_and_archives_workspace(
         self, mock_exists, mock_sub_run, mock_socket, mock_trpc, mock_git, mock_resolve
     ):
-        """Behavior: Given a running board and existing epic workspace, completing the epic creates a PR, removes worktree and deregisters."""
+        """Behavior: Given a running board and existing epic workspace, completing the epic creates a PR and archives the workspace."""
         # Arrange (Given)
         mock_resolve.return_value = self.repo_path
         mock_exists.return_value = True
@@ -119,7 +119,7 @@ class TestEpicCommand(unittest.TestCase):
         # Mock board up
         mock_socket.return_value = MagicMock()
         
-        # Mock projects list containing the epic, and projects remove success
+        # Mock projects list containing the epic, and projects setEpic success
         mock_projects_payload = {
             "projects": [
                 {
@@ -154,10 +154,16 @@ class TestEpicCommand(unittest.TestCase):
             "--title", "epic: merge cool-feature to production-line",
             "--body", "Epic workspace integration PR for 'cool-feature'.\n\nThis PR integrates the epic branch epic/cool-feature back into production-line."
         ], cwd=str(self.repo_path), capture_output=True, text=True)
-        # Verify deregistration
-        mock_trpc.assert_any_call(self.cfg, "projects.remove", {"projectId": "epic-ws-id"})
-        # Verify worktree removal
-        mock_git.assert_any_call(self.repo_path, ["worktree", "remove", "--force", "/mock/project/cline/epics/my-repo@cool-feature"], check=False)
+        # Verify archive call via setEpic
+        mock_trpc.assert_any_call(self.cfg, "projects.setEpic", {
+            "workspaceId": "epic-ws-id",
+            "epic": {
+                "name": "cool-feature",
+                "branch": "epic/cool-feature",
+                "base": "production-line",
+                "archived": True
+            }
+        })
 
     @patch("fleet._resolve_repo")
     @patch("fleet.trpc_call")
