@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
-import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
+import {
+	getAgentSubmitEnterDelayMs,
+	prepareAgentLaunch,
+	toBracketedPaste,
+} from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
 const originalAppData = process.env.APPDATA;
@@ -1490,5 +1494,24 @@ describe("prepareAgentLaunch — card gh environment", () => {
 		// then
 		expect(launch.env.GH_REPO).toBeUndefined();
 		expect(launch.env.GH_PROMPT_DISABLED).toBeUndefined();
+	});
+});
+
+describe("getAgentSubmitEnterDelayMs", () => {
+	it("given claude as the agentId, when fetching delay, then it returns the default 50ms", () => {
+		expect(getAgentSubmitEnterDelayMs("claude")).toBe(50);
+	});
+
+	it("given codex as the agentId, when fetching delay, then it returns the default 50ms", () => {
+		expect(getAgentSubmitEnterDelayMs("codex")).toBe(50);
+	});
+
+	it("given gemini as the agentId, when fetching delay, then it returns the custom 300ms", () => {
+		expect(getAgentSubmitEnterDelayMs("gemini")).toBe(300);
+	});
+
+	it("given null or undefined agentId, when fetching delay, then it returns the default 50ms", () => {
+		expect(getAgentSubmitEnterDelayMs(null)).toBe(50);
+		expect(getAgentSubmitEnterDelayMs(undefined)).toBe(50);
 	});
 });

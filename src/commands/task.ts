@@ -2105,21 +2105,37 @@ export function registerTaskCommand(program: Command): void {
 		.command("send-input")
 		.description("Send steering input into a running task session (architect → agent).")
 		.requiredOption("--task-id <id>", "Task ID.")
-		.requiredOption("--text <text>", "Text to inject into the session.")
+		.option("--text <text>", "Text to inject into the session.")
+		.option("--submit-only", "Submit current staged content by sending Enter without appending text.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
 		.option("--no-submit", "Stage the text in the prompt without submitting it (default: submit).")
-		.action(async (options: { taskId: string; text: string; projectPath?: string; submit?: boolean }) => {
-			await runTaskCommand(
-				async () =>
-					await sendTaskInput({
-						cwd: process.cwd(),
-						taskId: options.taskId,
-						text: options.text,
-						projectPath: options.projectPath,
-						submit: options.submit !== false,
-					}),
-			);
-		});
+		.action(
+			async (options: {
+				taskId: string;
+				text?: string;
+				submitOnly?: boolean;
+				projectPath?: string;
+				submit?: boolean;
+			}) => {
+				if (!options.text && !options.submitOnly) {
+					throw new Error("Either --text <text> or --submit-only must be provided.");
+				}
+				if (options.text && options.submitOnly) {
+					throw new Error("Cannot specify both --text and --submit-only.");
+				}
+				const textValue = options.submitOnly ? "" : (options.text ?? "");
+				await runTaskCommand(
+					async () =>
+						await sendTaskInput({
+							cwd: process.cwd(),
+							taskId: options.taskId,
+							text: textValue,
+							projectPath: options.projectPath,
+							submit: options.submit !== false,
+						}),
+				);
+			},
+		);
 
 	task
 		.command("review")

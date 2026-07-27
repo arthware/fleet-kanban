@@ -1311,24 +1311,61 @@ print(f"{D}tail: fleet task tail {tid} [--lines N] [--since <mins>]  — read it
 PY
       ;;
     say|steer)
-      local tid="" repo="" text="" submit=1
+      local tid="" repo="" text="" submit=1 submit_only=0
       while [ $# -gt 0 ]; do case "$1" in
         --submit) submit=1; shift;;
         --no-submit) submit=0; shift;;
+        --submit-only) submit_only=1; shift;;
         --repo) repo="$2"; shift 2;;
         --) shift;;
         -*) echo "task say: unknown flag $1" >&2; return 1;;
         *) if [ -z "$tid" ]; then tid="$1"; elif [ -z "$text" ]; then text="$1"; else text="$text $1"; fi; shift;;
       esac; done
-      [ -n "$tid" ] || { echo "usage: fleet task say <id> \"<text>\" [--submit|--no-submit]" >&2; return 1; }
-      [ -n "$text" ] || { echo "task say: message text required — fleet task say $tid \"<text>\"" >&2; return 1; }
+      [ -n "$tid" ] || { echo "usage: fleet task say <id> [\"<text>\"] [--submit|--no-submit|--submit-only]" >&2; return 1; }
+      if [ "$submit_only" = 0 ]; then
+        [ -n "$text" ] || { echo "task say: message text required — fleet task say $tid \"<text>\"" >&2; return 1; }
+      else
+        [ -z "$text" ] || { echo "task say: cannot combine text with --submit-only" >&2; return 1; }
+      fi
       local pp; pp="$(_fleet_repo_path "$repo" "task say")" || return 1
-      local args=(task send-input --task-id "$tid" --project-path "$pp" --text "$text")
-      [ "$submit" = 0 ] && args+=(--no-submit)
+      local args=(task send-input --task-id "$tid" --project-path "$pp")
+      if [ "$submit_only" = 1 ]; then
+        args+=(--submit-only)
+      else
+        args+=(--text "$text")
+        [ "$submit" = 0 ] && args+=(--no-submit)
+      fi
       local out
       out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
       if printf '%s' "$out" | grep -q '"ok": true'; then
-        [ "$submit" = 0 ] && say "✓ staged steering for task $tid (not submitted)" || say "✓ steered task $tid"
+        if [ "$submit_only" = 1 ]; then
+          say "✓ submitted task $tid"
+        elif [ "$submit" = 0 ]; then
+          say "✓ staged steering for task $tid (not submitted)"
+        else
+          say "✓ steered task $tid"
+        fi
+      else
+        dim "couldn't reach task $tid's session — it may have ended."
+        dim "resume it first, then retry:  fleet task start --task-id $tid${repo:+ --repo $repo}"
+        return 1
+      fi
+      ;;
+    submit)
+      local tid="" repo=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --repo) repo="$2"; shift 2;;
+        --) shift;;
+        -*) echo "task submit: unknown flag $1" >&2; return 1;;
+        *) if [ -z "$tid" ]; then tid="$1"; fi; shift;;
+      esac; done
+      [ -n "$tid" ] || { echo "usage: fleet task submit <id> [--repo <name>]" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task submit")" || return 1
+      local args=(task send-input --task-id "$tid" --project-path "$pp" --submit-only)
+      local out
+      out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" "${args[@]}" 2>&1 || true)"
+      if printf '%s' "$out" | grep -q '"ok": true'; then
+        say "✓ submitted task $tid"
       else
         dim "couldn't reach task $tid's session — it may have ended."
         dim "resume it first, then retry:  fleet task start --task-id $tid${repo:+ --repo $repo}"
@@ -1634,7 +1671,8 @@ PY
        echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
        echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]" >&2
        echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
-       echo "       fleet task say <id> \"<text>\" [--submit|--no-submit] [--repo <name>]   steer a running agent" >&2
+       echo "       fleet task say <id> \"<text>\" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent" >&2
+       echo "       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)" >&2
        echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2
        echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
        echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2

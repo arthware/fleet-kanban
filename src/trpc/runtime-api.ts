@@ -67,7 +67,11 @@ import { openInBrowser } from "../server/browser";
 import { applyFleetUpdate, getFleetUpdateStatus } from "../server/fleet-update-status";
 import { listWorkspacesWithEpic, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
-import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../terminal/agent-session-adapters";
+import {
+	getAgentSubmitEnterDelayMs,
+	SUBMIT_ENTER_DELAY_MS,
+	toBracketedPaste,
+} from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
@@ -164,6 +168,22 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					summary: clineSummary,
 				};
 			}
+			// Submit-only path: if body.text is empty, write a lone \r directly and return.
+			if (body.text === "") {
+				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const summary = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
+				if (!summary) {
+					return {
+						ok: false,
+						summary: null,
+						error: "Task session is not running.",
+					};
+				}
+				return {
+					ok: true,
+					summary,
+				};
+			}
 			// PTY path: `fleet task say` wraps steering in a bracketed paste so a
 			// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
 			const wantsSubmit = body.submit ?? true;
@@ -190,7 +210,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			// had). The delay lets the paste flush and paste-mode close first, so the Enter
 			// registers as a submit keypress. `--no-submit` skips it, staging the text.
 			if (body.bracketedPaste && wantsSubmit) {
-				await delay(SUBMIT_ENTER_DELAY_MS);
+				const submitEnterDelayMs = getAgentSubmitEnterDelayMs(summary.agentId);
+				await delay(submitEnterDelayMs);
 				const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
 				if (afterSubmit) {
 					summary = afterSubmit;

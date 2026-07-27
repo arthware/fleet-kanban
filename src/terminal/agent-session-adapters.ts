@@ -86,6 +86,7 @@ interface HookCommandMetadata {
 
 interface AgentSessionAdapter {
 	prepare(input: AgentAdapterLaunchInput): Promise<PreparedAgentLaunch>;
+	submitEnterDelayMs?: number;
 }
 
 function escapeForTemplateLiteral(value: string): string {
@@ -736,6 +737,17 @@ export function toBracketedPaste(command: string): string {
  */
 export const SUBMIT_ENTER_DELAY_MS = 50;
 
+/**
+ * Gets the submit Enter delay for a given agent ID.
+ */
+export function getAgentSubmitEnterDelayMs(agentId: string | null | undefined): number {
+	if (!agentId) {
+		return SUBMIT_ENTER_DELAY_MS;
+	}
+	const adapter = ADAPTERS[agentId as RuntimeAgentId];
+	return adapter?.submitEnterDelayMs ?? SUBMIT_ENTER_DELAY_MS;
+}
+
 // Cursor Agent does not expose a separate append-system-prompt flag, so home
 // sidebar guidance is passed as part of the initial prompt content.
 function mergeCursorPromptWithHomeSystemPrompt(prompt: string, appendedSystemPrompt: string | null): string {
@@ -1065,6 +1077,7 @@ const codexAdapter: AgentSessionAdapter = {
 };
 
 const geminiAdapter: AgentSessionAdapter = {
+	submitEnterDelayMs: 300,
 	async prepare(input) {
 		const args = [...input.args];
 		const env: Record<string, string | undefined> = {};
