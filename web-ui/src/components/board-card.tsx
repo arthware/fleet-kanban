@@ -324,7 +324,6 @@ export function BoardCard({
 	onRestoreFromTrash,
 	onSaveTitle,
 	onOpenPr,
-	onImplementHere,
 	onCancelAutomaticAction,
 	isOpenPrLoading = false,
 	isMoveToTrashLoading = false,
@@ -351,7 +350,6 @@ export function BoardCard({
 	onRestoreFromTrash?: (taskId: string) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
 	onOpenPr?: (taskId: string) => void;
-	onImplementHere?: (taskId: string) => void;
 	onCancelAutomaticAction?: (taskId: string) => void;
 	isOpenPrLoading?: boolean;
 	isMoveToTrashLoading?: boolean;
@@ -564,8 +562,6 @@ export function BoardCard({
 	// this same live session. Reuse the exact signal the Design badge shows: the
 	// review-column "Implement here" action appears only when that doc resolves.
 	const designDoc = useTaskDesignDoc({ card, workspaceId: workspaceId ?? null, workspacePath });
-	const showImplementHere =
-		columnId === "review" && Boolean(onImplementHere) && Boolean(designDoc.data?.exists && designDoc.data.path);
 	const trashRestoreLabel =
 		sessionSummary?.agentSessionLifecycle === "gone"
 			? "Start fresh"
@@ -774,36 +770,18 @@ export function BoardCard({
 											}}
 										/>
 									) : columnId === "review" ? (
-										<>
-											{card.cardType === "plan" ? (
-												<Button
-													icon={isPromoting ? <Spinner size={13} /> : <Hammer size={13} />}
-													variant="default"
-													size="sm"
-													disabled={isPromoting}
-													aria-label="Promote task to build"
-													onMouseDown={stopEvent}
-													onClick={(event) => {
-														stopEvent(event);
-														handlePromoteToBuild();
-													}}
-												>
-													Promote to build
-												</Button>
-											) : null}
-											<Button
-												icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
-												variant="ghost"
-												size="sm"
-												disabled={isMoveToTrashLoading}
-												aria-label="Abandon task"
-												onMouseDown={stopEvent}
-												onClick={(event) => {
-													stopEvent(event);
-													onMoveToTrash?.(card.id);
-												}}
-											/>
-										</>
+										<Button
+											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+											variant="ghost"
+											size="sm"
+											disabled={isMoveToTrashLoading}
+											aria-label="Abandon task"
+											onMouseDown={stopEvent}
+											onClick={(event) => {
+												stopEvent(event);
+												onMoveToTrash?.(card.id);
+											}}
+										/>
 									) : isDoneCard ? (
 										<Button
 											icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
@@ -1098,40 +1076,41 @@ export function BoardCard({
 										) : null}
 									</div>
 								) : null}
-								{showImplementHere ? (
-									<div className="mt-1.5">
-										<Button
-											variant="primary"
-											size="sm"
-											fill
-											icon={<Hammer size={14} />}
-											aria-label="Implement plan in this session"
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onImplementHere?.(card.id);
-											}}
-										>
-											Implement here
-										</Button>
-									</div>
-								) : null}
-								{showOpenPrAction ? (
+								{columnId === "review" && (card.cardType === "plan" || showOpenPrAction) ? (
 									<div className="flex gap-1.5 mt-1.5">
-										<Button
-											variant="primary"
-											size="sm"
-											icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
-											disabled={isOpenPrLoading}
-											style={{ flex: "1 1 0" }}
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onOpenPr?.(card.id);
-											}}
-										>
-											Open PR
-										</Button>
+										{card.cardType === "plan" ? (
+											<Button
+												variant="primary"
+												size="sm"
+												icon={isPromoting ? <Spinner size={12} /> : <Hammer size={14} />}
+												disabled={isPromoting}
+												style={{ flex: "1 1 0" }}
+												aria-label="Implement the approved plan now"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													handlePromoteToBuild();
+												}}
+											>
+												Implement Plan now
+											</Button>
+										) : null}
+										{showOpenPrAction ? (
+											<Button
+												variant="primary"
+												size="sm"
+												icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
+												disabled={isOpenPrLoading}
+												style={{ flex: "1 1 0" }}
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													onOpenPr?.(card.id);
+												}}
+											>
+												Open PR
+											</Button>
+										) : null}
 									</div>
 								) : null}
 							</div>
