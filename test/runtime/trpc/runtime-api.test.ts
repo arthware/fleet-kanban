@@ -130,7 +130,7 @@ vi.mock("../../../src/server/browser.js", () => ({
 import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
 import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
 import { buildPrCardPromptDirective } from "../../../src/prompts/pr-card-directive";
-import { SUBMIT_ENTER_DELAY_MS } from "../../../src/terminal/agent-session-adapters";
+import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
 
@@ -1828,6 +1828,87 @@ describe("createRuntimeApi startTaskSession", () => {
 		// Only after the delay does the Enter go out, as its own distinct PTY write.
 		expect(terminalManager.writeInput).toHaveBeenCalledTimes(2);
 		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(2, "task-1", Buffer.from("\r", "utf8"));
+	});
+
+	it("defers the submit Enter to a custom tick so the paste settles before it (gemini)", async () => {
+		const summary = createSummary({ agentId: "gemini", pid: 4242 });
+		const terminalManager = {
+			writeInput: vi.fn(() => summary),
+			stopTaskSession: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+
+		// A gated delay parks the call between the paste write and the Enter write
+		let releaseDelay!: () => void;
+		const delayGate = new Promise<void>((resolve) => {
+			releaseDelay = resolve;
+		});
+		const delay = vi.fn(() => delayGate);
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+			delay,
+		});
+
+		const pending = api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "steer", bracketedPaste: true, submit: true },
+		);
+
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(1);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(
+			1,
+			"task-1",
+			Buffer.from(toBracketedPaste("steer"), "utf8"),
+		);
+		expect(delay).toHaveBeenCalledWith(300);
+
+		releaseDelay();
+		const response = await pending;
+		expect(response.ok).toBe(true);
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(2);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(2, "task-1", Buffer.from("\r", "utf8"));
+	});
+
+	it("supports a submit-only path by writing a lone \r with empty text", async () => {
+		const summary = createSummary({ agentId: "gemini", pid: 4242 });
+		const terminalManager = {
+			writeInput: vi.fn(() => summary),
+			stopTaskSession: vi.fn(),
+		};
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.sendTaskSessionInput.mockResolvedValue(null);
+		const delay = vi.fn();
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+			delay,
+		});
+
+		const response = await api.sendTaskSessionInput(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", text: "", bracketedPaste: true, submit: true },
+		);
+
+		expect(response.ok).toBe(true);
+		expect(terminalManager.writeInput).toHaveBeenCalledTimes(1);
+		expect(terminalManager.writeInput).toHaveBeenNthCalledWith(1, "task-1", Buffer.from("\r", "utf8"));
+		expect(delay).not.toHaveBeenCalled();
 	});
 
 	it("submits codex steering the same way — paste then a separate deferred Enter", async () => {
