@@ -1058,7 +1058,11 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	};
 }
 
-async function promoteTaskCommand(input: { cwd: string; taskId: string; projectPath?: string }): Promise<JsonRecord> {
+export async function promoteTaskCommand(input: {
+	cwd: string;
+	taskId: string;
+	projectPath?: string;
+}): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
@@ -1082,6 +1086,13 @@ async function promoteTaskCommand(input: { cwd: string; taskId: string; projectP
 		const movement = moveTaskToColumn(updatedTask.board, taskId, "in_progress");
 		if (!movement.task) {
 			throw new Error(`Task "${taskId}" could not be resolved after type update.`);
+		}
+
+		const finalColumnId = getTaskColumnId(movement.board, taskId);
+		if (finalColumnId !== "in_progress") {
+			throw new Error(
+				`Task "${taskId}" could not be transitioned to "in_progress" (ended up in "${finalColumnId}").`,
+			);
 		}
 
 		return {
