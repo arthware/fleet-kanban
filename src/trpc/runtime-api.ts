@@ -18,6 +18,7 @@ import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtim
 import type {
 	RuntimeCommandRunResponse,
 	RuntimeRunUpdateResponse,
+	RuntimeTaskAutoReviewMode,
 	RuntimeTaskReviewNotificationResponse,
 	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
@@ -447,6 +448,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				} else {
 					let board = { columns: [] as any[] };
 					let boardCardType: string | undefined;
+					let boardAutoReviewEnabled: boolean | undefined;
+					let boardAutoReviewMode: RuntimeTaskAutoReviewMode | undefined;
 
 					try {
 						const state = await loadWorkspaceState(workspaceScope.workspacePath);
@@ -456,6 +459,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 								const card = column.cards.find((c: any) => c.id === body.taskId);
 								if (card) {
 									boardCardType = card.cardType;
+									boardAutoReviewEnabled = card.autoReviewEnabled;
+									boardAutoReviewMode = card.autoReviewMode;
 									break;
 								}
 							}
@@ -471,9 +476,12 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						(await loadCardTypeManifest("build", { workspacePath: workspaceScope.workspacePath }));
 
 					if (manifest) {
+						const autoReviewEnabled = body.autoReviewEnabled ?? boardAutoReviewEnabled ?? false;
+						const autoReviewMode = body.autoReviewMode ?? boardAutoReviewMode;
+
 						const orderedSkills = resolveStartActiveSkills(manifest, {
-							autoReviewEnabled: body.autoReviewEnabled,
-							autoReviewMode: body.autoReviewMode,
+							autoReviewEnabled,
+							autoReviewMode,
 						});
 
 						const directive = composeCardDirective(orderedSkills, { baseRef: body.baseRef });
