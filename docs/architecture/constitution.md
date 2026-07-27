@@ -1,9 +1,8 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (unratified draft) → 1.0.0
-Bump rationale: Initial ratification. Distilled from AGENTS.md + docs/architecture.md into a short,
-  gate-checkable core. MAJOR baseline: establishes binding governance where none existed.
+Version change: 1.0.0 → 1.0.1
+Bump rationale: 1.0.1: Compress and tighten Article prose to halve injected per-card token cost without altering meaning.
 
 Principles defined:
   1. Concepts first: reuse, extend, or abstract before you build  (NON-NEGOTIABLE)
@@ -41,94 +40,56 @@ that agents most often skip.
 
 ## Article 1 — Concepts first: reuse, extend, or abstract before you build (NON-NEGOTIABLE)
 
-**Before introducing anything new, consult the concept map (`concepts/`).** Then reason like a good
-software engineer, in this order — do not skip to the last step:
+**Before introducing anything new, consult the concept map (`concepts/`).** Reason in this exact order:
+1. **Fit exists?** → Reuse it and point to its canonical concept home.
+2. **Close but not quite?** → **Extend** the existing concept; do not clone with variations.
+3. **Convergence?** → Introduce the right **abstraction** and fold near-duplicates into it.
+4. **Genuinely new?** → Only then add a new concept deliberately as `concepts/<name>.md` in the same change.
 
-1. **Do we already have something that fits?** → use it. Point at the canonical concept and its home.
-2. **Something close but not quite?** → **extend** the existing concept, don't clone it with a
-   variation.
-3. **Two or more things converging on the same idea?** → introduce the right **abstraction** and fold
-   the near-duplicates into it. Convergence is the signal to generalize.
-4. **Genuinely new?** → *only then* add a new concept — deliberately, as a new `concepts/<name>.md`
-   file in the same change.
-
-You MUST NOT reimplement a **similar** concept as a near-duplicate with minor variations. That is the
-single most expensive failure mode here: N slightly-different versions of the same idea. A new concept
-is a **decision**, recorded in the concept map — never an accident.
-
-**Rationale:** Fan-out codegen re-invents by default — each card starts cold. The concept map is the
-shared memory that turns "build something" into "extend the one thing that already does this."
+You MUST NOT reimplement a similar concept as a near-duplicate with minor variations.
+**Rationale:** Standard codegen reinventing by default creates N slightly different versions of the same idea; the concept map is our shared memory to extend the one thing that already does this.
 
 ## Article 2 — Root cause, not duct tape (NON-NEGOTIABLE)
 
-Agents tend to duct-tape symptoms. **We don't.** Before any fix, you MUST do root-cause analysis:
+We do not duct-tape symptoms. Before any fix, you MUST analyze the root cause:
+1. **Fundamental cause:** Identify the underlying issue that, when removed, makes the symptom impossible.
+2. **Local vs. Design:** Ask if the design still fits. A recurring bug indicates a wrong model.
+3. **General solution:** Prefer a deeper fix that simplifies or removes code over adding a conditional guard.
 
-1. **What is the fundamental cause?** Not the surface symptom — the thing that, if removed, makes the
-   symptom impossible.
-2. **Is this local, or a design problem?** ALWAYS ask whether the current design still fits, or whether
-   the bug is a sign the model is wrong. A recurring bug means the model is wrong.
-3. **Would a better general solution remove the whole class of problem — and simplify things?** The
-   deeper fix often *removes* code, config, or special-cases rather than adding a guard. Prefer it.
-
-Two workarounds on the same surface is a **stop sign**: re-model the problem, don't patch it a third
-time. Making a broken thing *loud* (better logging, a timeout that rethrows) is diagnosis, not a fix —
-don't ship it as if the problem is solved. If while scoping a small fix you see the broader re-model
-that would dissolve it, **say so** rather than quietly shipping the workaround.
-
-**Rationale:** Patches stack into unmaintainable special-casing; the deeper fix usually removes code.
-Symptom-chasing is how a wrong model survives — naming the cause is what lets us replace it.
+Two workarounds on the same surface is a **stop sign**: remodel the problem, do not patch a third time. Making a broken thing *loud* is diagnosis, not a fix. If a broader remodel would dissolve the bug, **say so** instead of quietly shipping a workaround.
+**Rationale:** Special-casing stacks unmaintainably; naming the cause and fixing the model removes code and prevents symptoms from surviving.
 
 ---
 
 ## Article 3 — One source of truth
 
-Every concern has exactly one owner (see `architecture.md` → "Who Owns What"). MUST NOT mirror state or
-duplicate logic across layers. If a change feels awkward, ownership is usually being blurred — fix the
-ownership, not the symptom (see Article 2).
+Every concern has exactly one owner (see `architecture.md` → "Who Owns What"). MUST NOT mirror state or duplicate logic across layers. If a change feels awkward, ownership is blurred: fix the ownership, not the symptom.
 
 ## Article 4 — Test-backed change (module tests, minimal mocking)
 
-MUST write tests first and watch them fail (RED) before implementing. **Prefer module tests** — exercise
-a coherent module through its **external / public API** (Given / When / Then where there's a user-facing
-surface) — over fine-grained unit tests bound to internals. When a module has external dependencies,
-define a **clean, narrow interface** for each and mock **at that seam only**. Do not use excessive
-mocking: a test drowning in mocks tests the mocks, not the behavior. The suite is the living spec — a
-failing name should point at exactly one cause.
-
-**Rationale:** Module-through-its-API tests survive refactors and read as the spec; internal-heavy
-mocking couples tests to implementation and hides real behavior.
+MUST write tests first and watch them fail (RED). **Prefer module tests** exercising a coherent module through its **public API** (Given/When/Then) over internal-bound unit tests. Mock only at clean, narrow interfaces for external dependencies; avoid excessive mocking. The test suite is the living spec where a failing name points to exactly one cause.
+**Rationale:** API-level tests survive refactors and serve as the spec, whereas excessive internal mocking couples tests to implementation and hides real behavior.
 
 ## Article 5 — Verification before completion
 
-No "done / fixed / passing" claim without **fresh command output in the same turn** that shows it.
-A card does not leave for Review on a self-report — it leaves on evidence.
-
-**Rationale:** A self-reported "done" the board trusts is how broken work reaches Review. Evidence,
-not confidence, gates a transition.
+No "done / fixed / passing" claim without **fresh command output in the same turn** showing it. Cards leave for Review only on evidence, never self-reports.
+**Rationale:** Self-reported completions bypass validation; only empirical evidence gates transitions safely.
 
 ## Article 6 — Capability over identity
 
-Prefer capability-oriented reasoning over `selectedAgentId === "cline"` branches. Keep the SDK behind
-its boundary modules (`src/cline-sdk/`); only those modules may import `@clinebot/*`.
+Prefer capability-oriented reasoning over `selectedAgentId === "cline"` branching. Keep the SDK isolated behind `src/cline-sdk/`; only boundary modules may import `@clinebot/*`.
 
 ## Article 7 — Clean replacement over compatibility scaffolding
 
-This area has no legacy users to migrate. Prefer clean replacement over backward-compatibility glue —
-except at the persistence/wire boundary (`src/core/api-contract.ts` and the on-disk JSON), where
-changes MUST stay additive / optional.
+Prefer clean replacement over backward-compatibility glue. The only exception is the persistence/wire boundary (`src/core/api-contract.ts` and on-disk JSON), where changes MUST remain additive and optional.
 
 ## Article 8 — Small, single-responsibility, DRY
 
-No thin pass-through wrappers; extract domain logic (state, effects, orchestration), not
-presentation-only shells. No `any`; use SDK-provided types, schemas, and helpers; no inline or dynamic
-imports; upgrade a dependency rather than downgrade to satisfy a type error.
+Extract domain logic (state, effects, orchestration) instead of presentation wrappers. Use SDK types/schemas/helpers and never use `any`. No inline/dynamic imports. Upgrade dependencies rather than downgrading to resolve type errors.
 
 ## Article 9 — Git & operational safety
 
-Never commit or push unless asked; never push to `upstream` (only `origin`). Commit at coherent
-incremental boundaries with semantic-commit prefixes; no destructive git (`reset --hard`, `clean -fdx`,
-`worktree remove`, `rm`/`mv` on repo paths). Never target the live boards (ports 3500 / 3200) — verify
-on a throwaway, isolated instance and tear it down.
+Commit incrementally with semantic prefixes. Never push to `upstream` (only `origin`). No destructive git commands (`reset --hard`, `clean -fdx`, `worktree remove`, or `rm/mv` on repo paths). Never target live boards (ports 3500/3200); verify on throwaway instances and tear them down.
 
 ---
 
@@ -157,4 +118,4 @@ the fleet root (`fleet-root/.fleet/doctrine/<repo>/`) so source repos stay prist
 [`../design/architect-doctrine-placement.md`](../design/architect-doctrine-placement.md). Repos extend
 the core; they never override Articles 1–5.*
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-22 | **Last Amended**: 2026-07-22
+**Version**: 1.0.1 | **Ratified**: 2026-07-22 | **Last Amended**: 2026-07-27

@@ -56,6 +56,25 @@ export const CONSTITUTION_DIRECTIVE_HEADER =
 	"Follow this project constitution — it is the non-negotiable core for this change:";
 
 /**
+ * Extracts the normative core of the constitution.
+ * The constitution's normative core is everything from the first Article through the last,
+ * excluding HTML comments and the Governance footer.
+ */
+export function extractInjectableConstitution(raw: string): string {
+	// Strip HTML comments (including multi-line)
+	let content = raw.replace(/<!--[\s\S]*?-->/g, "");
+
+	// Find case-insensitive "## Governance" at the start of a line
+	const governanceRegex = /^##\s+Governance\b/im;
+	const match = content.match(governanceRegex);
+	if (match && typeof match.index === "number") {
+		content = content.slice(0, match.index);
+	}
+
+	return content.trim();
+}
+
+/**
  * Prepend the constitution to a card/agent prompt so it can't be skipped. The full
  * (short) text is inlined rather than pointed at, so it works identically whether the
  * doctrine lives in-repo or at the fleet root. A null constitution leaves the prompt as-is.
@@ -64,5 +83,9 @@ export function prependConstitution(prompt: string, constitution: string | null)
 	if (!constitution) {
 		return prompt;
 	}
-	return `${CONSTITUTION_DIRECTIVE_HEADER}\n\n${constitution.trim()}\n\n---\n\n${prompt}`;
+	const core = extractInjectableConstitution(constitution);
+	if (!core) {
+		return prompt;
+	}
+	return `${CONSTITUTION_DIRECTIVE_HEADER}\n\n${core}\n\n---\n\n${prompt}`;
 }

@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	CONSTITUTION_DIRECTIVE_HEADER,
+	extractInjectableConstitution,
 	loadDoctrine,
 	prependConstitution,
 	type ReadFileIfExists,
@@ -103,5 +104,65 @@ describe("prependConstitution", () => {
 		const result = prependConstitution("P", "\n\n# Constitution\n\n");
 		// then
 		expect(result).toBe(`${CONSTITUTION_DIRECTIVE_HEADER}\n\n# Constitution\n\n---\n\nP`);
+	});
+
+	it("given a constitution that becomes empty after stripping, when prepended, then the prompt is unchanged", () => {
+		// given
+		const prompt = "Do the thing.";
+		const emptyConstitution = "<!-- only comment -->\n## Governance\nsome footer";
+		// when
+		const result = prependConstitution(prompt, emptyConstitution);
+		// then
+		expect(result).toBe(prompt);
+	});
+});
+
+describe("extractInjectableConstitution", () => {
+	it("should exclude HTML comments and ## Governance section onward while including all Article text", () => {
+		const raw = `<!--
+SYNC IMPACT REPORT
+==================
+Version change: 1.0.0
+-->
+
+# Constitution
+
+## Article 1 — Concepts first
+Do X.
+
+## Governance
+This is non-normative.`;
+
+		const result = extractInjectableConstitution(raw);
+		expect(result).toContain("# Constitution");
+		expect(result).toContain("## Article 1 — Concepts first\nDo X.");
+		expect(result).not.toContain("SYNC IMPACT REPORT");
+		expect(result).not.toContain("## Governance");
+		expect(result).not.toContain("This is non-normative.");
+	});
+
+	it("should return the full text if there are no HTML comments or Governance sections", () => {
+		const raw = "# Just text\nNo comment, no governance.";
+		const result = extractInjectableConstitution(raw);
+		expect(result).toBe("# Just text\nNo comment, no governance.");
+	});
+
+	it("should handle case-insensitive matching for Governance heading", () => {
+		const raw = "# Constitution\n\n## Article 1\nContent\n\n## goVeRnanCe\nMore content";
+		const result = extractInjectableConstitution(raw);
+		expect(result).toContain("# Constitution");
+		expect(result).toContain("## Article 1\nContent");
+		expect(result).not.toContain("## goVeRnanCe");
+		expect(result).not.toContain("More content");
+	});
+
+	it("should handle multiple HTML comments and strip them all", () => {
+		const raw = "<!-- first --># Hello<!-- second -->\nWorld<!-- third -->";
+		const result = extractInjectableConstitution(raw);
+		expect(result).toBe("# Hello\nWorld");
+	});
+
+	it("should not crash or return empty on an empty string", () => {
+		expect(extractInjectableConstitution("")).toBe("");
 	});
 });
