@@ -68,6 +68,15 @@ interface RuntimeWorkspaceMutationResult<T> {
 }
 
 type JsonRecord = Record<string, unknown>;
+type RuntimeTaskCommandClient = ReturnType<typeof createRuntimeTrpcClient>;
+
+interface StartTaskFromStateInput {
+	runtimeClient: RuntimeTaskCommandClient;
+	workspaceRepoPath: string;
+	runtimeState: RuntimeWorkspaceStateResponse;
+	taskId: string;
+	fromColumnId: RuntimeBoardColumnId;
+}
 
 function toErrorMessage(error: unknown): string {
 	if (error instanceof Error && error.message.trim().length > 0) {
@@ -981,17 +990,33 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 		throw new Error(`Task "${taskId}" is in "${fromColumnId}" and can only be started from backlog or in_progress.`);
 	}
 
-	const currentRecord = findTaskRecord(runtimeState, taskId);
-	const task = currentRecord?.task;
-	if (!task) {
-		throw new Error(`Task "${taskId}" could not be resolved.`);
+	return await startTaskFromState({
+		runtimeClient,
+		workspaceRepoPath,
+		runtimeState,
+		taskId,
+		fromColumnId,
+	});
+}
+
+async function startTaskFromState(input: StartTaskFromStateInput): Promise<JsonRecord> {
+	if (input.fromColumnId !== "backlog" && input.fromColumnId !== "in_progress") {
+		throw new Error(
+			`Task "${input.taskId}" is in "${input.fromColumnId}" and can only be started from backlog or in_progress.`,
+		);
 	}
 
-	const existingSession = runtimeState.sessions[task.id] ?? null;
+	const currentRecord = findTaskRecord(input.runtimeState, input.taskId);
+	const task = currentRecord?.task;
+	if (!task) {
+		throw new Error(`Task "${input.taskId}" could not be resolved.`);
+	}
+
+	const existingSession = input.runtimeState.sessions[task.id] ?? null;
 	const shouldStartSession = !existingSession || existingSession.state !== "running";
 
 	if (shouldStartSession) {
-		const ensured = await runtimeClient.workspace.ensureWorktree.mutate({
+		const ensured = await input.runtimeClient.workspace.ensureWorktree.mutate({
 			taskId: task.id,
 			baseRef: task.baseRef,
 		});
@@ -999,7 +1024,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			throw new Error(ensured.error ?? "Could not ensure task worktree.");
 		}
 
-		const started = await runtimeClient.runtime.startTaskSession.mutate({
+		const started = await input.runtimeClient.runtime.startTaskSession.mutate({
 			taskId: task.id,
 			prompt: task.prompt,
 			taskTitle: task.title,
@@ -1015,10 +1040,10 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 		}
 	}
 
-	const moved = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (latestState) => {
-		const movement = moveTaskToColumn(latestState.board, taskId, "in_progress");
+	const moved = await updateRuntimeWorkspaceState(input.runtimeClient, input.workspaceRepoPath, (latestState) => {
+		const movement = moveTaskToColumn(latestState.board, input.taskId, "in_progress");
 		if (!movement.task) {
-			throw new Error(`Task "${taskId}" could not be resolved.`);
+			throw new Error(`Task "${input.taskId}" could not be resolved.`);
 		}
 		if (!movement.moved) {
 			return {
@@ -1035,12 +1060,12 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 	if (!moved.moved) {
 		return {
 			ok: true,
-			message: `Task "${taskId}" is already in progress.`,
+			message: `Task "${input.taskId}" is already in progress.`,
 			task: {
 				id: task.id,
 				prompt: task.prompt,
 				column: "in_progress",
-				workspacePath: workspaceRepoPath,
+				workspacePath: input.workspaceRepoPath,
 				cardType: task.cardType,
 			},
 		};
@@ -1052,7 +1077,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			id: task.id,
 			prompt: task.prompt,
 			column: "in_progress",
-			workspacePath: workspaceRepoPath,
+			workspacePath: input.workspaceRepoPath,
 			cardType: task.cardType,
 		},
 	};
@@ -1063,7 +1088,7 @@ async function promoteTaskCommand(input: { cwd: string; taskId: string; projectP
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 
-	await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
+	const promoted = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
 		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
 		const taskRecord = findTaskRecord(runtimeState, taskId);
 		if (!taskRecord) {
@@ -1071,6 +1096,7 @@ async function promoteTaskCommand(input: { cwd: string; taskId: string; projectP
 		}
 
 		const updatedTask = updateTask(runtimeState.board, taskId, {
+			title: taskRecord.task.title,
 			prompt: taskRecord.task.prompt,
 			baseRef: taskRecord.task.baseRef,
 			cardType: "build",
@@ -1083,14 +1109,35 @@ async function promoteTaskCommand(input: { cwd: string; taskId: string; projectP
 		if (!movement.task) {
 			throw new Error(`Task "${taskId}" could not be resolved after type update.`);
 		}
+		const finalColumnId = getTaskColumnId(movement.board, taskId);
+		if (finalColumnId !== "in_progress") {
+			throw new Error(
+				`Task "${taskId}" could not be transitioned to "in_progress" (ended up in "${finalColumnId}").`,
+			);
+		}
+
+		const nextState: RuntimeWorkspaceStateResponse = {
+			...runtimeState,
+			board: movement.board,
+		};
 
 		return {
 			board: movement.board,
-			value: movement,
+			value: {
+				runtimeState: nextState,
+				taskId,
+				fromColumnId: "in_progress" as const,
+			},
 		};
 	});
 
-	return startTask(input);
+	return await startTaskFromState({
+		runtimeClient,
+		workspaceRepoPath,
+		runtimeState: promoted.runtimeState,
+		taskId: promoted.taskId,
+		fromColumnId: promoted.fromColumnId,
+	});
 }
 
 async function sendTaskInput(input: {
