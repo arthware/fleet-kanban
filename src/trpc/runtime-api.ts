@@ -47,13 +47,13 @@ import {
 	parseTaskTokenUsageRequest,
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
-import { resolveStartActiveSkills } from "../core/card-type";
+import { resolveStartActiveSkills, validateSkill } from "../core/card-type";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
 import { resolveTaskTitle } from "../core/task-title.js";
 import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadCardTypeManifest } from "../prompts/card-type-discovery";
-import { composeCardDirective } from "../prompts/compose-card-directive";
+import { composeCardDirective, resolveCanonicalSkillsDirSync } from "../prompts/compose-card-directive";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { getAgentBudget } from "../server/agent-budget";
 import {
@@ -475,6 +475,18 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 							autoReviewEnabled: body.autoReviewEnabled,
 							autoReviewMode: body.autoReviewMode,
 						});
+
+						const skillsDir = resolveCanonicalSkillsDirSync();
+						if (skillsDir) {
+							for (const skillName of orderedSkills) {
+								const status = validateSkill(skillName, skillsDir);
+								if (status !== "ok") {
+									process.stderr.write(
+										`[kanban] Warning: Skill "${skillName}" for card-type "${manifest.name}" is ${status}. It will be skipped.\n`,
+									);
+								}
+							}
+						}
 
 						const directive = composeCardDirective(orderedSkills, { baseRef: body.baseRef });
 						withDirectives = directive ? `${directive}${body.prompt}` : body.prompt;
