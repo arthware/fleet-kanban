@@ -13,6 +13,7 @@ let mockMeasureWidths = [240, 240, 240];
 let mockMeasureCallCount = 0;
 const trpcMocks = vi.hoisted(() => ({
 	getDesignDoc: vi.fn(),
+	runCommand: vi.fn(),
 }));
 
 vi.mock("@hello-pangea/dnd", () => ({
@@ -41,6 +42,11 @@ vi.mock("@/runtime/trpc-client", () => ({
 		workspace: {
 			getDesignDoc: {
 				query: trpcMocks.getDesignDoc,
+			},
+		},
+		runtime: {
+			runCommand: {
+				mutate: trpcMocks.runCommand,
 			},
 		},
 	}),
@@ -1792,23 +1798,15 @@ describe("BoardCard", () => {
 		expect(document.body.textContent).toContain("Design details are ready.");
 	});
 
-	it("given a review card with a design doc, when Implement here is clicked, then it invokes the implement-here handler with the card id", async () => {
-		// given a review card whose committed design doc resolves
-		trpcMocks.getDesignDoc.mockResolvedValue({
-			exists: true,
-			path: "/tmp/repo/docs/design/task-1-approved-plan.md",
-			content: "# Approved plan",
-		});
-		const onImplementHere = vi.fn();
+	it("given a plan card in review, when the card renders, then it renders an 'Implement Plan now' button in the bottom review-decision row", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
-					card={createCard()}
+					card={createCard({ cardType: "plan" })}
 					index={0}
 					columnId="review"
 					workspaceId="workspace-1"
 					workspacePath="/tmp/repo"
-					onImplementHere={onImplementHere}
 				/>,
 			);
 		});
@@ -1816,35 +1814,55 @@ describe("BoardCard", () => {
 			await Promise.resolve();
 		});
 
-		// when its Implement here button is clicked
 		const implementButton = container.querySelector<HTMLButtonElement>(
-			'button[aria-label="Implement plan in this session"]',
+			'button[aria-label="Implement the approved plan now"]',
 		);
 		expect(implementButton).toBeInstanceOf(HTMLButtonElement);
-		expect(implementButton?.textContent).toContain("Implement here");
+		expect(implementButton?.textContent).toContain("Implement Plan now");
+	});
+
+	it("given a plan card in review, when 'Implement Plan now' is clicked, then it invokes the promote handler and calls the fleet promote command via runCommand", async () => {
+		trpcMocks.runCommand.mockResolvedValue({ exitCode: 0, combinedOutput: "" });
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ cardType: "plan" })}
+					index={0}
+					columnId="review"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+				/>,
+			);
+		});
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const implementButton = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Implement the approved plan now"]',
+		);
+		expect(implementButton).toBeInstanceOf(HTMLButtonElement);
+
 		await act(async () => {
 			implementButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 			implementButton?.click();
 		});
 
-		// then the implement-here handler runs for that card
-		expect(onImplementHere).toHaveBeenCalledWith("task-1");
+		expect(trpcMocks.runCommand).toHaveBeenCalledWith({
+			command: "fleet task promote task-1",
+		});
 	});
 
-	it("given a review card with no design doc, when the card renders, then no Implement-here action is shown", async () => {
-		// given a review card with no matching design doc (default mock: exists false)
-		const onImplementHere = vi.fn();
-
-		// when the card renders
+	it("given a build card in review, when the card renders, then no 'Implement Plan now' button is shown", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
-					card={createCard()}
+					card={createCard({ cardType: "build" })}
 					index={0}
 					columnId="review"
 					workspaceId="workspace-1"
 					workspacePath="/tmp/repo"
-					onImplementHere={onImplementHere}
 				/>,
 			);
 		});
@@ -1852,9 +1870,9 @@ describe("BoardCard", () => {
 			await Promise.resolve();
 		});
 
-		// then no Implement-here action is offered
-		expect(container.querySelector('button[aria-label="Implement plan in this session"]')).toBeNull();
-		expect(container.textContent).not.toContain("Implement here");
+		const implementButton = container.querySelector('button[aria-label="Implement the approved plan now"]');
+		expect(implementButton).toBeNull();
+		expect(container.textContent).not.toContain("Implement Plan now");
 	});
 
 	it("shows the latest assistant preview on active task cards", async () => {

@@ -429,7 +429,6 @@ export default function App(): ReactElement {
 		runGitAction,
 		switchHomeBranch,
 		discardHomeWorkingChanges,
-		runImplementHereAction,
 		resetGitActionState,
 	} = useGitActions({
 		currentProjectId,
@@ -680,7 +679,6 @@ export default function App(): ReactElement {
 		handleMoveToTrash,
 		handleMoveDoneCardToTrash,
 		handleMoveReviewCardToTrash,
-		handleImplementHere,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,
@@ -707,7 +705,6 @@ export default function App(): ReactElement {
 		fetchTaskWorkspaceInfo,
 		sendTaskSessionInput,
 		readyForReviewNotificationsEnabled,
-		runImplementHereAction,
 	});
 
 	const {
@@ -1078,7 +1075,6 @@ export default function App(): ReactElement {
 												inlineTaskEditor={inlineTaskEditor}
 												onEditTask={handleOpenEditTask}
 												onSaveTaskTitle={handleSaveTaskTitle}
-												onImplementHereTask={handleImplementHere}
 												onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
 												moveToTrashLoadingById={moveToTrashLoadingById}
 												onMoveToTrashTask={handleMoveReviewCardToTrash}
