@@ -58,6 +58,8 @@ import type {
 	RuntimeGitSummaryResponse,
 	RuntimeGitSyncAction,
 	RuntimeGitSyncResponse,
+	RuntimeHomeAgentFreshStartRequest,
+	RuntimeHomeAgentFreshStartResponse,
 	RuntimeHookIngestRequest,
 	RuntimeHookIngestResponse,
 	RuntimeOpenFileRequest,
@@ -167,6 +169,8 @@ import {
 	runtimeGitSummaryResponseSchema,
 	runtimeGitSyncActionSchema,
 	runtimeGitSyncResponseSchema,
+	runtimeHomeAgentFreshStartRequestSchema,
+	runtimeHomeAgentFreshStartResponseSchema,
 	runtimeHookIngestRequestSchema,
 	runtimeHookIngestResponseSchema,
 	runtimeOpenFileRequestSchema,
@@ -258,6 +262,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionStopRequest,
 		) => Promise<RuntimeTaskSessionStopResponse>;
+		startFreshHomeAgentSession: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeHomeAgentFreshStartRequest,
+		) => Promise<RuntimeHomeAgentFreshStartResponse>;
 		sendTaskSessionInput: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionInputRequest,
@@ -535,6 +543,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeTaskSessionStopResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.stopTaskSession(ctx.workspaceScope, input);
+			}),
+		startFreshHomeAgentSession: workspaceProcedure
+			.input(runtimeHomeAgentFreshStartRequestSchema)
+			.output(runtimeHomeAgentFreshStartResponseSchema)
+			.mutation(async ({ ctx, input }) => {
+				return await ctx.runtimeApi.startFreshHomeAgentSession(ctx.workspaceScope, input);
 			}),
 		sendTaskSessionInput: workspaceProcedure
 			.input(runtimeTaskSessionInputRequestSchema)

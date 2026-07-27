@@ -8,6 +8,7 @@ import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessio
 const startTaskSessionMutateMock = vi.hoisted(() => vi.fn());
 const stopTaskSessionMutateMock = vi.hoisted(() => vi.fn());
 const reloadTaskChatSessionMutateMock = vi.hoisted(() => vi.fn());
+const startFreshHomeAgentSessionMutateMock = vi.hoisted(() => vi.fn());
 const notifyErrorMock = vi.hoisted(() => vi.fn());
 const showAppToastMock = vi.hoisted(() => vi.fn());
 
@@ -22,6 +23,9 @@ vi.mock("@/runtime/trpc-client", () => ({
 			},
 			reloadTaskChatSession: {
 				mutate: (input: object) => reloadTaskChatSessionMutateMock({ workspaceId, ...input }),
+			},
+			startFreshHomeAgentSession: {
+				mutate: (input: object) => startFreshHomeAgentSessionMutateMock({ workspaceId, ...input }),
 			},
 		},
 	}),
@@ -59,6 +63,7 @@ function createSummary(taskId: string, agentId: RuntimeTaskSessionSummary["agent
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
+		homeAgentSessionGeneration: 0,
 	};
 }
 
@@ -168,6 +173,7 @@ function HookHarness({
 	onSnapshot,
 	workspaceGit = DEFAULT_WORKSPACE_GIT,
 	seedSessionSummary = false,
+	startFreshSessionNonce = 0,
 }: {
 	config: RuntimeConfigResponse | null;
 	clineSessionContextVersion?: number;
@@ -175,6 +181,7 @@ function HookHarness({
 	onSnapshot: (snapshot: HookSnapshot) => void;
 	workspaceGit?: RuntimeGitRepositoryInfo | null;
 	seedSessionSummary?: boolean;
+	startFreshSessionNonce?: number;
 }): null {
 	const [sessionSummaries, setSessionSummaries] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const upsertSessionSummary = useCallback((summary: RuntimeTaskSessionSummary) => {
@@ -191,6 +198,7 @@ function HookHarness({
 		sessionSummaries,
 		setSessionSummaries,
 		upsertSessionSummary,
+		startFreshSessionNonce,
 	});
 
 	useEffect(() => {
@@ -220,6 +228,7 @@ describe("useHomeAgentSession", () => {
 		startTaskSessionMutateMock.mockReset();
 		stopTaskSessionMutateMock.mockReset();
 		reloadTaskChatSessionMutateMock.mockReset();
+		startFreshHomeAgentSessionMutateMock.mockReset();
 		startTaskSessionMutateMock.mockImplementation(async ({ taskId }: { taskId: string }) => ({
 			ok: true,
 			summary: createSummary(taskId, "codex"),
@@ -227,6 +236,10 @@ describe("useHomeAgentSession", () => {
 		reloadTaskChatSessionMutateMock.mockImplementation(async ({ taskId }: { taskId: string }) => ({
 			ok: true,
 			summary: createSummary(taskId, "cline"),
+		}));
+		startFreshHomeAgentSessionMutateMock.mockImplementation(async ({ taskId }: { taskId: string }) => ({
+			ok: true,
+			summary: createSummary(taskId, "claude"),
 		}));
 		notifyErrorMock.mockReset();
 		showAppToastMock.mockReset();
@@ -835,6 +848,54 @@ describe("useHomeAgentSession", () => {
 		);
 		expect(startTaskSessionMutateMock).toHaveBeenCalledTimes(2);
 		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
+	});
+
+	it("starts the same home terminal task again after the runtime starts a fresh session generation", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+		const config = createRuntimeConfig({
+			selectedAgentId: "claude",
+			effectiveCommand: "claude --dangerously-skip-permissions",
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					config={config}
+					currentProjectId="workspace-1"
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await createFlushPromises();
+		});
+
+		const taskId = requireTaskId(requireSnapshot(latestSnapshot).taskId);
+		expect(taskId).toBe("__home_agent__:workspace-1");
+		expect(startTaskSessionMutateMock).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					config={config}
+					currentProjectId="workspace-1"
+					startFreshSessionNonce={1}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await createFlushPromises();
+		});
+
+		expect(startFreshHomeAgentSessionMutateMock).toHaveBeenCalledWith({
+			workspaceId: "workspace-1",
+			taskId,
+		});
+		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
+		expect(startTaskSessionMutateMock).toHaveBeenCalledTimes(2);
+		expect(startTaskSessionMutateMock).toHaveBeenLastCalledWith(expect.objectContaining({ taskId }));
+		expect(requireSnapshot(latestSnapshot).taskId).toBe(taskId);
 	});
 
 	it("keeps the architect home chat session intact when the displayed project changes", async () => {

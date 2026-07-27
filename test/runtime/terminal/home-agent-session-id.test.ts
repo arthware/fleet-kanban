@@ -11,6 +11,16 @@ describe("deriveHomeAgentClaudeSessionId", () => {
 		expect(second).toBe(first);
 	});
 
+	it("returns the same id within a generation and a new deterministic id after the generation changes", () => {
+		const firstGeneration = deriveHomeAgentClaudeSessionId("tools", "claude", 0);
+		const sameGeneration = deriveHomeAgentClaudeSessionId("tools", "claude", 0);
+		const nextGeneration = deriveHomeAgentClaudeSessionId("tools", "claude", 1);
+
+		expect(sameGeneration).toBe(firstGeneration);
+		expect(nextGeneration).not.toBe(firstGeneration);
+		expect(deriveHomeAgentClaudeSessionId("tools", "claude", 1)).toBe(nextGeneration);
+	});
+
 	it("produces a valid UUID the CLI will accept as a session id", () => {
 		expect(deriveHomeAgentClaudeSessionId("tools", "claude")).toMatch(UUID_PATTERN);
 	});

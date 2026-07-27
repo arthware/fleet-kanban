@@ -134,6 +134,7 @@ function createDefaultSummary(taskId: string): RuntimeTaskSessionSummary {
 		reviewReason: null,
 		exitCode: null,
 		agentSessionId: null,
+		homeAgentSessionGeneration: 0,
 		lastHookAt: null,
 		latestHookActivity: null,
 		warningMessage: null,
@@ -352,12 +353,17 @@ export class TerminalSessionManager implements TerminalSessionService {
 		// deterministic session id so it is always resumable and never lost on a
 		// board restart: start it with --session-id the first time, then resume it on
 		// every launch after (chosen by whether its transcript already exists).
+		const isHomeAgentTask = request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId);
 		const homeAgentSessionId =
-			request.agentId === "claude" && request.workspaceId && isHomeAgentSessionId(request.taskId)
-				? deriveHomeAgentClaudeSessionId(request.workspaceId, request.agentId)
+			request.agentId === "claude" && request.workspaceId && isHomeAgentTask
+				? deriveHomeAgentClaudeSessionId(
+						request.workspaceId,
+						request.agentId,
+						entry.summary.homeAgentSessionGeneration ?? 0,
+					)
 				: null;
 
-		if (!homeAgentSessionId && !isFirstTaskLaunch && lifecycle === "gone") {
+		if (!homeAgentSessionId && !isHomeAgentTask && !isFirstTaskLaunch && lifecycle === "gone") {
 			return cloneSummary(entry.summary);
 		}
 
@@ -407,7 +413,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			({ agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
 				agentId: request.agentId,
 				storedSessionId: entry.summary.agentSessionId,
-				resumeMode: lifecycle === "resumable" ? "resume" : isFirstTaskLaunch ? "fresh" : "unavailable",
+				resumeMode:
+					lifecycle === "resumable" ? "resume" : isFirstTaskLaunch || isHomeAgentTask ? "fresh" : "unavailable",
 				mintSessionId: () => randomUUID(),
 			}));
 		}
@@ -1136,6 +1143,40 @@ export class TerminalSessionManager implements TerminalSessionService {
 			});
 		}
 		return cloneSummary(entry.summary);
+	}
+
+	startFreshHomeAgentSession(taskId: string): RuntimeTaskSessionSummary {
+		if (!isHomeAgentSessionId(taskId)) {
+			throw new Error(`Task "${taskId}" is not a home agent session.`);
+		}
+		const entry = this.ensureEntry(taskId);
+		if (entry.active) {
+			entry.suppressAutoRestartOnExit = true;
+			const cleanupFn = entry.active.onSessionCleanup;
+			entry.active.onSessionCleanup = null;
+			stopWorkspaceTrustTimers(entry.active);
+			entry.active.session.stop();
+			if (cleanupFn) {
+				cleanupFn().catch(() => {
+					// Best effort: cleanup failure is non-critical.
+				});
+			}
+			entry.active = null;
+		}
+		entry.terminalStateMirror?.dispose();
+		entry.terminalStateMirror = null;
+		entry.restartRequest = null;
+		const summary = updateSummary(entry, {
+			state: "idle",
+			pid: null,
+			reviewReason: null,
+			exitCode: null,
+			agentSessionId: null,
+			agentSessionLifecycle: "gone",
+			homeAgentSessionGeneration: (entry.summary.homeAgentSessionGeneration ?? 0) + 1,
+		});
+		this.emitSummary(summary);
+		return cloneSummary(summary);
 	}
 
 	markInterruptedAndStopAll(): RuntimeTaskSessionSummary[] {

@@ -9,7 +9,9 @@ import {
 	ExternalLink,
 	Info,
 	Lightbulb,
+	MoreVertical,
 	Plus,
+	RotateCcw,
 	X,
 } from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -89,6 +91,7 @@ export function ProjectNavigationPanel({
 	onSelectProject,
 	onRemoveProject,
 	onAddProject,
+	onStartFreshAgentSession,
 	sidebarWidth,
 	setExpandedSidebarWidth,
 	isCollapsed,
@@ -110,6 +113,7 @@ export function ProjectNavigationPanel({
 	onSelectProject: (projectId: string) => void;
 	onRemoveProject: (projectId: string) => Promise<boolean>;
 	onAddProject: () => void;
+	onStartFreshAgentSession?: (workspaceId: string) => void;
 	sidebarWidth: number;
 	setExpandedSidebarWidth: (width: number) => void;
 	isCollapsed: boolean;
@@ -126,6 +130,8 @@ export function ProjectNavigationPanel({
 		currentProjectId,
 		projects: sortedProjects,
 	});
+	const showAgentSessionMenu =
+		canShowAgentSection && agentChatWorkspaceId !== null && onStartFreshAgentSession !== undefined;
 
 	const activeAgentProject = sortedProjects.find((p) => p.id === agentChatWorkspaceId);
 	const epicProjects = sortedProjects.filter((p) => p.epic);
@@ -420,20 +426,58 @@ export function ProjectNavigationPanel({
 						>
 							Projects
 						</button>
-						<button
-							type="button"
-							onClick={() => onActiveSectionChange("agent")}
-							disabled={!canShowAgentSection}
-							className={cn(
-								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
-								activeSection === "agent"
-									? "bg-surface-4 text-text-primary border border-border"
-									: "text-text-secondary hover:text-text-primary border border-transparent",
-								!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
-							)}
-						>
-							Agent
-						</button>
+						<div className="relative min-w-0">
+							<button
+								type="button"
+								onClick={() => onActiveSectionChange("agent")}
+								disabled={!canShowAgentSection}
+								className={cn(
+									"w-full cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
+									showAgentSessionMenu ? "pr-7" : null,
+									activeSection === "agent"
+										? "bg-surface-4 text-text-primary border border-border"
+										: "text-text-secondary hover:text-text-primary border border-transparent",
+									!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
+								)}
+							>
+								Agent
+							</button>
+							{showAgentSessionMenu ? (
+								<DropdownMenu.Root>
+									<DropdownMenu.Trigger asChild>
+										<button
+											type="button"
+											aria-label="Agent session menu"
+											className="absolute right-1 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-sm text-text-secondary hover:text-text-primary hover:bg-surface-3 focus:outline-none"
+											onClick={(event) => event.stopPropagation()}
+										>
+											<MoreVertical size={14} />
+										</button>
+									</DropdownMenu.Trigger>
+									<DropdownMenu.Portal>
+										<DropdownMenu.Content
+											side="bottom"
+											align="end"
+											sideOffset={4}
+											className="z-50 min-w-44 rounded-md border border-border-bright bg-surface-1 p-1 shadow-lg"
+											onCloseAutoFocus={(event) => event.preventDefault()}
+										>
+											<DropdownMenu.Item
+												className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-status-orange cursor-pointer outline-none data-[highlighted]:bg-surface-3"
+												onSelect={() => {
+													if (agentChatWorkspaceId) {
+														onStartFreshAgentSession?.(agentChatWorkspaceId);
+													}
+												}}
+											>
+												<RotateCcw size={14} className="text-status-orange shrink-0" />
+												<span className="truncate">Start fresh Session</span>
+											</DropdownMenu.Item>
+										</DropdownMenu.Content>
+									</DropdownMenu.Portal>
+								</DropdownMenu.Root>
+							) : null}
+						</div>
 					</div>
 				</div>
 				{showSwitcher && (

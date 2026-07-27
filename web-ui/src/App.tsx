@@ -153,6 +153,18 @@ export default function App(): ReactElement {
 		currentProjectId,
 		projects,
 	});
+	const [freshAgentSessionNonceByWorkspaceId, setFreshAgentSessionNonceByWorkspaceId] = useState<
+		Record<string, number>
+	>({});
+	const handleStartFreshAgentSession = useCallback((workspaceId: string) => {
+		setFreshAgentSessionNonceByWorkspaceId((current) => ({
+			...current,
+			[workspaceId]: (current[workspaceId] ?? 0) + 1,
+		}));
+	}, []);
+	const freshAgentSessionNonce = agentChatWorkspaceId
+		? (freshAgentSessionNonceByWorkspaceId[agentChatWorkspaceId] ?? 0)
+		: 0;
 	// When the architect is a different workspace than the selected board, its live
 	// chat can't ride the board's per-workspace stream, so open a dedicated one.
 	// When they coincide (or there's no architect), the board stream already
@@ -486,6 +498,7 @@ export default function App(): ReactElement {
 		workspaceGit,
 		latestTaskChatMessage: agentChatLatestTaskChatMessage,
 		taskChatMessagesByTaskId: agentChatMessagesByTaskId,
+		startFreshSessionNonce: freshAgentSessionNonce,
 	});
 	const { runningShortcutLabel, handleSelectShortcutLabel, handleRunShortcut, handleCreateShortcut } =
 		useShortcutActions({
@@ -953,6 +966,7 @@ export default function App(): ReactElement {
 						isCollapsed={sidebarLayout.isCollapsed}
 						setSidebarCollapsed={sidebarLayout.setSidebarCollapsed}
 						architectWorkspaceId={architectWorkspaceId}
+						onStartFreshAgentSession={handleStartFreshAgentSession}
 					/>
 				) : null}
 				<div className="flex flex-col flex-1 min-w-0 overflow-hidden">

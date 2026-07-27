@@ -476,4 +476,41 @@ describe("ProjectNavigationPanel width persistence", () => {
 		});
 		expect(onSelectProject).toHaveBeenCalledWith("project-1");
 	});
+
+	it("renders the Agent session menu only for a resolvable Agent workspace and starts fresh for that workspace", () => {
+		const onStartFreshAgentSession = vi.fn();
+
+		renderPanel({
+			activeSection: "agent",
+			architectWorkspaceId: "project-1",
+			onStartFreshAgentSession,
+		});
+
+		const triggerButton = container.querySelector("button[aria-label='Agent session menu']");
+		expect(triggerButton).toBeInstanceOf(HTMLButtonElement);
+
+		act(() => {
+			triggerButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const menuItem = Array.from(document.querySelectorAll("[role='menuitem']")).find((item) =>
+			item.textContent?.includes("Start fresh Session"),
+		);
+		expect(menuItem).toBeDefined();
+
+		act(() => {
+			menuItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		expect(onStartFreshAgentSession).toHaveBeenCalledWith("project-1");
+
+		renderPanel({
+			activeSection: "agent",
+			currentProjectId: null,
+			canShowAgentSection: false,
+			onStartFreshAgentSession,
+		});
+
+		expect(container.querySelector("button[aria-label='Agent session menu']")).toBeNull();
+	});
 });

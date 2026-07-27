@@ -367,7 +367,11 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			if (!parsed || parsed.agentId !== "claude") {
 				continue;
 			}
-			const agentSessionId = deriveHomeAgentClaudeSessionId(parsed.workspaceId, "claude");
+			const agentSessionId = deriveHomeAgentClaudeSessionId(
+				parsed.workspaceId,
+				"claude",
+				summary.homeAgentSessionGeneration ?? 0,
+			);
 			const transcript = await locateAgentTranscript({
 				agentId: "claude",
 				sessionId: agentSessionId,

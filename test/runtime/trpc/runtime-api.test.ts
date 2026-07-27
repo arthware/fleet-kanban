@@ -130,6 +130,7 @@ const workspaceStateMocks = vi.hoisted(() => ({
 	listWorkspacesWithEpic: vi.fn(async () => []),
 	loadWorkspaceContextById: vi.fn(),
 	getRuntimeHomePath: vi.fn(() => "/tmp/home"),
+	mutateWorkspaceState: vi.fn(),
 }));
 
 vi.mock("../../../src/state/workspace-state.js", () => ({
@@ -139,6 +140,7 @@ vi.mock("../../../src/state/workspace-state.js", () => ({
 	listWorkspacesWithEpic: workspaceStateMocks.listWorkspacesWithEpic,
 	loadWorkspaceContextById: workspaceStateMocks.loadWorkspaceContextById,
 	getRuntimeHomePath: workspaceStateMocks.getRuntimeHomePath,
+	mutateWorkspaceState: workspaceStateMocks.mutateWorkspaceState,
 }));
 
 vi.mock("../../../src/server/browser.js", () => ({
@@ -296,6 +298,52 @@ function createClineTaskSessionServiceMock() {
 	};
 }
 
+describe("createRuntimeApi startFreshHomeAgentSession", () => {
+	it("given a home agent session, when starting fresh, then it stops and rotates the resumable launch generation", async () => {
+		const homeTaskId = "__home_agent__:workspace-1";
+		const rotatedSummary = createSummary({
+			taskId: homeTaskId,
+			state: "idle",
+			pid: null,
+			agentSessionId: null,
+			homeAgentSessionGeneration: 1,
+			agentSessionLifecycle: "gone",
+		});
+		const terminalManager = {
+			startFreshHomeAgentSession: vi.fn(() => rotatedSummary),
+		};
+		workspaceStateMocks.mutateWorkspaceState.mockImplementation(
+			async (
+				_workspacePath: string,
+				mutate: (state: { board: { columns: [] }; sessions: Record<string, RuntimeTaskSessionSummary> }) => unknown,
+			) => mutate({ board: { columns: [] }, sessions: {} }),
+		);
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startFreshHomeAgentSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{ taskId: homeTaskId },
+		);
+
+		expect(response).toEqual({ ok: true, summary: rotatedSummary });
+		expect(clineTaskSessionService.stopTaskSession).toHaveBeenCalledWith(homeTaskId);
+		expect(terminalManager.startFreshHomeAgentSession).toHaveBeenCalledWith(homeTaskId);
+		expect(workspaceStateMocks.mutateWorkspaceState).toHaveBeenCalledWith("/tmp/repo", expect.any(Function));
+	});
+});
+
 describe("createRuntimeApi startTaskSession", () => {
 	const originalClineApiKey = process.env.CLINE_API_KEY;
 	const originalOcaApiKey = process.env.OCA_API_KEY;
@@ -314,6 +362,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		workspaceStateMocks.listWorkspaceIndexEntries.mockReset();
 		workspaceStateMocks.listWorkspacesWithEpic.mockReset();
 		workspaceStateMocks.loadWorkspaceContextById.mockReset();
+		workspaceStateMocks.mutateWorkspaceState.mockReset();
 
 		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
 			repoPath: "/tmp/repo",
@@ -331,6 +380,17 @@ describe("createRuntimeApi startTaskSession", () => {
 			sessions: {},
 			revision: 1,
 		});
+		workspaceStateMocks.mutateWorkspaceState.mockImplementation(
+			async (
+				_workspacePath: string,
+				mutate: (state: {
+					board: {
+						columns: [];
+					};
+					sessions: Record<string, RuntimeTaskSessionSummary>;
+				}) => unknown,
+			) => mutate({ board: { columns: [] }, sessions: {} }),
+		);
 
 		agentRegistryMocks.resolveAgentCommand.mockReset();
 		agentRegistryMocks.buildRuntimeConfigResponse.mockReset();
@@ -1514,6 +1574,7 @@ describe("createRuntimeApi startTaskSession", () => {
 				cwd: "/tmp/repo",
 			}),
 		);
+		expect(workspaceStateMocks.mutateWorkspaceState).toHaveBeenCalledWith("/tmp/repo", expect.any(Function));
 		expect(turnCheckpointMocks.captureTaskTurnCheckpoint).not.toHaveBeenCalled();
 	});
 
@@ -3667,6 +3728,7 @@ describe("card-types centralized composition (Card C)", () => {
 			},
 		);
 
+		expect(response.ok).toBe(true);
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				prompt: expect.stringMatching(/^You are working a build card\..*My Prompt/s),
