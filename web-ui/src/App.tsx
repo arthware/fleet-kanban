@@ -955,6 +955,7 @@ export default function App(): ReactElement {
 						setExpandedSidebarWidth={sidebarLayout.setExpandedSidebarWidth}
 						isCollapsed={sidebarLayout.isCollapsed}
 						setSidebarCollapsed={sidebarLayout.setSidebarCollapsed}
+						architectWorkspaceId={architectWorkspaceId}
 					/>
 				) : null}
 				<div className="flex flex-col flex-1 min-w-0 overflow-hidden">

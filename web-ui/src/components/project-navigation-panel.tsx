@@ -22,6 +22,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import type { FeaturebaseFeedbackState } from "@/hooks/use-featurebase-feedback-widget";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { resolveAgentChatWorkspace } from "@/runtime/agent-chat-workspace";
 import type {
 	RuntimeAgentBudgetResponse,
 	RuntimeAgentId,
@@ -52,6 +53,15 @@ interface TaskCountBadge {
 	count: number;
 }
 
+function EpicBadge({ name }: { name: string }) {
+	const letter = name.charAt(0).toUpperCase();
+	return (
+		<span className="w-4 h-4 rounded text-[9px] font-bold shrink-0 border border-accent/20 bg-accent/15 text-accent flex items-center justify-center select-none">
+			{letter}
+		</span>
+	);
+}
+
 export function ProjectNavigationPanel({
 	projects,
 	isLoadingProjects = false,
@@ -72,6 +82,7 @@ export function ProjectNavigationPanel({
 	setExpandedSidebarWidth,
 	isCollapsed,
 	setSidebarCollapsed,
+	architectWorkspaceId = null,
 }: {
 	projects: RuntimeProjectSummary[];
 	isLoadingProjects?: boolean;
@@ -92,10 +103,22 @@ export function ProjectNavigationPanel({
 	setExpandedSidebarWidth: (width: number) => void;
 	isCollapsed: boolean;
 	setSidebarCollapsed: (collapsed: boolean, persist?: boolean) => void;
+	architectWorkspaceId?: string | null;
 }): React.ReactElement {
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
-	const activeProject = sortedProjects.find((p) => p.id === currentProjectId);
-	const agentTabLabel = activeProject?.epic ? "Epic Agent" : "Architect Agent";
+
+	const hasEpics = sortedProjects.some((p) => p.epic);
+	const showSwitcher = activeSection === "agent" && architectWorkspaceId !== null && hasEpics;
+
+	const { agentChatWorkspaceId } = resolveAgentChatWorkspace({
+		architectWorkspaceId,
+		currentProjectId,
+		projects: sortedProjects,
+	});
+
+	const activeAgentProject = sortedProjects.find((p) => p.id === agentChatWorkspaceId);
+	const epicProjects = sortedProjects.filter((p) => p.epic);
+
 	const shouldShowFeaturebaseFeedback = canShowFeaturebaseFeedbackButton({
 		selectedAgentId,
 		clineProviderSettings,
@@ -395,10 +418,86 @@ export function ProjectNavigationPanel({
 								!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
 							)}
 						>
-							{agentTabLabel}
+							Agent
 						</button>
 					</div>
 				</div>
+				{showSwitcher && (
+					<div className="mt-2">
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger asChild>
+								<button
+									type="button"
+									aria-label="Agent context switcher"
+									className="w-full cursor-pointer rounded-md border border-border bg-surface-2 hover:bg-surface-3 transition-colors flex items-center justify-between gap-2 px-2.5 py-1.5 focus:outline-none"
+								>
+									<div className="flex items-center gap-2 min-w-0 text-left">
+										{activeAgentProject?.epic ? (
+											<>
+												<EpicBadge name={activeAgentProject.epic.name ?? activeAgentProject.name} />
+												<span className="text-xs font-medium text-text-primary truncate">
+													{activeAgentProject.epic.name ?? activeAgentProject.name} Agent
+												</span>
+											</>
+										) : (
+											<>
+												<Command size={14} className="text-text-secondary shrink-0" />
+												<span className="text-xs font-medium text-text-primary truncate">
+													Architect Agent
+												</span>
+											</>
+										)}
+									</div>
+									<ChevronDown size={14} className="text-text-tertiary shrink-0" />
+								</button>
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Portal>
+								<DropdownMenu.Content
+									side="bottom"
+									align="start"
+									sideOffset={4}
+									className="z-50 w-[var(--radix-dropdown-menu-trigger-width)] rounded-md border border-border-bright bg-surface-1 p-1 shadow-lg"
+									onCloseAutoFocus={(event) => event.preventDefault()}
+								>
+									<DropdownMenu.Item
+										className={cn(
+											"flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-text-primary cursor-pointer outline-none data-[highlighted]:bg-surface-3",
+											!activeAgentProject?.epic ? "bg-surface-2 font-medium" : "",
+										)}
+										onSelect={() => {
+											if (architectWorkspaceId) {
+												onSelectProject(architectWorkspaceId);
+											}
+										}}
+									>
+										<Command size={14} className="text-text-secondary shrink-0" />
+										<span className="truncate">Architect Agent</span>
+									</DropdownMenu.Item>
+
+									{epicProjects.length > 0 && <div className="h-px bg-border my-1" />}
+
+									{epicProjects.map((project) => {
+										const isCurrent = agentChatWorkspaceId === project.id;
+										const name = project.epic?.name ?? project.name;
+										return (
+											<DropdownMenu.Item
+												key={project.id}
+												className={cn(
+													"flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-text-primary cursor-pointer outline-none data-[highlighted]:bg-surface-3",
+													isCurrent ? "bg-surface-2 font-medium" : "",
+												)}
+												onSelect={() => onSelectProject(project.id)}
+											>
+												<EpicBadge name={name} />
+												<span className="truncate">{name} Agent</span>
+											</DropdownMenu.Item>
+										);
+									})}
+								</DropdownMenu.Content>
+							</DropdownMenu.Portal>
+						</DropdownMenu.Root>
+					</div>
+				)}
 			</div>
 
 			{activeSection === "projects" ? (
