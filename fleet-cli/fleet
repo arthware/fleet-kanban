@@ -1185,6 +1185,18 @@ if wts:
     if un: print(f"{D}uncommitted:{R}\n  "+"\n  ".join(un.splitlines()[:8]))
 else:
     print(f"{D}(worktree cleaned — task complete or not yet started){R}")
+_pr_url = t.get('prUrl')
+_pr_num = t.get('prNumber')
+_pr_state = t.get('prState')
+_pr_gate = t.get('prGateStatus')
+if _pr_url or _pr_num:
+    _pr_desc = []
+    if _pr_num: _pr_desc.append(f"#{_pr_num}")
+    if _pr_state: _pr_desc.append(_pr_state)
+    _pr_desc_str = " ".join(_pr_desc)
+    _gate_part = f" {D}·{R} gate: {_pr_gate}" if _pr_gate and _pr_gate != "none" else ""
+    _url_part = f"  ({_pr_url})" if _pr_url else ""
+    print(f"{D}pr:{R} {_pr_desc_str}{_gate_part}{_url_part}")
 print(f"{D}tail: fleet task tail {tid} [--lines N] [--since <mins>]  — read its live conversation{R}")
 PY
       ;;
