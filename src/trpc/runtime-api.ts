@@ -20,6 +20,7 @@ import type {
 	RuntimeRunUpdateResponse,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskReviewNotificationResponse,
+	RuntimeTaskSessionSummary,
 	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
 } from "../core/api-contract";
@@ -34,6 +35,7 @@ import {
 	parseClineProviderSettingsSaveRequest,
 	parseClineUpdateProviderRequest,
 	parseCommandRunRequest,
+	parseHomeAgentFreshStartRequest,
 	parseRuntimeConfigSaveRequest,
 	parseShellSessionStartRequest,
 	parseTaskChatAbortRequest,
@@ -65,7 +67,12 @@ import {
 } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { applyFleetUpdate, getFleetUpdateStatus } from "../server/fleet-update-status";
-import { listWorkspacesWithEpic, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
+import {
+	listWorkspacesWithEpic,
+	loadWorkspaceContextById,
+	loadWorkspaceState,
+	mutateWorkspaceState,
+} from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import {
 	getAgentSubmitEnterDelayMs,
@@ -130,6 +137,17 @@ async function resolveExistingTaskCwdOrEnsure(options: {
 			ensure: true,
 		});
 	}
+}
+
+async function persistTaskSessionSummary(workspacePath: string, summary: RuntimeTaskSessionSummary): Promise<void> {
+	await mutateWorkspaceState(workspacePath, (state) => ({
+		board: state.board,
+		sessions: {
+			...state.sessions,
+			[summary.taskId]: summary,
+		},
+		value: null,
+	}));
 }
 
 export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrpcContext["runtimeApi"] {
@@ -666,9 +684,13 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						// Best effort checkpointing only.
 					}
 				}
+				const responseSummary = applyFleetToolsWarning(nextSummary);
+				if (isHome) {
+					await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
+				}
 				return {
 					ok: true,
-					summary: applyFleetToolsWarning(nextSummary),
+					summary: responseSummary,
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
@@ -694,6 +716,34 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const summary = terminalManager.stopTaskSession(body.taskId);
 				return {
 					ok: Boolean(summary),
+					summary,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					ok: false,
+					summary: null,
+					error: message,
+				};
+			}
+		},
+		startFreshHomeAgentSession: async (workspaceScope, input) => {
+			try {
+				const body = parseHomeAgentFreshStartRequest(input);
+				if (!isHomeAgentSessionId(body.taskId)) {
+					return {
+						ok: false,
+						summary: null,
+						error: "Only home agent sessions can be started fresh.",
+					};
+				}
+				const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
+				await clineTaskSessionService.stopTaskSession(body.taskId).catch(() => null);
+				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const summary = terminalManager.startFreshHomeAgentSession(body.taskId);
+				await persistTaskSessionSummary(workspaceScope.workspacePath, summary);
+				return {
+					ok: true,
 					summary,
 				};
 			} catch (error) {

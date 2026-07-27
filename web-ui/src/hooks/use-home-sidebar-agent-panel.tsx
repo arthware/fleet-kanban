@@ -37,6 +37,7 @@ interface UseHomeSidebarAgentPanelInput {
 	workspaceGit: RuntimeGitRepositoryInfo | null;
 	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null;
 	taskChatMessagesByTaskId: Record<string, RuntimeTaskChatMessage[]>;
+	startFreshSessionNonce?: number;
 }
 
 async function stopHomeSidebarTaskSession(workspaceId: string, taskId: string): Promise<void> {
@@ -58,6 +59,7 @@ export function useHomeSidebarAgentPanel({
 	workspaceGit,
 	latestTaskChatMessage,
 	taskChatMessagesByTaskId,
+	startFreshSessionNonce = 0,
 }: UseHomeSidebarAgentPanelInput): ReactElement | null {
 	const isMobile = useIsMobile();
 	const terminalThemeColors = useTerminalThemeColors();
@@ -93,6 +95,7 @@ export function useHomeSidebarAgentPanel({
 		sessionSummaries: effectiveSessionSummaries,
 		setSessionSummaries,
 		upsertSessionSummary,
+		startFreshSessionNonce,
 	});
 	const currentTaskIdRef = useRef<string | null>(null);
 

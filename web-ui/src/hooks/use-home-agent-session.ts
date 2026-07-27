@@ -27,6 +27,7 @@ interface UseHomeAgentSessionInput {
 	sessionSummaries: Record<string, RuntimeTaskSessionSummary>;
 	setSessionSummaries: Dispatch<SetStateAction<Record<string, RuntimeTaskSessionSummary>>>;
 	upsertSessionSummary: (summary: RuntimeTaskSessionSummary) => void;
+	startFreshSessionNonce?: number;
 }
 
 interface UseHomeAgentSessionResult {
@@ -68,6 +69,7 @@ export function useHomeAgentSession({
 	sessionSummaries,
 	setSessionSummaries: _setSessionSummaries,
 	upsertSessionSummary,
+	startFreshSessionNonce = 0,
 }: UseHomeAgentSessionInput): UseHomeAgentSessionResult {
 	const latestBaseRefRef = useRef("HEAD");
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
@@ -76,6 +78,7 @@ export function useHomeAgentSession({
 	const previousClineSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
 	const previousClineConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
 	const previousTerminalConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
+	const previousFreshStartNonceByWorkspaceRef = useRef(new Map<string, number>());
 	const nextStartRequestIdRef = useRef(0);
 	const disposedRef = useRef(false);
 	const clineProviderSettings = getRuntimeClineProviderSettings(runtimeProjectConfig);
@@ -256,6 +259,51 @@ export function useHomeAgentSession({
 	}, [currentProjectId, descriptor, runtimeProjectConfig]);
 
 	useEffect(() => {
+		if (!currentProjectId || !descriptor || startFreshSessionNonce <= 0) {
+			return;
+		}
+		const previousNonce = previousFreshStartNonceByWorkspaceRef.current.get(currentProjectId) ?? 0;
+		previousFreshStartNonceByWorkspaceRef.current.set(currentProjectId, startFreshSessionNonce);
+		if (previousNonce === startFreshSessionNonce) {
+			return;
+		}
+
+		const session = {
+			workspaceId: currentProjectId,
+			taskId: descriptor.taskId,
+		} satisfies HomeAgentSessionIdentity;
+		const sessionKey = buildHomeAgentSessionKey(session);
+		startedSessionKeysRef.current.delete(sessionKey);
+		pendingStartRequestIdsRef.current.delete(sessionKey);
+
+		let cancelled = false;
+		void getRuntimeTrpcClient(currentProjectId)
+			.runtime.startFreshHomeAgentSession.mutate({
+				taskId: descriptor.taskId,
+			})
+			.then((response) => {
+				if (cancelled || disposedRef.current) {
+					return;
+				}
+				if (!response.ok || !response.summary) {
+					throw new Error(response.error ?? "Could not start a fresh home agent session.");
+				}
+				upsertSessionSummary(response.summary);
+			})
+			.catch((error) => {
+				if (cancelled || disposedRef.current) {
+					return;
+				}
+				const message = error instanceof Error ? error.message : String(error);
+				notifyError(message);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [currentProjectId, descriptor, startFreshSessionNonce, upsertSessionSummary]);
+
+	useEffect(() => {
 		if (!currentProjectId || !descriptor || descriptor.panelMode !== "terminal") {
 			return;
 		}
@@ -351,6 +399,7 @@ export function useHomeAgentSession({
 			previousClineSessionContextVersionByWorkspaceRef.current.clear();
 			previousClineConfigByWorkspaceRef.current.clear();
 			previousTerminalConfigByWorkspaceRef.current.clear();
+			previousFreshStartNonceByWorkspaceRef.current.clear();
 		};
 	}, []);
 

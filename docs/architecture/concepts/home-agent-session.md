@@ -6,11 +6,12 @@ A synthetic, project-scoped session for the sidebar agent that reuses task-sessi
 a real card or worktree.
 
 ## Domain model
-Identified by a minted synthetic id `__home_agent__:<workspaceId>:<agentId>` (deterministic so
-refreshes reconnect). No task card, no worktree, no implement/PR directive. Rotates when the project
-or material agent config changes, but not when merely toggling sidebar tabs. Cline agent → native
-chat; other agents → terminal panel. The raw prefix must not be duplicated in app code
-(lint-enforced).
+Identified by a minted synthetic id `__home_agent__:<workspaceId>` (deterministic so refreshes
+reconnect; legacy `:<agentId>` ids still parse). No task card, no worktree, no implement/PR directive.
+Terminal-backed home agents also carry a persisted session generation; within a generation the agent
+CLI session id stays deterministic/resumable, and "Start fresh Session" bumps the generation so the
+next launch starts a new conversation while old transcripts remain on disk. Cline agent → native chat;
+other agents → terminal panel. The raw prefix must not be duplicated in app code (lint-enforced).
 
 ## Reuse / do-not-duplicate
 - Relates to [Workspace](workspace.md), [Task session](task-session.md),

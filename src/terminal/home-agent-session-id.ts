@@ -9,17 +9,18 @@ import type { RuntimeAgentId } from "../core/api-contract";
 const HOME_AGENT_UUID_NAMESPACE = "fee1c0de-0000-4000-8000-000000000001";
 
 /**
- * Derive a DETERMINISTIC session id (a UUIDv5 over `workspaceId:agentId`) for a
+ * Derive a DETERMINISTIC session id (a UUIDv5 over `workspaceId:agentId:generation`) for a
  * workspace's home/architect agent.
  *
- * Because it depends only on `(workspaceId, agentId)`, it is identical on every
- * launch — so the home/architect chat (a single, persistent conversation) is
- * always resumable and can never be lost on a board restart. The first launch
- * starts the CLI session with this id (`--session-id`); every launch after
- * resumes it (`--resume`), chosen by whether its transcript already exists.
+ * Because it depends on a persisted generation, it is identical on every launch
+ * within that generation, but a deliberate generation bump points the home agent
+ * at a fresh conversation without deleting the old transcript.
  */
-export function deriveHomeAgentClaudeSessionId(workspaceId: string, agentId: RuntimeAgentId): string {
-	return uuidV5(`${workspaceId}:${agentId}`, HOME_AGENT_UUID_NAMESPACE);
+export function deriveHomeAgentClaudeSessionId(workspaceId: string, agentId: RuntimeAgentId, generation = 0): string {
+	if (generation === 0) {
+		return uuidV5(`${workspaceId}:${agentId}`, HOME_AGENT_UUID_NAMESPACE);
+	}
+	return uuidV5(`${workspaceId}:${agentId}:${generation}`, HOME_AGENT_UUID_NAMESPACE);
 }
 
 export interface HomeAgentLaunchDecision {

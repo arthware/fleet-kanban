@@ -15,6 +15,7 @@ import {
 	type RuntimeDesignDocRequest,
 	type RuntimeDirectoryListRequest,
 	type RuntimeGitCheckoutRequest,
+	type RuntimeHomeAgentFreshStartRequest,
 	type RuntimeHookIngestRequest,
 	type RuntimeProjectAddRequest,
 	type RuntimeProjectRemoveRequest,
@@ -53,6 +54,7 @@ import {
 	runtimeDesignDocRequestSchema,
 	runtimeDirectoryListRequestSchema,
 	runtimeGitCheckoutRequestSchema,
+	runtimeHomeAgentFreshStartRequestSchema,
 	runtimeHookIngestRequestSchema,
 	runtimeProjectAddRequestSchema,
 	runtimeProjectRemoveRequestSchema,
@@ -287,6 +289,17 @@ export function parseTaskSessionStopRequest(value: unknown): RuntimeTaskSessionS
 	const taskId = parsed.taskId.trim();
 	if (!taskId) {
 		throw new Error("Invalid task session stop payload.");
+	}
+	return {
+		taskId,
+	};
+}
+
+export function parseHomeAgentFreshStartRequest(value: unknown): RuntimeHomeAgentFreshStartRequest {
+	const parsed = parseWithSchema(runtimeHomeAgentFreshStartRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Invalid home agent fresh-start payload.");
 	}
 	return {
 		taskId,

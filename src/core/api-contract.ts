@@ -420,6 +420,10 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	// sessions.json written before this field existed still parses.
 	agentSessionId: z.string().nullable().default(null),
 	agentSessionLifecycle: runtimeAgentSessionLifecycleSchema.optional(),
+	// Home/architect terminal sessions use a deterministic CLI session id per
+	// generation. Bumping this starts a fresh conversation while keeping the
+	// synthetic sidebar task id stable and old transcripts on disk.
+	homeAgentSessionGeneration: z.number().int().nonnegative().optional(),
 	lastHookAt: z.number().nullable().default(null),
 	latestHookActivity: runtimeTaskHookActivitySchema.nullable().default(null),
 	warningMessage: z.string().nullable().optional(),
@@ -1259,6 +1263,18 @@ export const runtimeTaskSessionStopResponseSchema = z.object({
 	error: z.string().optional(),
 });
 export type RuntimeTaskSessionStopResponse = z.infer<typeof runtimeTaskSessionStopResponseSchema>;
+
+export const runtimeHomeAgentFreshStartRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeHomeAgentFreshStartRequest = z.infer<typeof runtimeHomeAgentFreshStartRequestSchema>;
+
+export const runtimeHomeAgentFreshStartResponseSchema = z.object({
+	ok: z.boolean(),
+	summary: runtimeTaskSessionSummarySchema.nullable(),
+	error: z.string().optional(),
+});
+export type RuntimeHomeAgentFreshStartResponse = z.infer<typeof runtimeHomeAgentFreshStartResponseSchema>;
 
 export const runtimeTaskSessionInputRequestSchema = z.object({
 	taskId: z.string(),
