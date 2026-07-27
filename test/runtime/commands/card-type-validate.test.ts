@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { executeCardTypeValidate } from "../../../src/commands/card-type";
+import { validateCardType } from "../../../src/core/card-type";
 
 describe("Card Type Validate Command", () => {
 	let tempDirs: string[] = [];
@@ -66,7 +67,7 @@ phases:
 		).rejects.toThrow("Validation failed: missing-skill-1 is missing or has an empty directive");
 
 		// Then we expect missing-skill-1 to be marked as MISSING
-		const combinedOut = stdoutMsgs.join("\n") + "\n" + stderrMsgs.join("\n");
+		const combinedOut = `${stdoutMsgs.join("\n")}\n${stderrMsgs.join("\n")}`;
 		expect(combinedOut).toContain("missing-skill-1");
 		expect(combinedOut).toContain("MISSING");
 	});
@@ -126,7 +127,7 @@ Some content
 			}),
 		).rejects.toThrow("Validation failed: empty-directive-skill is missing or has an empty directive");
 
-		const combinedOut = stdoutMsgs.join("\n") + "\n" + stderrMsgs.join("\n");
+		const combinedOut = `${stdoutMsgs.join("\n")}\n${stderrMsgs.join("\n")}`;
 		expect(combinedOut).toContain("empty-directive-skill");
 		expect(combinedOut).toContain("EMPTY-DIRECTIVE");
 	});
@@ -219,5 +220,93 @@ directive: "Direct instructions for skill 2 with \${baseRef}."
 		expect(combinedOut).toContain("Composed Directive (with --auto-review pr):");
 		expect(combinedOut).toContain("Direct instructions for skill 1.");
 		expect(combinedOut).toContain("Direct instructions for skill 2 with main.");
+	});
+});
+
+describe("validateCardType & validateSkill module core", () => {
+	let tempDirs: string[] = [];
+
+	async function createTempDir(prefix: string): Promise<string> {
+		const dir = await mkdtemp(join(tmpdir(), prefix));
+		tempDirs.push(dir);
+		return dir;
+	}
+
+	afterEach(async () => {
+		for (const dir of tempDirs) {
+			try {
+				await rm(dir, { recursive: true, force: true });
+			} catch {}
+		}
+		tempDirs = [];
+	});
+
+	it("given a manifest referencing a missing skill, when validateCardType is evaluated, then it returns isValid=false and status MISSING", async () => {
+		// Arrange
+		const skillsDir = await createTempDir("skills-missing-");
+		const manifest = {
+			name: "test-missing",
+			description: "manifest with missing skill",
+			phases: [
+				{
+					name: "build",
+					lane: "in_progress" as const,
+					skills: ["missing-skill"],
+					activation: "default" as const,
+				},
+			],
+		};
+
+		// Act
+		const result = validateCardType(manifest, skillsDir);
+
+		// Assert
+		expect(result.isValid).toBe(false);
+		expect(result.phases).toHaveLength(1);
+		expect(result.phases[0].skills).toHaveLength(1);
+		expect(result.phases[0].skills[0]).toEqual({
+			name: "missing-skill",
+			status: "MISSING",
+		});
+	});
+
+	it("given a manifest referencing an empty directive skill, when validateCardType is evaluated, then it returns isValid=false and status EMPTY-DIRECTIVE", async () => {
+		// Arrange
+		const skillsDir = await createTempDir("skills-empty-");
+		const skillName = "empty-skill";
+		const skillPath = join(skillsDir, skillName);
+		await mkdir(skillPath, { recursive: true });
+		await writeFile(
+			join(skillPath, "SKILL.md"),
+			`---
+directive: ""
+---
+`,
+		);
+
+		const manifest = {
+			name: "test-empty",
+			description: "manifest with empty directive skill",
+			phases: [
+				{
+					name: "build",
+					lane: "in_progress" as const,
+					skills: [skillName],
+					activation: "default" as const,
+				},
+			],
+		};
+
+		// Act
+		const result = validateCardType(manifest, skillsDir);
+
+		// Assert
+		expect(result.isValid).toBe(false);
+		expect(result.phases).toHaveLength(1);
+		expect(result.phases[0].skills).toHaveLength(1);
+		expect(result.phases[0].skills[0]).toEqual({
+			name: skillName,
+			status: "EMPTY-DIRECTIVE",
+		});
 	});
 });
