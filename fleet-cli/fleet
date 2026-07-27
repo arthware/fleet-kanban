@@ -1084,7 +1084,8 @@ fleet_task() {
         --model) extra+=(--agent-model "$2"); shift 2;;
         --external-issue|--issue) extra+=(--external-issue "$2"); shift 2;;
         --base-ref) extra+=(--base-ref "$2"); shift 2;;
-        --plan) extra+=(--start-in-plan-mode true); shift;;
+        --type) extra+=(--card-type "$2"); shift 2;;
+        --plan|--start-in-plan-mode) echo "error: --plan was removed. Plan is now a card type: \`fleet task create --type plan …\`." >&2; return 1;;
         --auto-review) case "$2" in
             pr) extra+=(--auto-review-enabled true --auto-review-mode pr);;
             *) echo "task create: --auto-review pr" >&2; return 1;; esac; shift 2;;
@@ -1420,8 +1421,8 @@ PY
         --prompt-file) uargs+=(--prompt "$(cat "$2")"); shift 2;;
         --base-ref) uargs+=(--base-ref "$2"); shift 2;;
         --agent) uargs+=(--agent-id "$2"); shift 2;;
-        --plan) uargs+=(--start-in-plan-mode true); shift;;
-        --no-plan) uargs+=(--start-in-plan-mode false); shift;;
+        --plan|--start-in-plan-mode) echo "error: --plan was removed. Plan is now a card type: \`fleet task create --type plan …\`." >&2; return 1;;
+        --no-plan) echo "error: --no-plan was removed. Plan is now a card type (and tasks default to build)." >&2; return 1;;
         --auto-review) case "$2" in
             off|false|none) uargs+=(--auto-review-enabled false);;
             pr) uargs+=(--auto-review-enabled true --auto-review-mode pr);;
@@ -1494,6 +1495,18 @@ PY
       local -a sel; if [ -n "$tid" ]; then sel=(--task-id "$tid"); else sel=(--column "$col"); fi
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
+      ;;
+    promote)
+      local repo="" tid=""
+      while [ $# -gt 0 ]; do case "$1" in
+        --repo) repo="$2"; shift 2;;
+        -*) echo "task promote: unknown flag $1" >&2; return 1;;
+        *) if [ -z "$tid" ]; then tid="$1"; else echo "task promote: unexpected arg '$1'" >&2; return 1; fi; shift;;
+      esac; done
+      [ -n "$tid" ] || { echo "usage: fleet task promote <card-id> [--repo <name>]" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task promote: multiple repos — pass --repo <name>" >&2; return 1; }
+      local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task promote "$tid" --project-path "$pp" 2>&1 || true)"
+      if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ promoted $tid to build"; else echo "task promote failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
     land)
       local card="" repo="fleet-kanban" base="" merge_method="squash" delete_branch=1 do_done=1 dry_run=0 force=0
@@ -1654,15 +1667,16 @@ PY
 
       say "landed $card (#$pr_num)."
       ;;
-    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--agent claude|codex] [--model <id>] [--plan] [--auto-review pr] [--start]" >&2
+    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--type <type>] [--agent claude|codex] [--model <id>] [--auto-review pr] [--start]" >&2
        echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
-       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--auto-review pr|off][--agent..][--plan|--no-plan][--cline-model..]" >&2
+       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]" >&2
        echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
        echo "       fleet task say <id> \"<text>\" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent" >&2
        echo "       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)" >&2
        echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2
        echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
        echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2
+       echo "       fleet task promote <card-id> [--repo <name>]" >&2
        echo "       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent" >&2
        echo "       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]" >&2
        echo "       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)" >&2
@@ -1693,9 +1707,9 @@ fleet task tail <id> [--lines N] [--since <mins>]
     Read the last of a running card's agent conversation — what it's doing right
     now. Use to decide whether a card needs steering (fleet task say) before you act.
 
-fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] --repo <name> [--issue <ref>] [--model <id>] [--plan] [--start]
+fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] --repo <name> [--issue <ref>] [--model <id>] [--type <type>] [--start]
     Dispatch a new unit of work to a sub-repo. Write a scoped prompt (it drives the
-    agent's /implement, or /plan with --plan); add --start to launch it now.
+    agent's /implement, or /plan with --type plan); add --start to launch it now.
     --file/--markdown author the card as a Markdown doc with YAML frontmatter
     (agent, auto-review, issue, code-references, links) — see fleet-kanban/docs/card-authoring.md.
     Use --model to run a cheaper agent on mechanical cards (e.g. claude-haiku-4-5)
@@ -1854,6 +1868,124 @@ fleet_xtools() {
   esac
 }
 
+# --- card-types: workflows defining phases and skills -----------------------
+_card_type_dirs() {  # tracked project dir first, then built-in repo fallback
+  if [ "${IN_PROJECT:-0}" = 1 ] && [ "$CFG_DIR" != "$GLOBAL_DIR" ]; then
+    local project_root
+    project_root="$(dirname "$CFG_DIR")"
+    printf '%s\n' "$project_root/fleet/card-types"
+  fi
+  if [ -n "${FLEET_REPO:-}" ] && [ -d "$FLEET_REPO/fleet/card-types" ]; then
+    printf '%s\n' "$FLEET_REPO/fleet/card-types"
+  fi
+  return 0
+}
+_card_type_find() {  # print path of first matching card-type manifest, or fail
+  local name="${1:-}" d f
+  _xtools_valid_name "$name" || return 1
+  while IFS= read -r d; do
+    f="$d/$name.md"
+    [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }
+  done < <(_card_type_dirs)
+  return 1
+}
+card_type_list() {
+  local d f name desc seen=" " found=0
+  say "card-types — workflows defining phases and skills (run: fleet card-type show <name>)"
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*.md; do
+      [ -f "$f" ] || continue
+      name="$(basename "$f" .md)"
+      case "$seen" in *" $name "*) continue;; esac
+      seen="$seen$name "
+      desc="$(sed -n 's/^description: *//p' "$f" | sed "s/^['\"]//;s/['\"]$//" | head -1)"
+      printf '  %-20s %s\n' "$name" "${desc:-}"
+      found=1
+    done
+  done < <(_card_type_dirs)
+  [ "$found" = 1 ] || dim "  (none yet — create one: fleet card-type new <name>)"
+}
+card_type_new() {
+  local name="${1:-}"
+  _xtools_valid_name "$name" || { dim "usage: fleet card-type new <name>  (name: letters/digits/_/-)"; return 1; }
+  local existing dir f
+  existing="$(_card_type_find "$name")" && { dim "already exists: $existing"; return 1; }
+  dir="$(dirname "$CFG_DIR")/fleet/card-types"
+  mkdir -p "$dir"
+  f="$dir/$name.md"
+  [ -e "$f" ] && { dim "already exists: $f"; return 1; }
+  cat >"$f" <<EOF
+---
+name: $name
+description: A custom card workflow for $name tasks.
+phases:
+  - name: build
+    lane: in_progress
+    skills: [fleet-implement]
+    activation: default
+---
+
+# $name
+
+Prose description and documentation for the $name card type.
+EOF
+  say "created $f"
+  dim "  edit it, then run: fleet card-type show $name"
+}
+card_type_path() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name'"; return 1; }
+  printf '%s\n' "$f"
+}
+card_type_show() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name' — list: fleet card-type ls"; return 1; }
+  cat "$f"
+}
+card_type_edit() {
+  local f; f="$(_card_type_find "${1:-}")" || { dim "no card-type '${1:-}' — create: fleet card-type new ${1:-<name>}"; return 1; }
+  "${EDITOR:-vi}" "$f"
+}
+card_type_rm() {
+  local name="${1:-}" f
+  _xtools_valid_name "$name" || { dim "invalid name"; return 1; }
+  f="$(_card_type_find "$name")" || { dim "no card-type '$name'"; return 1; }
+  local project_root project_file
+  project_root="$(dirname "$CFG_DIR")"
+  project_file="$project_root/fleet/card-types/$name.md"
+  if [ "$f" = "$project_file" ]; then
+    rm -f "$f" && say "removed $f"
+  else
+    dim "cannot remove built-in card-type '$name' at $f"
+    return 1
+  fi
+}
+card_type_validate() {
+  local name="${1:-}"
+  _xtools_valid_name "$name" || { dim "usage: fleet card-type validate <name>"; return 1; }
+  local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+  local project_root; project_root="$(dirname "$CFG_DIR")"
+  "$bin" card-type validate "$name" --project-path "$project_root"
+}
+fleet_card_type() {
+  case "${1:-}" in
+    ''|ls|list|-h|--help|help) card_type_list;;
+    new|create) shift; card_type_new "$@";;
+    path|which) shift; card_type_path "$@";;
+    show|cat) shift; card_type_show "$@";;
+    edit) shift; card_type_edit "$@";;
+    rm|remove|delete) shift; card_type_rm "$@";;
+    validate) shift; card_type_validate "$@";;
+    *)
+      dim "unknown card-type command '${1:-}' (try: ls, new, show, path, edit, rm, validate)"
+      return 1
+      ;;
+  esac
+}
+
 cmd="${1:-status}"; shift || true
 
 # fleet is project-scoped: nearly every command reads/writes a project's .fleet
@@ -1893,9 +2025,10 @@ case "$cmd" in
   kanban) fleet_kanban "$@";;
   service|svc) fleet_service "$@";;
   task) fleet_task "$@";;
+  card-type|card-types|ct) fleet_card_type "$@";;
   xtools|xtool|x) fleet_xtools "$@";;
   init) fleet_init "$@";;
   update) fleet_update "$@";;
   budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
-  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task xtools)" >&2; exit 1;;
+  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools)" >&2; exit 1;;
 esac

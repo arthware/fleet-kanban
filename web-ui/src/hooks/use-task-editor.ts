@@ -245,7 +245,7 @@ export function useTaskEditor({
 
 			setEditTaskPrompt(taskPrompt);
 			setEditTaskImages(task.images ? task.images.map((image) => ({ ...image })) : []);
-			setEditTaskStartInPlanMode(task.startInPlanMode);
+			setEditTaskStartInPlanMode(task.startInPlanMode ?? false);
 			setEditTaskAutoReviewEnabled(task.autoReviewEnabled === true);
 			setEditTaskAutoReviewMode(resolveTaskAutoReviewMode(task.autoReviewMode) ?? DEFAULT_TASK_AUTO_REVIEW_MODE);
 			const fallbackBranch = task.baseRef || resolvedDefaultTaskBranchRef;

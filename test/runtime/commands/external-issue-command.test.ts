@@ -111,6 +111,19 @@ describe("task command machine output", () => {
 		expect(record.title).toBe("Create a clean task response.");
 	});
 
+	it("given a card created with a card type, when task create response is formatted, then it includes the cardType", () => {
+		// given
+		const card = createCard("created-with-type", undefined, {
+			cardType: "bugfix",
+		});
+
+		// when
+		const record = formatCreatedTaskRecord(card, "/tmp/repo");
+
+		// then
+		expect(record.cardType).toBe("bugfix");
+	});
+
 	it("given task create --quiet, when a card is created, then stdout is exactly the new task id and nothing else", () => {
 		// given
 		const payload = {

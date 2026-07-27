@@ -670,6 +670,43 @@ describe("board dependency state", () => {
 		expect(cardAbsent?.prGateStatus).toBeUndefined();
 	});
 
+	it("carries cardType through normalization", () => {
+		const rawBoardWithType = (type: unknown) => ({
+			columns: [
+				{
+					id: "backlog",
+					cards: [
+						{
+							id: "a",
+							prompt: "Task A",
+							startInPlanMode: false,
+							baseRef: "main",
+							cardType: type,
+						},
+					],
+				},
+				{ id: "in_progress", cards: [] },
+				{ id: "review", cards: [] },
+				{ id: "trash", cards: [] },
+			],
+			dependencies: [],
+		});
+
+		const normalized = normalizeBoardData(rawBoardWithType("bugfix"));
+		const card = normalized?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(card?.cardType).toBe("bugfix");
+
+		// Non-string cardType should be dropped/unset
+		const normalizedInvalid = normalizeBoardData(rawBoardWithType(123));
+		const cardInvalid = normalizedInvalid?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(cardInvalid?.cardType).toBeUndefined();
+
+		// Absent cardType should remain unset
+		const normalizedAbsent = normalizeBoardData(rawBoardWithType(undefined));
+		const cardAbsent = normalizedAbsent?.columns.find((column) => column.id === "backlog")?.cards[0];
+		expect(cardAbsent?.cardType).toBeUndefined();
+	});
+
 	it("disables auto-review settings for a task", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "review", {

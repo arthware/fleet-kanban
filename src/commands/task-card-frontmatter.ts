@@ -29,6 +29,8 @@ const KNOWN_FRONTMATTER_KEYS = [
 	"issue",
 	"code-references",
 	"links",
+	"card-type",
+	"cardType",
 ] as const;
 
 const AUTO_REVIEW_VALUES = ["pr", "off"] as const;
@@ -48,9 +50,9 @@ export interface ParsedTaskCard {
 	agentModel?: string;
 	skill?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
+	cardType?: string;
 	externalIssueRef?: string;
 	/** Task ids to link as dependencies after the card is created. */
 	links: string[];
@@ -226,8 +228,10 @@ export function parseTaskCardDocument(source: string): ParsedTaskCard {
 	if (data["base-ref"] !== undefined) {
 		card.baseRef = expectString("base-ref", data["base-ref"]);
 	}
-	if (data.plan !== undefined) {
-		card.startInPlanMode = parseBooleanValue("plan", data.plan);
+	if (data["card-type"] !== undefined) {
+		card.cardType = expectString("card-type", data["card-type"]);
+	} else if (data.cardType !== undefined) {
+		card.cardType = expectString("cardType", data.cardType);
 	}
 	if (data.issue !== undefined) {
 		card.externalIssueRef = expectString("issue", data.issue);
@@ -302,12 +306,12 @@ export interface TaskCardCreateFlags {
 	title?: string;
 	prompt?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
 	skill?: string | null;
+	cardType?: string | null;
 	externalIssueRef?: string;
 }
 
@@ -315,12 +319,12 @@ export interface ResolvedTaskCardCreate {
 	title?: string;
 	prompt: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
+	cardType?: string;
 	externalIssueRef?: string;
 	links: string[];
 }
@@ -347,16 +351,17 @@ export function resolveTaskCardCreate(
 	const agentId = pick(flags.agentId, card?.agentId) ?? undefined;
 	const agentModel = pick(flags.agentModel, card?.agentModel) ?? undefined;
 	const skill = pick(flags.skill, card?.skill) ?? undefined;
+	const cardType = pick(flags.cardType, card?.cardType) ?? undefined;
 	return {
 		title: pick(flags.title, card?.title),
 		prompt,
 		baseRef: pick(flags.baseRef, card?.baseRef),
-		startInPlanMode: pick(flags.startInPlanMode, card?.startInPlanMode),
 		autoReviewEnabled: pick(flags.autoReviewEnabled, card?.autoReviewEnabled),
 		autoReviewMode: pick(flags.autoReviewMode, card?.autoReviewMode),
 		agentId,
 		agentModel,
 		skill,
+		cardType,
 		externalIssueRef: pick(flags.externalIssueRef, card?.externalIssueRef),
 		links: card?.links ?? [],
 	};

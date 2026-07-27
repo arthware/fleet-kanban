@@ -1,11 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { showAppToast } from "@/components/app-toaster";
 import { type UseGitHistoryDataResult, useGitHistoryData } from "@/components/git-history/use-git-history-data";
-import { buildImplementHerePrompt } from "@/git-actions/build-implement-here-prompt";
-import { isNativeClineAgentSelected } from "@/runtime/native-agent";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type { RuntimeConfigResponse, RuntimeGitSyncAction, RuntimeTaskWorkspaceInfoResponse } from "@/runtime/types";
-import { findCardSelection } from "@/state/board-state";
 import {
 	setHomeGitSummary,
 	useHomeGitStateVersionValue,
@@ -51,7 +48,6 @@ export interface UseGitActionsResult {
 	runGitAction: (action: RuntimeGitSyncAction) => Promise<void>;
 	switchHomeBranch: (branch: string) => Promise<void>;
 	discardHomeWorkingChanges: () => Promise<void>;
-	runImplementHereAction: (taskId: string) => Promise<boolean>;
 	resetGitActionState: () => void;
 }
 
@@ -115,86 +111,6 @@ export function useGitActions({
 		enabled: isGitHistoryOpen,
 	});
 	const refreshGitHistory = gitHistory.refresh;
-
-	const shouldUseClineChatForTaskGitActions = isNativeClineAgentSelected(
-		runtimeProjectConfig?.selectedAgentId ?? null,
-	);
-
-	// Approve-to-build for a plan card. Resolving the doc path server-side via
-	// `getDesignDoc` reuses the badge's resolver instead of re-deriving the path.
-	// The live-session guard lives one layer up where session summaries are in scope.
-	const runImplementHereAction = useCallback(
-		async (taskId: string): Promise<boolean> => {
-			if (!currentProjectId) {
-				return false;
-			}
-			const selection = findCardSelection(board, taskId);
-			if (!selection || selection.column.id !== "review") {
-				showAppToast({
-					intent: "warning",
-					icon: "warning-sign",
-					message: "Implement here is only available for tasks in Review.",
-					timeout: 5000,
-				});
-				return false;
-			}
-			const externalIssueKey = selection.card.externalIssue?.key;
-			const designDoc = await getRuntimeTrpcClient(currentProjectId)
-				.workspace.getDesignDoc.query({
-					taskId,
-					...(externalIssueKey ? { externalIssueKey } : {}),
-				})
-				.catch(() => null);
-			if (!designDoc?.exists || !designDoc.path) {
-				showAppToast({
-					intent: "warning",
-					icon: "warning-sign",
-					message: "No approved design doc found for this card.",
-					timeout: 6000,
-				});
-				return false;
-			}
-			const prompt = buildImplementHerePrompt(designDoc.path);
-			if (shouldUseClineChatForTaskGitActions) {
-				const sent = await sendTaskChatMessage(taskId, prompt, { mode: "act" });
-				if (!sent.ok) {
-					showAppToast({
-						intent: "danger",
-						icon: "warning-sign",
-						message: sent.message ?? "Could not send the implement-here instructions to the task chat session.",
-						timeout: 7000,
-					});
-					return false;
-				}
-				return true;
-			}
-			const typed = await sendTaskSessionInput(taskId, prompt, { appendNewline: false, mode: "paste" });
-			if (!typed.ok) {
-				showAppToast({
-					intent: "danger",
-					icon: "warning-sign",
-					message: typed.message ?? "Could not send the implement-here instructions to the task session.",
-					timeout: 7000,
-				});
-				return false;
-			}
-			await new Promise<void>((resolve) => {
-				window.setTimeout(resolve, 200);
-			});
-			const submitted = await sendTaskSessionInput(taskId, "\r", { appendNewline: false });
-			if (!submitted.ok) {
-				showAppToast({
-					intent: "danger",
-					icon: "warning-sign",
-					message: submitted.message ?? "Could not submit the implement-here instructions to the task session.",
-					timeout: 7000,
-				});
-				return false;
-			}
-			return true;
-		},
-		[board, currentProjectId, sendTaskChatMessage, sendTaskSessionInput, shouldUseClineChatForTaskGitActions],
-	);
 
 	const runGitAction = useCallback(
 		async (action: RuntimeGitSyncAction) => {
@@ -360,7 +276,6 @@ export function useGitActions({
 		runGitAction,
 		switchHomeBranch,
 		discardHomeWorkingChanges,
-		runImplementHereAction,
 		resetGitActionState,
 	};
 }

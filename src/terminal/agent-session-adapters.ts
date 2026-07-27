@@ -14,7 +14,6 @@ import { buildKanbanCommandParts } from "../core/kanban-command";
 import { quoteShellArg } from "../core/shell";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { resolveHomeAgentAppendSystemPrompt } from "../prompts/append-system-prompt";
-import { prependPlanCardDirective } from "../prompts/plan-card-directive";
 import { getRuntimeHomePath } from "../state/workspace-state";
 import { runGit } from "../workspace/git-utils";
 import { parseGithubRemoteNameWithOwner } from "../workspace/repo-name";
@@ -43,7 +42,6 @@ export interface AgentAdapterLaunchInput {
 	// with `--model <agentModel>` so mechanical cards can run a cheaper model.
 	agentModel?: string;
 	images?: RuntimeTaskImage[];
-	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
 	// The agent CLI's own session id. On a fresh start Claude launches under it
 	// (`--session-id`); on a resume it identifies which session to reopen.
@@ -914,11 +912,7 @@ const claudeAdapter: AgentSessionAdapter = {
 			args.push("--append-system-prompt", appendedSystemPrompt);
 		}
 
-		const withPromptLaunch = withPrompt(
-			args,
-			prependPlanCardDirective(input.prompt, input.startInPlanMode),
-			"append",
-		);
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -970,7 +964,7 @@ const cursorAdapter: AgentSessionAdapter = {
 				architectContextPreamble: input.architectContextPreamble,
 			}),
 		);
-		const withPromptLaunch = withPrompt(args, prependPlanCardDirective(prompt, input.startInPlanMode), "append");
+		const withPromptLaunch = withPrompt(args, prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -1056,7 +1050,7 @@ const codexAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const prompt = prependPlanCardDirective(input.prompt, input.startInPlanMode);
+		const prompt = input.prompt;
 		const trimmed = prompt.trim();
 		if (trimmed) {
 			codexArgs.push(trimmed);
@@ -1098,10 +1092,6 @@ const geminiAdapter: AgentSessionAdapter = {
 			args.push("--resume", geminiSessionId);
 		} else if (input.resumeFromTrash && !hasResumeFlag) {
 			args.push("--resume", "latest");
-		}
-
-		if (input.startInPlanMode) {
-			args.push("--approval-mode=plan");
 		}
 
 		const configPath = join(getHookAgentDirectory("gemini"), "settings.json");
@@ -1410,13 +1400,6 @@ const opencodeAdapter: AgentSessionAdapter = {
 			args.push("--continue");
 		}
 
-		if (input.startInPlanMode) {
-			env.OPENCODE_EXPERIMENTAL_PLAN_MODE = "true";
-			if (!hasOpenCodeAgentArg(args)) {
-				args.push("--agent", "plan");
-			}
-		}
-
 		const hooks = resolveHookContext(input);
 		if (hooks) {
 			const pluginPath = join(getHookAgentDirectory("opencode"), "kanban.js");
@@ -1478,11 +1461,11 @@ const droidAdapter: AgentSessionAdapter = {
 		}
 
 		const hooks = resolveHookContext(input);
-		const shouldWriteSettings = Boolean(hooks) || input.startInPlanMode || input.autonomousModeEnabled !== undefined;
+		const shouldWriteSettings = Boolean(hooks) || input.autonomousModeEnabled !== undefined;
 		if (shouldWriteSettings) {
 			const settingsPath = join(getHookAgentDirectory("droid"), "settings.json");
 			const settings: Record<string, unknown> = {
-				autonomyMode: input.startInPlanMode ? "spec" : input.autonomousModeEnabled ? "auto-high" : "normal",
+				autonomyMode: input.autonomousModeEnabled ? "auto-high" : "normal",
 			};
 
 			if (hooks) {
@@ -1646,18 +1629,7 @@ const kiroAdapter: AgentSessionAdapter = {
 			}
 		}
 
-		const trimmedPrompt = input.prompt.trim();
-		const planPrompt = input.startInPlanMode
-			? [
-					"First, inspect the codebase and produce a clear implementation plan only.",
-					"Do not modify files, do not use write tools, and do not implement anything yet.",
-					"After you present the plan, ask for approval before making changes.",
-					trimmedPrompt
-						? `\n\nTask:\n${trimmedPrompt}`
-						: " Ask the user what they want planned if the task is unclear.",
-				].join(" ")
-			: input.prompt;
-		const withPromptLaunch = withPrompt(args, planPrompt, "append");
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {
@@ -1710,11 +1682,7 @@ const clineAdapter: AgentSessionAdapter = {
 			);
 		}
 
-		const withPromptLaunch = withPrompt(
-			args,
-			prependPlanCardDirective(input.prompt, input.startInPlanMode),
-			"append",
-		);
+		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
 			env: {

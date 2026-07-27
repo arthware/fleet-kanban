@@ -123,25 +123,67 @@ vi.mock("@clinebot/core", () => ({
 	},
 }));
 
+const workspaceStateMocks = vi.hoisted(() => ({
+	loadWorkspaceState: vi.fn(),
+	getWorkspaceEpic: vi.fn(),
+	listWorkspaceIndexEntries: vi.fn(async () => []),
+	listWorkspacesWithEpic: vi.fn(async () => []),
+	loadWorkspaceContextById: vi.fn(),
+	getRuntimeHomePath: vi.fn(() => "/tmp/home"),
+}));
+
+vi.mock("../../../src/state/workspace-state.js", () => ({
+	loadWorkspaceState: workspaceStateMocks.loadWorkspaceState,
+	getWorkspaceEpic: workspaceStateMocks.getWorkspaceEpic,
+	listWorkspaceIndexEntries: workspaceStateMocks.listWorkspaceIndexEntries,
+	listWorkspacesWithEpic: workspaceStateMocks.listWorkspacesWithEpic,
+	loadWorkspaceContextById: workspaceStateMocks.loadWorkspaceContextById,
+	getRuntimeHomePath: workspaceStateMocks.getRuntimeHomePath,
+}));
+
 vi.mock("../../../src/server/browser.js", () => ({
 	openInBrowser: browserMocks.openInBrowser,
 }));
 
 import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
-import { IMPLEMENT_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/implement-card-directive";
-import { buildPrCardPromptDirective } from "../../../src/prompts/pr-card-directive";
 import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
 
+const IMPLEMENT_CARD_PROMPT_DIRECTIVE =
+	"You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card.\n\n";
+
+function buildPrCardPromptDirective(baseRef: string): string {
+	return `You are working an auto-review PR card. Use the fleet-pr skill: the card is your authorization to commit and push — never pause to ask whether to commit, push, or open the PR; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch \`${baseRef}\` non-interactively — \`gh pr create --base ${baseRef} --title <subject> --body <summary>\` (never a bare or interactive \`gh pr create\`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.\n\n`;
+}
+
 function createTestRuntimeApi(
-	deps: Omit<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow" | "getFleetUpdateInProgressCount"> &
-		Partial<Pick<CreateRuntimeApiDependencies, "getUpdateStatus" | "runUpdateNow" | "getFleetUpdateInProgressCount">>,
+	deps: Omit<
+		CreateRuntimeApiDependencies,
+		| "getUpdateStatus"
+		| "runUpdateNow"
+		| "getFleetUpdateInProgressCount"
+		| "resolveInteractiveShellCommand"
+		| "runCommand"
+	> &
+		Partial<
+			Pick<
+				CreateRuntimeApiDependencies,
+				| "getUpdateStatus"
+				| "runUpdateNow"
+				| "getFleetUpdateInProgressCount"
+				| "resolveInteractiveShellCommand"
+				| "runCommand"
+			>
+		>,
 ): RuntimeTrpcContext["runtimeApi"] {
 	return createRuntimeApi({
 		...deps,
 		// Default the submit-Enter delay to a no-op so PTY-submit tests don't wait on a
 		// real timer; the deferral test injects its own gated delay to assert ordering.
+		resolveInteractiveShellCommand:
+			deps.resolveInteractiveShellCommand ?? vi.fn(() => ({ binary: "bash", args: [] })),
+		runCommand: deps.runCommand ?? vi.fn(),
 		delay: deps.delay ?? (async () => {}),
 		getUpdateStatus:
 			deps.getUpdateStatus ??
@@ -267,6 +309,29 @@ describe("createRuntimeApi startTaskSession", () => {
 		mcpOauthSettingsPath = `/tmp/kanban-mcp-oauth-settings-${Date.now()}-${Math.random().toString(16).slice(2)}.json`;
 		process.env.CLINE_MCP_SETTINGS_PATH = mcpSettingsPath;
 		process.env.CLINE_MCP_OAUTH_SETTINGS_PATH = mcpOauthSettingsPath;
+		workspaceStateMocks.loadWorkspaceState.mockReset();
+		workspaceStateMocks.getWorkspaceEpic.mockReset();
+		workspaceStateMocks.listWorkspaceIndexEntries.mockReset();
+		workspaceStateMocks.listWorkspacesWithEpic.mockReset();
+		workspaceStateMocks.loadWorkspaceContextById.mockReset();
+
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			repoPath: "/tmp/repo",
+			statePath: "/tmp/state",
+			taskWorktreesRoot: "/tmp/worktrees",
+			git: { isRepository: false },
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{ id: "in_progress", cards: [{ id: "task-1" }] },
+					{ id: "review", cards: [] },
+					{ id: "done", cards: [] },
+				],
+			},
+			sessions: {},
+			revision: 1,
+		});
+
 		agentRegistryMocks.resolveAgentCommand.mockReset();
 		agentRegistryMocks.buildRuntimeConfigResponse.mockReset();
 		taskWorktreeMocks.resolveTaskCwd.mockReset();
@@ -774,6 +839,22 @@ describe("createRuntimeApi startTaskSession", () => {
 			startTaskSession: vi.fn(async () => createSummary()),
 			applyTurnCheckpoint: vi.fn(),
 		};
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			repoPath: "/tmp/repo",
+			statePath: "/tmp/state",
+			taskWorktreesRoot: "/tmp/worktrees",
+			git: { isRepository: false },
+			board: {
+				columns: [
+					{ id: "backlog", cards: [{ id: "task-1" }] },
+					{ id: "in_progress", cards: [] },
+					{ id: "review", cards: [] },
+					{ id: "done", cards: [] },
+				],
+			},
+			sessions: {},
+			revision: 1,
+		});
 		const clineTaskSessionService = createClineTaskSessionServiceMock();
 		clineTaskSessionService.startTaskSession.mockResolvedValue(createSummary({ agentId: "cline", pid: null }));
 
@@ -807,7 +888,7 @@ describe("createRuntimeApi startTaskSession", () => {
 						mimeType: "image/png",
 					},
 				],
-				startInPlanMode: true,
+				cardType: "plan",
 			},
 		);
 
@@ -816,7 +897,7 @@ describe("createRuntimeApi startTaskSession", () => {
 			expect.objectContaining({
 				taskId: "task-1",
 				cwd: "/tmp/existing-worktree",
-				prompt: "Continue task",
+				prompt: expect.stringMatching(/^You are working a plan card\..*Continue task/s),
 				images: [
 					{
 						id: "img-1",
@@ -827,7 +908,6 @@ describe("createRuntimeApi startTaskSession", () => {
 				providerId: "anthropic",
 				apiKey: "anthropic-api-key",
 				mode: "act",
-				startInPlanMode: true,
 				resumeFromTrash: undefined,
 			}),
 		);
@@ -3542,5 +3622,363 @@ describe("createRuntimeApi update handlers", () => {
 			message: "Updated Kanban to 0.2.0.",
 		});
 		expect(runUpdateNow).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("card-types centralized composition (Card C)", () => {
+	it("given a bare card in in_progress, when started, then prompt begins with the implement directive only", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{
+						id: "in_progress",
+						cards: [{ id: "task-1", title: "My Task" }],
+					},
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		const response = await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+			},
+		);
+
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: expect.stringMatching(/^You are working a build card\..*My Prompt/s),
+			}),
+		);
+	});
+
+	it("given a --plan card in backlog, when started, then prompt begins with the plan directive and starts in plan mode", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{
+						id: "backlog",
+						cards: [{ id: "task-1", title: "My Task" }],
+					},
+					{ id: "in_progress", cards: [] },
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+				cardType: "plan",
+			},
+		);
+
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: expect.stringMatching(/^You are working a plan card\..*My Prompt/s),
+			}),
+		);
+	});
+
+	it("given a --auto-review pr card in in_progress, when started, then prompt contains implement and pr directives in order", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{
+						id: "in_progress",
+						cards: [{ id: "task-1", title: "My Task" }],
+					},
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+				autoReviewEnabled: true,
+				autoReviewMode: "pr",
+			},
+		);
+
+		const expectedPromptPattern =
+			/You are working a build card\..*You are working an auto-review PR card\..*My Prompt/s;
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: expect.stringMatching(expectedPromptPattern),
+			}),
+		);
+	});
+
+	it("given an explicit skill override, when started, then only that skill's directive is composed", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{
+						id: "in_progress",
+						cards: [{ id: "task-1", title: "My Task" }],
+					},
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+				skill: "fleet-pr",
+			},
+		);
+
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: expect.stringMatching(/^You are working an auto-review PR card\..*My Prompt/s),
+			}),
+		);
+	});
+
+	it("given the home agent, when started, then prompt contains no card directives", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{ id: "in_progress", cards: [] },
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "__home_agent__:workspace-1:claude",
+				baseRef: "main",
+				prompt: "My Prompt",
+			},
+		);
+
+		const actualPrompt = (terminalManager.startTaskSession as any).mock.calls[0][0].prompt;
+		expect(actualPrompt).not.toContain("You are working a build card.");
+		expect(actualPrompt).not.toContain("You are working a plan card.");
+		expect(actualPrompt).not.toContain("You are working an auto-review PR card.");
+		expect(actualPrompt).toContain("My Prompt");
+	});
+
+	it("given a build-type card with autoReviewEnabled=true and autoReviewMode=pr on the board, when started with a request that omits autoReview fields, then prompt contains both implement and pr directives", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{
+						id: "in_progress",
+						cards: [
+							{
+								id: "task-1",
+								title: "My Task",
+								cardType: "build",
+								autoReviewEnabled: true,
+								autoReviewMode: "pr",
+							},
+						],
+					},
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+				// omitting autoReviewEnabled and autoReviewMode to simulate CLI/auto-start
+			},
+		);
+
+		const expectedPromptPattern =
+			/You are working a build card\..*You are working an auto-review PR card\..*My Prompt/s;
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				prompt: expect.stringMatching(expectedPromptPattern),
+			}),
+		);
+	});
+
+	it("given a card with autoReviewEnabled=false or no autoReviewMode on the board, when started with a request that omits autoReview fields, then prompt contains implement directive only", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{ id: "backlog", cards: [] },
+					{
+						id: "in_progress",
+						cards: [
+							{
+								id: "task-1",
+								title: "My Task",
+								cardType: "build",
+								autoReviewEnabled: false,
+							},
+						],
+					},
+				],
+			},
+		});
+
+		const terminalManager = {
+			startTaskSession: vi.fn(async () => createSummary()),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		await api.startTaskSession(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "My Prompt",
+			},
+		);
+
+		const actualPrompt = (terminalManager.startTaskSession as any).mock.calls[0][0].prompt;
+		expect(actualPrompt).toContain("You are working a build card.");
+		expect(actualPrompt).not.toContain("You are working an auto-review PR card.");
+		expect(actualPrompt).toContain("My Prompt");
 	});
 });

@@ -50,7 +50,8 @@ export interface BoardCard {
 	id: string;
 	title: string;
 	prompt: string;
-	startInPlanMode: boolean;
+	startInPlanMode?: boolean;
+	cardType?: string;
 	autoReviewEnabled: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];

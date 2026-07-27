@@ -13,6 +13,7 @@ let mockMeasureWidths = [240, 240, 240];
 let mockMeasureCallCount = 0;
 const trpcMocks = vi.hoisted(() => ({
 	getDesignDoc: vi.fn(),
+	runCommand: vi.fn(),
 }));
 
 vi.mock("@hello-pangea/dnd", () => ({
@@ -41,6 +42,11 @@ vi.mock("@/runtime/trpc-client", () => ({
 		workspace: {
 			getDesignDoc: {
 				query: trpcMocks.getDesignDoc,
+			},
+		},
+		runtime: {
+			runCommand: {
+				mutate: trpcMocks.runCommand,
 			},
 		},
 	}),
@@ -617,23 +623,46 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("default");
 	});
 
-	it("shows a purple Plan badge for start-in-plan-mode cards", async () => {
+	it("shows a purple card-type badge on a card", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ startInPlanMode: true })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ cardType: "bugfix" })} index={0} columnId="backlog" />);
 		});
 
-		const planBadge = findSpanByExactText(container, "Plan");
-		expect(planBadge).toBeDefined();
-		expect(planBadge?.className).toContain("border-status-purple/30");
-		expect(planBadge?.className).toContain("text-status-purple");
+		const badge = findSpanByExactText(container, "bugfix");
+		expect(badge).toBeDefined();
+		expect(badge?.className).toContain("border-status-purple/30");
+		expect(badge?.className).toContain("text-status-purple");
 	});
 
-	it("does not show a kind badge for build cards", async () => {
+	it("defaults the card-type badge to build when unset", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ startInPlanMode: false })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ cardType: undefined })} index={0} columnId="backlog" />);
 		});
 
-		expect(findSpanByExactText(container, "Plan")).toBeUndefined();
+		const badge = findSpanByExactText(container, "build");
+		expect(badge).toBeDefined();
+		expect(badge?.className).toContain("border-status-purple/30");
+		expect(badge?.className).toContain("text-status-purple");
+	});
+
+	it("shows the active phase chip for a started card", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ cardType: "plan" })} index={0} columnId="in_progress" />);
+		});
+
+		const phaseChip = findSpanByExactText(container, "design");
+		expect(phaseChip).toBeDefined();
+		expect(phaseChip?.className).toContain("border-status-blue/30");
+		expect(phaseChip?.className).toContain("text-status-blue");
+	});
+
+	it("does not show an active phase chip for an unstarted card in backlog", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard({ cardType: "plan" })} index={0} columnId="backlog" />);
+		});
+
+		const phaseChip = container.querySelector('[data-testid="board-card-phase-chip"]');
+		expect(phaseChip).toBeNull();
 	});
 
 	it("shows an Auto-PR completion-policy badge for build cards configured to self-open a PR", async () => {
@@ -1769,23 +1798,15 @@ describe("BoardCard", () => {
 		expect(document.body.textContent).toContain("Design details are ready.");
 	});
 
-	it("given a review card with a design doc, when Implement here is clicked, then it invokes the implement-here handler with the card id", async () => {
-		// given a review card whose committed design doc resolves
-		trpcMocks.getDesignDoc.mockResolvedValue({
-			exists: true,
-			path: "/tmp/repo/docs/design/task-1-approved-plan.md",
-			content: "# Approved plan",
-		});
-		const onImplementHere = vi.fn();
+	it("given a plan card in review, when the card renders, then it renders an 'Implement Plan now' button in the bottom review-decision row", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
-					card={createCard()}
+					card={createCard({ cardType: "plan" })}
 					index={0}
 					columnId="review"
 					workspaceId="workspace-1"
 					workspacePath="/tmp/repo"
-					onImplementHere={onImplementHere}
 				/>,
 			);
 		});
@@ -1793,35 +1814,55 @@ describe("BoardCard", () => {
 			await Promise.resolve();
 		});
 
-		// when its Implement here button is clicked
 		const implementButton = container.querySelector<HTMLButtonElement>(
-			'button[aria-label="Implement plan in this session"]',
+			'button[aria-label="Implement the approved plan now"]',
 		);
 		expect(implementButton).toBeInstanceOf(HTMLButtonElement);
-		expect(implementButton?.textContent).toContain("Implement here");
+		expect(implementButton?.textContent).toContain("Implement Plan now");
+	});
+
+	it("given a plan card in review, when 'Implement Plan now' is clicked, then it invokes the promote handler and calls the fleet promote command via runCommand", async () => {
+		trpcMocks.runCommand.mockResolvedValue({ exitCode: 0, combinedOutput: "" });
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ cardType: "plan" })}
+					index={0}
+					columnId="review"
+					workspaceId="workspace-1"
+					workspacePath="/tmp/repo"
+				/>,
+			);
+		});
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const implementButton = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Implement the approved plan now"]',
+		);
+		expect(implementButton).toBeInstanceOf(HTMLButtonElement);
+
 		await act(async () => {
 			implementButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 			implementButton?.click();
 		});
 
-		// then the implement-here handler runs for that card
-		expect(onImplementHere).toHaveBeenCalledWith("task-1");
+		expect(trpcMocks.runCommand).toHaveBeenCalledWith({
+			command: "fleet task promote task-1",
+		});
 	});
 
-	it("given a review card with no design doc, when the card renders, then no Implement-here action is shown", async () => {
-		// given a review card with no matching design doc (default mock: exists false)
-		const onImplementHere = vi.fn();
-
-		// when the card renders
+	it("given a build card in review, when the card renders, then no 'Implement Plan now' button is shown", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
-					card={createCard()}
+					card={createCard({ cardType: "build" })}
 					index={0}
 					columnId="review"
 					workspaceId="workspace-1"
 					workspacePath="/tmp/repo"
-					onImplementHere={onImplementHere}
 				/>,
 			);
 		});
@@ -1829,9 +1870,9 @@ describe("BoardCard", () => {
 			await Promise.resolve();
 		});
 
-		// then no Implement-here action is offered
-		expect(container.querySelector('button[aria-label="Implement plan in this session"]')).toBeNull();
-		expect(container.textContent).not.toContain("Implement here");
+		const implementButton = container.querySelector('button[aria-label="Implement the approved plan now"]');
+		expect(implementButton).toBeNull();
+		expect(container.textContent).not.toContain("Implement Plan now");
 	});
 
 	it("shows the latest assistant preview on active task cards", async () => {

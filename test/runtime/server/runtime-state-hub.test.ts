@@ -69,7 +69,6 @@ function boardWithCard(columnId: RuntimeBoardColumnId): RuntimeBoardData {
 							runtimeBoardCardSchema.parse({
 								id: "task-1",
 								prompt: "Ship a feature",
-								startInPlanMode: false,
 								baseRef: "main",
 								prUrl: MERGED_PR.url,
 								prState: "open",
@@ -209,7 +208,6 @@ function createCliStyleCard(prompt: string): RuntimeBoardCard {
 		{
 			prompt,
 			title: prompt.split(/\r?\n/u)[0],
-			startInPlanMode: false,
 			autoReviewEnabled: true,
 			autoReviewMode: "pr",
 			baseRef: "main",

@@ -15,8 +15,9 @@ import {
 	Trash2,
 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { notifyError, showAppToast } from "@/components/app-toaster";
 import { DesignDocBadge } from "@/components/design-doc-badge";
 import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
 import {
@@ -32,10 +33,12 @@ import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useTaskDesignDoc } from "@/hooks/use-task-design-doc";
+import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { cardKind, getTaskCompletionPolicyBadgeLabel } from "@/utils/card-completion-policy";
+import { resolvePhaseLabelForLane } from "@/utils/card-phase";
 import { formatCostUsd, formatTokenCount, realWorkTokenCount, totalTokenCount } from "@/utils/format-token-count";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
@@ -321,7 +324,6 @@ export function BoardCard({
 	onRestoreFromTrash,
 	onSaveTitle,
 	onOpenPr,
-	onImplementHere,
 	onCancelAutomaticAction,
 	isOpenPrLoading = false,
 	isMoveToTrashLoading = false,
@@ -348,7 +350,6 @@ export function BoardCard({
 	onRestoreFromTrash?: (taskId: string) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
 	onOpenPr?: (taskId: string) => void;
-	onImplementHere?: (taskId: string) => void;
 	onCancelAutomaticAction?: (taskId: string) => void;
 	isOpenPrLoading?: boolean;
 	isMoveToTrashLoading?: boolean;
@@ -377,6 +378,37 @@ export function BoardCard({
 	const isDoneCard = columnId === "done";
 	const isTrashCard = columnId === "trash";
 	const isCardInteractive = !isTrashCard;
+
+	const [isPromoting, setIsPromoting] = useState(false);
+	const phaseLabel = useMemo(() => resolvePhaseLabelForLane(card, columnId), [card, columnId]);
+
+	const handlePromoteToBuild = useCallback(() => {
+		if (isPromoting || !workspaceId) {
+			return;
+		}
+		setIsPromoting(true);
+		void (async () => {
+			try {
+				const trpcClient = getRuntimeTrpcClient(workspaceId);
+				const payload = await trpcClient.runtime.runCommand.mutate({
+					command: `fleet task promote ${card.id}`,
+				});
+				if (payload.exitCode === 0) {
+					showAppToast({
+						intent: "success",
+						message: `✓ promoted ${card.id} to build`,
+					});
+				} else {
+					notifyError(`Failed to promote task: ${payload.combinedOutput || "Unknown error"}`);
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				notifyError(`Failed to promote task to build: ${message}`);
+			} finally {
+				setIsPromoting(false);
+			}
+		})();
+	}, [card.id, workspaceId, isPromoting]);
 	const descriptionWidth = descriptionRect.width > 0 ? descriptionRect.width : descriptionWidthFallback;
 	const rawSessionActivity = useMemo(() => getCardSessionActivity(sessionSummary), [sessionSummary]);
 	const lastSessionActivityRef = useRef<CardSessionActivity | null>(null);
@@ -530,8 +562,6 @@ export function BoardCard({
 	// this same live session. Reuse the exact signal the Design badge shows: the
 	// review-column "Implement here" action appears only when that doc resolves.
 	const designDoc = useTaskDesignDoc({ card, workspaceId: workspaceId ?? null, workspacePath });
-	const showImplementHere =
-		columnId === "review" && Boolean(onImplementHere) && Boolean(designDoc.data?.exists && designDoc.data.path);
 	const trashRestoreLabel =
 		sessionSummary?.agentSessionLifecycle === "gone"
 			? "Start fresh"
@@ -897,48 +927,55 @@ export function BoardCard({
 										</p>
 									</div>
 								) : null}
-								{isPlanCard || badgeInfo || completionPolicyBadgeLabel ? (
-									<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
-										{isPlanCard ? (
-											<span
-												className={cn(
-													"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
-													isTrashCard
-														? "border-border text-text-tertiary bg-surface-1"
-														: "border-status-purple/30 bg-status-purple/10 text-status-purple",
-												)}
-											>
-												Plan
+								<div className="mt-1 flex min-w-0 items-center gap-1.5" data-testid="board-card-chip-row">
+									<span
+										className={cn(
+											"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+											isTrashCard
+												? "border-border text-text-tertiary bg-surface-1"
+												: "border-status-purple/30 bg-status-purple/10 text-status-purple",
+										)}
+									>
+										{card.cardType ?? "build"}
+									</span>
+									{phaseLabel ? (
+										<span
+											className={cn(
+												"inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-mono text-xs",
+												"border-status-blue/30 bg-status-blue/10 text-status-blue",
+											)}
+											data-testid="board-card-phase-chip"
+										>
+											{phaseLabel}
+										</span>
+									) : null}
+									{badgeInfo ? (
+										<span
+											className={cn(
+												"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
+												badgeInfo.colorClasses,
+											)}
+										>
+											<Bot size={12} className="shrink-0" />
+											<span className="truncate">
+												{badgeInfo.shortLabel}
+												{badgeInfo.modelText ? (
+													<>
+														{badgeInfo.shortLabel && " "}
+														<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
+															{badgeInfo.modelText}
+														</span>
+													</>
+												) : null}
 											</span>
-										) : null}
-										{badgeInfo ? (
-											<span
-												className={cn(
-													"inline-flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs",
-													badgeInfo.colorClasses,
-												)}
-											>
-												<Bot size={12} className="shrink-0" />
-												<span className="truncate">
-													{badgeInfo.shortLabel}
-													{badgeInfo.modelText ? (
-														<>
-															{badgeInfo.shortLabel && " "}
-															<span className={cn(badgeInfo.isDefaultModel && "text-text-tertiary")}>
-																{badgeInfo.modelText}
-															</span>
-														</>
-													) : null}
-												</span>
-											</span>
-										) : null}
-										{completionPolicyBadgeLabel ? (
-											<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
-												{completionPolicyBadgeLabel}
-											</span>
-										) : null}
-									</div>
-								) : null}
+										</span>
+									) : null}
+									{completionPolicyBadgeLabel ? (
+										<span className="shrink-0 rounded-md border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[11px] text-text-tertiary">
+											{completionPolicyBadgeLabel}
+										</span>
+									) : null}
+								</div>
 								{!isDoneCard && sessionActivity ? (
 									<div
 										className="flex gap-1.5 items-start mt-[6px]"
@@ -1039,40 +1076,41 @@ export function BoardCard({
 										) : null}
 									</div>
 								) : null}
-								{showImplementHere ? (
-									<div className="mt-1.5">
-										<Button
-											variant="primary"
-											size="sm"
-											fill
-											icon={<Hammer size={14} />}
-											aria-label="Implement plan in this session"
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onImplementHere?.(card.id);
-											}}
-										>
-											Implement here
-										</Button>
-									</div>
-								) : null}
-								{showOpenPrAction ? (
+								{columnId === "review" && (card.cardType === "plan" || showOpenPrAction) ? (
 									<div className="flex gap-1.5 mt-1.5">
-										<Button
-											variant="primary"
-											size="sm"
-											icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
-											disabled={isOpenPrLoading}
-											style={{ flex: "1 1 0" }}
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onOpenPr?.(card.id);
-											}}
-										>
-											Open PR
-										</Button>
+										{card.cardType === "plan" ? (
+											<Button
+												variant="primary"
+												size="sm"
+												icon={isPromoting ? <Spinner size={12} /> : <Hammer size={14} />}
+												disabled={isPromoting}
+												style={{ flex: "1 1 0" }}
+												aria-label="Implement the approved plan now"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													handlePromoteToBuild();
+												}}
+											>
+												Implement Plan now
+											</Button>
+										) : null}
+										{showOpenPrAction ? (
+											<Button
+												variant="primary"
+												size="sm"
+												icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
+												disabled={isOpenPrLoading}
+												style={{ flex: "1 1 0" }}
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													onOpenPr?.(card.id);
+												}}
+											>
+												Open PR
+											</Button>
+										) : null}
 									</div>
 								) : null}
 							</div>

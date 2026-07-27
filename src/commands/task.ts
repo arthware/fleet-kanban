@@ -506,7 +506,6 @@ export function formatTaskRecord(
 		prompt: task.prompt,
 		column: columnId,
 		baseRef: task.baseRef,
-		startInPlanMode: task.startInPlanMode,
 		autoReviewEnabled: task.autoReviewEnabled === true,
 		...(task.autoReviewMode ? { autoReviewMode: task.autoReviewMode } : {}),
 		...(task.agentId ? { agentId: task.agentId } : {}),
@@ -543,12 +542,12 @@ export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepo
 		title: resolveTaskTitle(created.title, created.prompt),
 		prompt: created.prompt,
 		baseRef: created.baseRef,
-		startInPlanMode: created.startInPlanMode,
 		autoReviewEnabled: created.autoReviewEnabled === true,
 		...(created.autoReviewMode ? { autoReviewMode: created.autoReviewMode } : {}),
 		...(created.agentId ? { agentId: created.agentId } : {}),
 		...(created.agentModel ? { agentModel: created.agentModel } : {}),
 		...(created.skill ? { skill: created.skill } : {}),
+		...(created.cardType ? { cardType: created.cardType } : {}),
 		...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
 		...formatTaskClineSettings(created.clineSettings),
 	};
@@ -722,12 +721,12 @@ async function createTask(input: {
 	prompt: string;
 	projectPath?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
+	cardType?: string;
 	externalIssueRef?: string;
 	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
@@ -753,12 +752,12 @@ async function createTask(input: {
 			{
 				title: input.title,
 				prompt: input.prompt,
-				startInPlanMode: input.startInPlanMode,
 				autoReviewEnabled: input.autoReviewEnabled,
 				autoReviewMode: resolveAutoReviewModeForEnabled(input.autoReviewEnabled, input.autoReviewMode),
 				agentId: input.agentId,
 				agentModel: input.agentModel,
 				skill: input.skill,
+				cardType: input.cardType,
 				externalIssue,
 				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
@@ -784,12 +783,12 @@ async function updateTaskCommand(input: {
 	projectPath?: string;
 	prompt?: string;
 	baseRef?: string;
-	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: "pr";
 	agentId?: RuntimeAgentId | null;
 	agentModel?: string | null;
 	skill?: string | null;
+	cardType?: string | null;
 	externalIssueRef?: string | null;
 	clineProviderId?: string | null;
 	clineModelId?: string | null;
@@ -799,12 +798,12 @@ async function updateTaskCommand(input: {
 		input.title === undefined &&
 		input.prompt === undefined &&
 		input.baseRef === undefined &&
-		input.startInPlanMode === undefined &&
 		input.autoReviewEnabled === undefined &&
 		input.autoReviewMode === undefined &&
 		input.agentId === undefined &&
 		input.agentModel === undefined &&
 		input.skill === undefined &&
+		input.cardType === undefined &&
 		input.externalIssueRef === undefined &&
 		input.clineProviderId === undefined &&
 		input.clineModelId === undefined &&
@@ -864,7 +863,6 @@ async function updateTaskCommand(input: {
 			title: input.title ?? taskRecord.task.title,
 			prompt: input.prompt ?? taskRecord.task.prompt,
 			baseRef: input.baseRef ?? taskRecord.task.baseRef,
-			startInPlanMode: input.startInPlanMode ?? taskRecord.task.startInPlanMode,
 			autoReviewEnabled: input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
 			autoReviewMode: resolveAutoReviewModeForEnabled(
 				input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
@@ -873,6 +871,7 @@ async function updateTaskCommand(input: {
 			agentId: input.agentId,
 			agentModel: input.agentModel,
 			skill: input.skill,
+			cardType: input.cardType,
 			externalIssue,
 			clineSettings: nextTaskClineSettings,
 		});
@@ -1004,11 +1003,11 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			taskId: task.id,
 			prompt: task.prompt,
 			taskTitle: task.title,
-			startInPlanMode: task.startInPlanMode,
 			baseRef: task.baseRef,
 			agentId: task.agentId,
 			agentModel: task.agentModel,
 			skill: task.skill,
+			cardType: task.cardType,
 			clineSettings: task.clineSettings,
 		});
 		if (!started.ok || !started.summary) {
@@ -1042,6 +1041,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 				prompt: task.prompt,
 				column: "in_progress",
 				workspacePath: workspaceRepoPath,
+				cardType: task.cardType,
 			},
 		};
 	}
@@ -1053,8 +1053,44 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			prompt: task.prompt,
 			column: "in_progress",
 			workspacePath: workspaceRepoPath,
+			cardType: task.cardType,
 		},
 	};
+}
+
+async function promoteTaskCommand(input: { cwd: string; taskId: string; projectPath?: string }): Promise<JsonRecord> {
+	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
+	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
+	const runtimeClient = createRuntimeTrpcClient(workspaceId);
+
+	await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
+		const taskId = resolveCardIdFromRefOrIssue(runtimeState, input.taskId);
+		const taskRecord = findTaskRecord(runtimeState, taskId);
+		if (!taskRecord) {
+			throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
+		}
+
+		const updatedTask = updateTask(runtimeState.board, taskId, {
+			prompt: taskRecord.task.prompt,
+			baseRef: taskRecord.task.baseRef,
+			cardType: "build",
+		});
+		if (!updatedTask.updated || !updatedTask.task) {
+			throw new Error(`Task "${taskId}" could not be promoted.`);
+		}
+
+		const movement = moveTaskToColumn(updatedTask.board, taskId, "in_progress");
+		if (!movement.task) {
+			throw new Error(`Task "${taskId}" could not be resolved after type update.`);
+		}
+
+		return {
+			board: movement.board,
+			value: movement,
+		};
+	});
+
+	return startTask(input);
 }
 
 async function sendTaskInput(input: {
@@ -1735,6 +1771,21 @@ export function registerTaskCommand(program: Command): void {
 		});
 
 	task
+		.command("promote <taskId>")
+		.description("Promotes a plan card in review to a build card and starts it in the current worktree")
+		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
+		.action(async (taskId: string, options: { projectPath?: string }) => {
+			await runTaskCommand(
+				async () =>
+					await promoteTaskCommand({
+						cwd: process.cwd(),
+						taskId,
+						projectPath: options.projectPath,
+					}),
+			);
+		});
+
+	task
 		.command("create")
 		.description("Create a task in backlog.")
 		.option("--title <text>", "Task title.")
@@ -1746,7 +1797,6 @@ export function registerTaskCommand(program: Command): void {
 		.option("--markdown <text>", "Card Markdown (frontmatter + body) supplied inline instead of via --file.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
 		.option("--base-ref <branch>", "Task base branch/ref.")
-		.option("--start-in-plan-mode [value]", "Set plan mode (true|false). Flag-only implies true.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
 		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
 		.option("--agent-id <id>", "Agent override: cline | claude | codex | droid | gemini | opencode | default.")
@@ -1755,6 +1805,7 @@ export function registerTaskCommand(program: Command): void {
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
 		)
 		.option("--skill <name>", "Per-card Agent Skills / SKILL.md pointer.")
+		.option("--card-type <name>", "Card Type / manifest pointer.")
 		.option("--quiet", "Print only the created task id.")
 		.option("--id-only", "Alias for --quiet.")
 		.option(
@@ -1782,12 +1833,12 @@ export function registerTaskCommand(program: Command): void {
 				markdown?: string;
 				projectPath?: string;
 				baseRef?: string;
-				startInPlanMode?: unknown;
 				autoReviewEnabled?: unknown;
 				autoReviewMode?: "pr";
 				agentId?: string;
 				agentModel?: string;
 				skill?: string;
+				cardType?: string;
 				quiet?: boolean;
 				idOnly?: boolean;
 				externalIssue?: string;
@@ -1805,12 +1856,12 @@ export function registerTaskCommand(program: Command): void {
 							title: options.title,
 							prompt: options.prompt,
 							baseRef: options.baseRef,
-							startInPlanMode: parseOptionalBooleanOption(options.startInPlanMode, "--start-in-plan-mode"),
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							skill: parseOptionalStringOrDefault(options.skill),
+							cardType: parseOptionalStringOrDefault(options.cardType),
 							externalIssueRef: options.externalIssue ?? options.issue,
 						});
 						const created = await createTask({
@@ -1819,12 +1870,12 @@ export function registerTaskCommand(program: Command): void {
 							prompt: resolved.prompt,
 							projectPath: options.projectPath,
 							baseRef: resolved.baseRef,
-							startInPlanMode: resolved.startInPlanMode,
 							autoReviewEnabled: resolved.autoReviewEnabled,
 							autoReviewMode: resolved.autoReviewMode,
 							agentId: resolved.agentId,
 							agentModel: resolved.agentModel,
 							skill: resolved.skill,
+							cardType: resolved.cardType,
 							externalIssueRef: resolved.externalIssueRef,
 							clineSettings: buildTaskClineSettingsForCreate({
 								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
@@ -1848,8 +1899,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--title <text>", "Replacement task title.")
 		.option("--prompt <text>", "Replacement task prompt.")
 		.option("--project-path <path>", "Workspace path. Defaults to current directory workspace.")
-		.option("--base-ref <branch>", "Replacement base branch/ref.")
-		.option("--start-in-plan-mode [value]", "Set plan mode (true|false). Flag-only implies true.")
+		.option("--base-ref <branch>", "Task base branch/ref.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
 		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
 		.option(
@@ -1882,7 +1932,6 @@ export function registerTaskCommand(program: Command): void {
 				prompt?: string;
 				projectPath?: string;
 				baseRef?: string;
-				startInPlanMode?: unknown;
 				autoReviewEnabled?: unknown;
 				autoReviewMode?: "pr";
 				agentId?: string;
@@ -1903,7 +1952,6 @@ export function registerTaskCommand(program: Command): void {
 							projectPath: options.projectPath,
 							prompt: options.prompt,
 							baseRef: options.baseRef,
-							startInPlanMode: parseOptionalBooleanOption(options.startInPlanMode, "--start-in-plan-mode"),
 							autoReviewEnabled: parseOptionalBooleanOption(options.autoReviewEnabled, "--auto-review-enabled"),
 							autoReviewMode: options.autoReviewMode,
 							agentId: parseAgentId(options.agentId),

@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
-import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 import {
 	getAgentSubmitEnterDelayMs,
 	prepareAgentLaunch,
@@ -238,14 +237,13 @@ describe("prepareAgentLaunch hook strategies", () => {
 			autonomousModeEnabled: true,
 			cwd,
 			prompt: "Design Cursor plan handling",
-			startInPlanMode: true,
 			workspaceId: "workspace-1",
 		});
 
 		// then
 		expect(launch.args).not.toContain("--plan");
 		expect(launch.args).toContain("--force");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design Cursor plan handling`);
+		expect(launch.args.at(-1)).toBe("Design Cursor plan handling");
 	});
 
 	it("given cursor-agent starts a normal card, then Cursor launch args are unchanged", async () => {
@@ -510,7 +508,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			autonomousModeEnabled: true,
 			cwd: "/tmp",
 			prompt: "Investigate deployment drift",
-			startInPlanMode: true,
 			workspaceId: "workspace-1",
 		});
 
@@ -520,8 +517,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args[launch.args.indexOf("--agent") + 1]).toBe("kanban");
 		expect(launch.args).toContain("--trust-all-tools");
 		const initialPrompt = launch.args.at(-1) ?? "";
-		expect(initialPrompt).toContain("Do not modify files");
-		expect(initialPrompt).toContain("Task:\nInvestigate deployment drift");
+		expect(initialPrompt).toBe("Investigate deployment drift");
 
 		const configPath = join(homedir(), ".kiro", "agents", "kanban.json");
 		const config = JSON.parse(readFileSync(configPath, "utf8")) as {
@@ -577,10 +573,9 @@ describe("prepareAgentLaunch hook strategies", () => {
 			args: [],
 			cwd: "/tmp",
 			prompt: "Audit the deployment pipeline",
-			startInPlanMode: true,
 		});
 
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Audit the deployment pipeline`);
+		expect(launch.args.at(-1)).toBe("Audit the deployment pipeline");
 		expect(launch.args.join(" ")).not.toContain("/plan");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
@@ -679,11 +674,10 @@ describe("prepareAgentLaunch hook strategies", () => {
 			args: [],
 			cwd: "/tmp",
 			prompt: "Design native Cline plan handling",
-			startInPlanMode: true,
 		});
 
 		expect(launch.args).not.toContain("--plan");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design native Cline plan handling`);
+		expect(launch.args.at(-1)).toBe("Design native Cline plan handling");
 	});
 
 	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
@@ -924,13 +918,12 @@ describe("prepareAgentLaunch hook strategies", () => {
 			cwd: "/tmp",
 			prompt: "Design the migration path",
 			agentModel: "claude-haiku-4-5",
-			startInPlanMode: true,
 		});
 		expect(launch.args).not.toContain("--permission-mode");
 		expect(launch.args).not.toContain("plan");
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--allow-dangerously-skip-permissions");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Design the migration path`);
+		expect(launch.args.at(-1)).toBe("Design the migration path");
 		expect(launch.deferredStartupInput).toBeUndefined();
 		expect(launch.env.CLAUDE_CODE_ENABLE_AUTO_MODE).toBe("1");
 	});
@@ -945,12 +938,11 @@ describe("prepareAgentLaunch hook strategies", () => {
 			autonomousModeEnabled: true,
 			cwd: "/tmp",
 			prompt: "",
-			startInPlanMode: true,
 		});
 
 		const permissionModeIndex = launch.args.indexOf("--permission-mode");
 		expect(launch.args[permissionModeIndex + 1]).not.toBe("plan");
-		expect(launch.args.at(-1)).toBe(PLAN_CARD_PROMPT_DIRECTIVE.trim());
+		expect(launch.args.at(-1)).toBe("auto");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
@@ -964,12 +956,11 @@ describe("prepareAgentLaunch hook strategies", () => {
 			autonomousModeEnabled: false,
 			cwd: "/tmp",
 			prompt: "Document the approach",
-			startInPlanMode: true,
 		});
 
 		expect(launch.args).toContain("--dangerously-skip-permissions");
 		expect(launch.args).not.toContain("--permission-mode");
-		expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Document the approach`);
+		expect(launch.args.at(-1)).toBe("Document the approach");
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
@@ -1410,13 +1401,12 @@ describe("prepareAgentLaunch — tiered autonomous permissions", () => {
 				prompt: "Write the rollout design",
 				workspaceId: "workspace-1",
 				agentModel: "claude-haiku-4-5",
-				startInPlanMode: true,
 			});
 
 			expect(launch.args).not.toContain("--permission-mode");
 			expect(launch.args).not.toContain("plan");
 			expect(launch.args).toContain("--dangerously-skip-permissions");
-			expect(launch.args.at(-1)).toBe(`${PLAN_CARD_PROMPT_DIRECTIVE}Write the rollout design`);
+			expect(launch.args.at(-1)).toBe("Write the rollout design");
 			expect(launch.deferredStartupInput).toBeUndefined();
 			expect(findBashGuardHook(readClaudeSettings())).toBeDefined();
 		} finally {

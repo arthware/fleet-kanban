@@ -56,6 +56,7 @@ numbers. The architect reconciles the map on merge.
 | [Runtime state fanout](runtime-state-fanout.md) | the hub that streams board/session deltas to the browser | `src/server/runtime-state-hub.ts` |
 | [Cline SDK boundary](cline-sdk-boundary.md) | maps task semantics onto the SDK; keeps SDK internals contained | `src/cline-sdk/` |
 | [Agent catalog](agent-catalog.md) | registry of supported agents (Cline-native vs CLI/PTY) | `src/core/agent-catalog.ts`, `src/terminal/agent-session-adapters.ts` |
+| [Card type / skill pipeline](card-types.md) | data-defined pipeline phases mapping to lanes, skills, and prompts | `src/core/card-type.ts`, `fleet/card-types/` |
 
 ### Secondary
 
@@ -63,7 +64,7 @@ numbers. The architect reconciles the map on merge.
 | --- | --- | --- |
 | [Home / architect agent session](home-agent-session.md) | synthetic project-scoped sidebar session; no card, no worktree | `src/core/home-agent-session.ts`, `src/server/architect-workspace.ts` |
 | [Auto-review / PR mode](auto-review-pr-mode.md) | per-card mode: commit, open one idempotent PR, leave in Review | `src/prompts/pr-card-directive.ts`, `src/core/api-contract.ts` |
-| [Skill injection & directives](skill-injection.md) | symlink `.agents/skills` into worktrees + one-line skill directives | `src/prompts/`, `src/workspace/task-worktree.ts` |
+| [Skill injection & directives](skill-injection.md) | symlink `.agents/skills` into worktrees + prompt-derived directives | `src/prompts/compose-card-directive.ts`, `src/workspace/task-worktree.ts` |
 | [Persistence / CLINE_HOME](persistence-cline-home.md) | on-disk board/session JSON + worktrees, atomic + optimistic-concurrency | `src/state/workspace-state.ts`, `src/fs/locked-file-system.ts` |
 | [External-issue correlation](external-issue.md) | optional link from a card to its Linear/GitHub source issue | `src/core/external-issue.ts`, `src/core/api-contract.ts` |
 | [Dependency links](dependency-links.md) | directed prerequisite edges between cards | `src/core/api-contract.ts`, `src/core/task-board-mutations.ts` |

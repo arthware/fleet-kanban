@@ -19,7 +19,6 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 				"skill: fleet-smoke",
 				"base-ref: feature/x",
 				"auto-review: pr",
-				"plan: true",
 				"issue: ENG-123",
 				"---",
 				"Build the widget end to end.",
@@ -33,7 +32,6 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 		expect(card.baseRef).toBe("feature/x");
 		expect(card.autoReviewEnabled).toBe(true);
 		expect(card.autoReviewMode).toBe("pr");
-		expect(card.startInPlanMode).toBe(true);
 		expect(card.externalIssueRef).toBe("ENG-123");
 		expect(card.prompt).toBe("Build the widget end to end.");
 	});
@@ -69,6 +67,14 @@ describe("parseTaskCardDocument frontmatter mapping", () => {
 	it("maps agent: default to a null (cleared) override", () => {
 		const card = parseTaskCardDocument(["---", "agent: default", "---", "body"].join("\n"));
 		expect(card.agentId).toBeNull();
+	});
+
+	it("maps card-type and cardType to cardType", () => {
+		const card1 = parseTaskCardDocument(["---", "card-type: bugfix", "---", "body"].join("\n"));
+		expect(card1.cardType).toBe("bugfix");
+
+		const card2 = parseTaskCardDocument(["---", "cardType: feature-request", "---", "body"].join("\n"));
+		expect(card2.cardType).toBe("feature-request");
 	});
 });
 
@@ -157,12 +163,6 @@ describe("invalid frontmatter", () => {
 		);
 	});
 
-	it("rejects a non-boolean plan value", () => {
-		expect(() => parseTaskCardDocument(["---", "plan: yes-please", "---", "body"].join("\n"))).toThrow(
-			/"plan" must be a boolean/,
-		);
-	});
-
 	it("given the frontmatter has an empty skill value, when parsed, then it hard-errors", () => {
 		expect(() => parseTaskCardDocument(["---", "skill: ''", "---", "body"].join("\n"))).toThrow(
 			/"skill" must be a non-empty string/,
@@ -234,6 +234,26 @@ describe("resolveTaskCardCreate precedence", () => {
 		expect(resolved.agentId).toBe("claude");
 		expect(resolved.skill).toBe("other-skill");
 		expect(resolved.baseRef).toBe("flag-branch");
+	});
+
+	it("correctly propagates and overrides cardType", () => {
+		const card = {
+			prompt: "some body",
+			cardType: "bugfix",
+			links: [],
+			codeReferences: [],
+		};
+		// uses card value when flag is omitted
+		const res1 = resolveTaskCardCreate(card, {});
+		expect(res1.cardType).toBe("bugfix");
+
+		// overrides card value when flag is provided
+		const res2 = resolveTaskCardCreate(card, { cardType: "feature" });
+		expect(res2.cardType).toBe("feature");
+
+		// null flag clears card value
+		const res3 = resolveTaskCardCreate(card, { cardType: null });
+		expect(res3.cardType).toBeUndefined();
 	});
 
 	it("collapses an explicit default (null) agent override to undefined", () => {

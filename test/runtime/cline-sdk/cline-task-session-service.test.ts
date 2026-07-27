@@ -13,7 +13,6 @@ import type { ClineTaskSessionService } from "../../../src/cline-sdk/cline-task-
 import { createInMemoryClineTaskSessionService } from "../../../src/cline-sdk/cline-task-session-service";
 import { createClineWatcherRegistry } from "../../../src/cline-sdk/cline-watcher-registry";
 import type { RuntimeTaskImage, RuntimeTaskSessionMode } from "../../../src/core/api-contract";
-import { PLAN_CARD_PROMPT_DIRECTIVE } from "../../../src/prompts/plan-card-directive";
 
 const originalArgv = [...process.argv];
 const originalExecArgv = [...process.execArgv];
@@ -926,7 +925,6 @@ describe("InMemoryClineTaskSessionService", () => {
 			taskId: "task-1",
 			cwd: "/tmp/worktree",
 			prompt: "Investigate startup",
-			startInPlanMode: true,
 		});
 		await vi.waitFor(() => {
 			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(1);
@@ -935,7 +933,7 @@ describe("InMemoryClineTaskSessionService", () => {
 		expect(runtime.startTaskSessionMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mode: "act",
-				prompt: `resolved:${PLAN_CARD_PROMPT_DIRECTIVE}Investigate startup`,
+				prompt: "resolved:Investigate startup",
 			}),
 		);
 		expect(service.getSummary("task-1")?.mode).toBe("act");

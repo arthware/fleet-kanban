@@ -18,6 +18,7 @@ import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtim
 import type {
 	RuntimeCommandRunResponse,
 	RuntimeRunUpdateResponse,
+	RuntimeTaskAutoReviewMode,
 	RuntimeTaskReviewNotificationResponse,
 	RuntimeTaskTokenUsage,
 	RuntimeUpdateStatusResponse,
@@ -47,13 +48,14 @@ import {
 	parseTaskTokenUsageRequest,
 	parseTaskTranscriptRequest,
 } from "../core/api-validation";
+import { resolveStartActiveSkills, validateSkill } from "../core/card-type";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
 import { resolveTaskTitle } from "../core/task-title.js";
 import { readFileIfExists } from "../fs/read-file-if-exists";
+import { loadCardTypeManifest } from "../prompts/card-type-discovery";
+import { composeCardDirective, resolveCanonicalSkillsDirSync } from "../prompts/compose-card-directive";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
-import { prependImplementCardDirective } from "../prompts/implement-card-directive";
-import { prependPrCardDirective } from "../prompts/pr-card-directive";
 import { getAgentBudget } from "../server/agent-budget";
 import {
 	type RegisteredWorkspace,
@@ -437,28 +439,81 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					});
 				}
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
+				const isHome = isHomeAgentSessionId(body.taskId);
 				const skillName = body.skill?.trim();
-				const skillPrompt = skillName
-					? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
-					: body.prompt;
-				const withPrDirective = prependPrCardDirective(
-					skillPrompt,
-					body.autoReviewEnabled,
-					body.autoReviewMode,
-					body.baseRef,
-				);
-				// A build card with no explicit skill defaults to fleet-implement (skipped for plan
-				// cards and the home agent — see prependImplementCardDirective). An explicit `skill:`
-				// overrides that default rather than stacking on top of it.
-				const withDirectives = skillName
-					? withPrDirective
-					: prependImplementCardDirective(withPrDirective, body.taskId, body.startInPlanMode);
+
+				let withDirectives = body.prompt;
+
+				if (isHome) {
+					withDirectives = skillName
+						? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
+						: body.prompt;
+				} else if (skillName) {
+					const directive = composeCardDirective([skillName], { baseRef: body.baseRef });
+					const skillPrompt = `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`;
+					withDirectives = directive ? `${directive}${skillPrompt}` : skillPrompt;
+				} else {
+					let board = { columns: [] as any[] };
+					let boardCardType: string | undefined;
+					let boardAutoReviewEnabled: boolean | undefined;
+					let boardAutoReviewMode: RuntimeTaskAutoReviewMode | undefined;
+
+					try {
+						const state = await loadWorkspaceState(workspaceScope.workspacePath);
+						if (state?.board) {
+							board = state.board;
+							for (const column of board.columns) {
+								const card = column.cards.find((c: any) => c.id === body.taskId);
+								if (card) {
+									boardCardType = card.cardType;
+									boardAutoReviewEnabled = card.autoReviewEnabled;
+									boardAutoReviewMode = card.autoReviewMode;
+									break;
+								}
+							}
+						}
+					} catch {
+						// Fallback safely when workspace state or git detection fails (e.g. in resume routing unit tests)
+					}
+
+					const cardType = body.cardType?.trim() || boardCardType?.trim() || "build";
+
+					const manifest =
+						(await loadCardTypeManifest(cardType, { workspacePath: workspaceScope.workspacePath })) ??
+						(await loadCardTypeManifest("build", { workspacePath: workspaceScope.workspacePath }));
+
+					if (manifest) {
+						const autoReviewEnabled = body.autoReviewEnabled ?? boardAutoReviewEnabled ?? false;
+						const autoReviewMode = body.autoReviewMode ?? boardAutoReviewMode;
+
+						const orderedSkills = resolveStartActiveSkills(manifest, {
+							autoReviewEnabled,
+							autoReviewMode,
+						});
+
+						const skillsDir = resolveCanonicalSkillsDirSync();
+						if (skillsDir) {
+							for (const skillName of orderedSkills) {
+								const status = validateSkill(skillName, skillsDir);
+								if (status !== "ok") {
+									process.stderr.write(
+										`[kanban] Warning: Skill "${skillName}" for card-type "${manifest.name}" is ${status}. It will be skipped.\n`,
+									);
+								}
+							}
+						}
+
+						const directive = composeCardDirective(orderedSkills, { baseRef: body.baseRef });
+						withDirectives = directive ? `${directive}${body.prompt}` : body.prompt;
+					}
+				}
+
 				// Prepend the repo's constitution to card prompts so it can't be skipped (Article 1/5).
 				// Scoped via resolveDoctrineScope so an overseen repo resolves in-repo first, else
 				// architect-owned doctrine at the fleet root; null when the repo has none, leaving the
 				// prompt unchanged. The home/architect agent gets the constitution via its context
 				// preamble instead, not prepended to every message.
-				const doctrine = isHomeAgentSessionId(body.taskId)
+				const doctrine = isHome
 					? null
 					: await loadDoctrine(
 							{
@@ -532,7 +587,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						providerId: clineLaunchConfig.providerId,
 						modelId: clineLaunchConfig.modelId,
 						mode: requestedClineTaskMode,
-						startInPlanMode: body.startInPlanMode,
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
 						reasoningEffort: clineLaunchConfig.reasoningEffort,
@@ -590,7 +644,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					prompt: finalPrompt,
 					agentModel: body.agentModel,
 					images: body.images,
-					startInPlanMode: body.startInPlanMode,
 					resumeFromTrash: body.resumeFromTrash,
 					resumeMode,
 					cols: body.cols,

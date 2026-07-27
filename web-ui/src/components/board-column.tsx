@@ -23,7 +23,6 @@ export function BoardColumn({
 	onEditTask,
 	onSaveTitle,
 	onOpenPrTask,
-	onImplementHereTask,
 	onCancelAutomaticTaskAction,
 	onMoveToTrashTask,
 	onRestoreFromTrashTask,
@@ -56,7 +55,6 @@ export function BoardColumn({
 	onEditTask?: (card: BoardCardModel) => void;
 	onSaveTitle?: (taskId: string, title: string) => void;
 	onOpenPrTask?: (taskId: string) => void;
-	onImplementHereTask?: (taskId: string) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	onMoveToTrashTask?: (taskId: string) => void;
 	onRestoreFromTrashTask?: (taskId: string) => void;
@@ -185,7 +183,6 @@ export function BoardColumn({
 											onMoveToTrash={onMoveToTrashTask}
 											onRestoreFromTrash={onRestoreFromTrashTask}
 											onOpenPr={onOpenPrTask}
-											onImplementHere={onImplementHereTask}
 											onCancelAutomaticAction={onCancelAutomaticTaskAction}
 											isOpenPrLoading={openPrTaskLoadingById?.[card.id] ?? false}
 											isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
