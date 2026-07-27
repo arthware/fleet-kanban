@@ -1196,3 +1196,18 @@ export async function setWorkspaceEpic(workspaceId: string, epic: WorkspaceEpicD
 		lock: null,
 	});
 }
+
+export async function listWorkspacesWithEpic(): Promise<
+	(RuntimeWorkspaceIndexEntry & { epic?: WorkspaceEpicDescriptor })[]
+> {
+	const rawWorkspaces = await listWorkspaceIndexEntries();
+	return await Promise.all(
+		rawWorkspaces.map(async (ws) => {
+			const epic = await getWorkspaceEpic(ws.workspaceId);
+			return {
+				...ws,
+				epic: epic ?? undefined,
+			};
+		}),
+	);
+}

@@ -17,6 +17,12 @@ const trpcMocks = vi.hoisted(() => ({
 			stopTaskSession: {
 				mutate: vi.fn(),
 			},
+			sendTaskSessionInput: {
+				mutate: vi.fn(),
+			},
+			getTaskTranscript: {
+				query: vi.fn(),
+			},
 		},
 		workspace: {
 			getState: {
@@ -34,6 +40,8 @@ const trpcMocks = vi.hoisted(() => ({
 const workspaceStateMocks = vi.hoisted(() => ({
 	loadWorkspaceContext: vi.fn(),
 	mutateWorkspaceState: vi.fn(),
+	listWorkspaceIndexEntries: vi.fn(),
+	loadWorkspaceBoardById: vi.fn(),
 }));
 
 const taskWorktreeContextMocks = vi.hoisted(() => ({
@@ -48,6 +56,8 @@ vi.mock("@trpc/client", () => ({
 vi.mock("../../../src/state/workspace-state.js", () => ({
 	loadWorkspaceContext: workspaceStateMocks.loadWorkspaceContext,
 	mutateWorkspaceState: workspaceStateMocks.mutateWorkspaceState,
+	listWorkspaceIndexEntries: workspaceStateMocks.listWorkspaceIndexEntries,
+	loadWorkspaceBoardById: workspaceStateMocks.loadWorkspaceBoardById,
 }));
 
 vi.mock("../../../src/workspace/task-worktree-context.js", () => ({
@@ -148,11 +158,46 @@ describe("task commands resolve cwd inside a task worktree without --project-pat
 		trpcMocks.client.runtime.stopTaskSession.mutate.mockResolvedValue({ ok: true });
 		trpcMocks.client.workspace.getState.query.mockImplementation(async () => state);
 		trpcMocks.client.workspace.notifyStateUpdated.mutate.mockResolvedValue(undefined);
-		workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({
-			repoPath: MAIN_REPO_PATH,
-			workspaceId: "workspace-1",
-			statePath: `${MAIN_REPO_PATH}/.cline/kanban/board.json`,
-			git: state.git,
+		workspaceStateMocks.loadWorkspaceContext.mockImplementation(async (path, _options) => {
+			if (path === MAIN_REPO_PATH) {
+				return {
+					repoPath: MAIN_REPO_PATH,
+					workspaceId: "workspace-1",
+					statePath: `${MAIN_REPO_PATH}/.cline/kanban/board.json`,
+					git: state.git,
+				};
+			}
+			if (path === "/epic/repo") {
+				return {
+					repoPath: "/epic/repo",
+					workspaceId: "workspace-epic",
+					statePath: `/epic/repo/.cline/kanban/board.json`,
+					git: state.git,
+				};
+			}
+			return null;
+		});
+		workspaceStateMocks.listWorkspaceIndexEntries.mockResolvedValue([
+			{ workspaceId: "workspace-1", repoPath: MAIN_REPO_PATH },
+			{ workspaceId: "workspace-epic", repoPath: "/epic/repo" },
+		]);
+		workspaceStateMocks.loadWorkspaceBoardById.mockImplementation(async (workspaceId: string) => {
+			if (workspaceId === "workspace-1") {
+				return state.board;
+			}
+			if (workspaceId === "workspace-epic") {
+				return {
+					columns: [
+						{
+							id: "in_progress",
+							title: "In Progress",
+							cards: [createCard({ id: "epic-task-id", title: "Epic Card" })],
+						},
+					],
+					dependencies: [],
+				};
+			}
+			throw new Error("Unknown workspace ID");
 		});
 		workspaceStateMocks.mutateWorkspaceState.mockImplementation(async (_workspacePath, mutate) => {
 			const result = mutate(state);
@@ -234,5 +279,51 @@ describe("task commands resolve cwd inside a task worktree without --project-pat
 		expect(process.exitCode).toBe(1);
 		expect(payload.ok).toBe(false);
 		expect(payload.error).toContain("task done requires either --task-id or --column.");
+	});
+
+	it("given a task in an epic workspace, when sending input without --project-path, then it resolves and targets the epic workspace", async () => {
+		// Arrange: a task "epic-task-id" exists in "/epic/repo" (workspace-epic)
+		trpcMocks.client.runtime.sendTaskSessionInput.mutate.mockResolvedValue({
+			ok: true,
+			summary: { state: "running" },
+		});
+
+		// Act: send input to the epic task from the main repo cwd
+		await createTaskProgram().parseAsync([
+			"node",
+			"kanban",
+			"task",
+			"send-input",
+			"--task-id",
+			"epic-task-id",
+			"--text",
+			"hello",
+		]);
+
+		// Assert: it should have added the epic workspace and sent the input
+		expect(trpcMocks.client.projects.add.mutate).toHaveBeenCalledWith({
+			path: "/epic/repo",
+		});
+		expect(trpcMocks.client.runtime.sendTaskSessionInput.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ taskId: "epic-task-id", text: "hello" }),
+		);
+	});
+
+	it("given a task in an epic workspace, when tailing without --project-path, then it resolves and targets the epic workspace", async () => {
+		// Arrange: a task "epic-task-id" exists in "/epic/repo" (workspace-epic)
+		trpcMocks.client.runtime.getTaskTranscript.query.mockResolvedValue({
+			ok: true,
+			present: true,
+			messages: [{ role: "user", content: "hello" }],
+		});
+
+		// Act: tail the epic task from the main repo cwd
+		await createTaskProgram().parseAsync(["node", "kanban", "task", "tail", "--task-id", "epic-task-id"]);
+
+		// Assert: it should have resolved the workspace and fetched transcript from the epic workspace
+		expect(workspaceStateMocks.loadWorkspaceContext).toHaveBeenCalledWith("/epic/repo", expect.any(Object));
+		expect(trpcMocks.client.runtime.getTaskTranscript.query).toHaveBeenCalledWith({
+			taskId: "epic-task-id",
+		});
 	});
 });

@@ -126,7 +126,8 @@ vi.mock("@clinebot/core", () => ({
 const workspaceStateMocks = vi.hoisted(() => ({
 	loadWorkspaceState: vi.fn(),
 	getWorkspaceEpic: vi.fn(),
-	listWorkspaceIndexEntries: vi.fn(),
+	listWorkspaceIndexEntries: vi.fn(async () => []),
+	listWorkspacesWithEpic: vi.fn(async () => []),
 	loadWorkspaceContextById: vi.fn(),
 	getRuntimeHomePath: vi.fn(() => "/tmp/home"),
 }));
@@ -135,6 +136,7 @@ vi.mock("../../../src/state/workspace-state.js", () => ({
 	loadWorkspaceState: workspaceStateMocks.loadWorkspaceState,
 	getWorkspaceEpic: workspaceStateMocks.getWorkspaceEpic,
 	listWorkspaceIndexEntries: workspaceStateMocks.listWorkspaceIndexEntries,
+	listWorkspacesWithEpic: workspaceStateMocks.listWorkspacesWithEpic,
 	loadWorkspaceContextById: workspaceStateMocks.loadWorkspaceContextById,
 	getRuntimeHomePath: workspaceStateMocks.getRuntimeHomePath,
 }));
@@ -310,6 +312,7 @@ describe("createRuntimeApi startTaskSession", () => {
 		workspaceStateMocks.loadWorkspaceState.mockReset();
 		workspaceStateMocks.getWorkspaceEpic.mockReset();
 		workspaceStateMocks.listWorkspaceIndexEntries.mockReset();
+		workspaceStateMocks.listWorkspacesWithEpic.mockReset();
 		workspaceStateMocks.loadWorkspaceContextById.mockReset();
 
 		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
