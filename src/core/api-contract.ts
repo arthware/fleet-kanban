@@ -473,6 +473,7 @@ export const workspaceEpicDescriptorSchema = z.object({
 	name: z.string().min(1),
 	branch: z.string().min(1),
 	base: z.string().optional(),
+	archived: z.boolean().optional(),
 });
 export type WorkspaceEpicDescriptor = z.infer<typeof workspaceEpicDescriptorSchema>;
 
