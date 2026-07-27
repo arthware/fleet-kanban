@@ -1001,22 +1001,23 @@ def epic_complete(name: str, repo: str, cfg: dict):
         print(f"{GREEN}✓ PR created successfully!{RESET}")
         print(f"  {pr_res.stdout.strip()}")
 
-    # 2. Deregister workspace via projects.remove
-    print(f"Deregistering workspace {workspace_id} from board...")
-    remove_res = trpc_call(cfg, "projects.remove", {"projectId": workspace_id})
-    if not remove_res or not remove_res.get("ok"):
-        print(f"{RED}Error: Failed to deregister workspace.{RESET}", file=sys.stderr)
+    # 2. Archive workspace instead of removing it
+    print(f"Archiving epic workspace {workspace_id} on board...")
+    set_res = trpc_call(cfg, "projects.setEpic", {
+        "workspaceId": workspace_id,
+        "epic": {
+            "name": name,
+            "branch": epic_branch,
+            "base": base_branch,
+            "archived": True
+        }
+    })
+    if not set_res or not set_res.get("ok"):
+        print(f"{RED}Error: Failed to archive epic workspace.{RESET}", file=sys.stderr)
         return 1
-    print(f"  Workspace deregistered.")
+    print(f"  Workspace archived.")
 
-    # 3. Remove git worktree
-    if wt_path.exists():
-        print(f"Removing git worktree at {wt_path}...")
-        git_run(rp, ["worktree", "remove", "--force", str(wt_path)], check=False)
-    else:
-        print(f"  (worktree path does not exist on disk; skipping deletion)")
-
-    print(f"\n{GREEN}✓ Epic '{name}' completed and cleaned up!{RESET}")
+    print(f"\n{GREEN}✓ Epic '{name}' marked as completed/archived!{RESET}")
     return 0
 
 def epic_sync(name: str, repo: str, cfg: dict):
