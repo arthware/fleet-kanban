@@ -326,4 +326,47 @@ describe("task commands resolve cwd inside a task worktree without --project-pat
 			taskId: "epic-task-id",
 		});
 	});
+
+	it("given send-input, when --submit-only is provided, then it calls trpc with empty text", async () => {
+		trpcMocks.client.runtime.sendTaskSessionInput.mutate.mockResolvedValue({
+			ok: true,
+			summary: { state: "running" },
+		});
+
+		await createTaskProgram().parseAsync([
+			"node",
+			"kanban",
+			"task",
+			"send-input",
+			"--task-id",
+			"task-1",
+			"--submit-only",
+		]);
+
+		expect(trpcMocks.client.runtime.sendTaskSessionInput.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ taskId: "task-1", text: "" }),
+		);
+	});
+
+	it("given send-input, when neither --text nor --submit-only is provided, then it fails clearly", async () => {
+		await expect(
+			createTaskProgram().parseAsync(["node", "kanban", "task", "send-input", "--task-id", "task-1"]),
+		).rejects.toThrow("Either --text <text> or --submit-only must be provided.");
+	});
+
+	it("given send-input, when both --text and --submit-only are provided, then it fails clearly", async () => {
+		await expect(
+			createTaskProgram().parseAsync([
+				"node",
+				"kanban",
+				"task",
+				"send-input",
+				"--task-id",
+				"task-1",
+				"--text",
+				"hello",
+				"--submit-only",
+			]),
+		).rejects.toThrow("Cannot specify both --text and --submit-only.");
+	});
 });
