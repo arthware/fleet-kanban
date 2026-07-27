@@ -1,6 +1,17 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, ChevronUp, Command, Ellipsis, ExternalLink, Info, Lightbulb, Plus, X } from "lucide-react";
+import {
+	Archive,
+	ChevronDown,
+	ChevronUp,
+	Command,
+	Ellipsis,
+	ExternalLink,
+	Info,
+	Lightbulb,
+	Plus,
+	X,
+} from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { AgentBudgetReadout } from "@/components/agent-budget-readout";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
@@ -292,6 +303,7 @@ export function ProjectNavigationPanel({
 							.map((project) => {
 								const isCurrent = currentProjectId === project.id;
 								const letter = (project.epic?.name ?? project.name).charAt(0).toUpperCase();
+								const isArchived = !!project.epic?.archived;
 								return (
 									<button
 										key={project.id}
@@ -308,10 +320,12 @@ export function ProjectNavigationPanel({
 											isMobile ? "w-11 h-11" : "w-8 h-8",
 											isCurrent
 												? "bg-accent text-accent-fg"
-												: "bg-accent/15 text-accent hover:text-accent hover:bg-accent/25 border border-accent/20",
+												: isArchived
+													? "bg-surface-3 text-text-tertiary hover:bg-surface-4 hover:text-text-secondary border border-border/50 opacity-60"
+													: "bg-accent/15 text-accent hover:text-accent hover:bg-accent/25 border border-accent/20",
 										)}
 									>
-										{letter}
+										{isArchived ? <Archive size={14} className="shrink-0" /> : letter}
 									</button>
 								);
 							})}
@@ -479,17 +493,22 @@ export function ProjectNavigationPanel({
 									{epicProjects.map((project) => {
 										const isCurrent = agentChatWorkspaceId === project.id;
 										const name = project.epic?.name ?? project.name;
+										const isArchived = !!project.epic?.archived;
 										return (
 											<DropdownMenu.Item
 												key={project.id}
 												className={cn(
 													"flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-text-primary cursor-pointer outline-none data-[highlighted]:bg-surface-3",
 													isCurrent ? "bg-surface-2 font-medium" : "",
+													isArchived ? "opacity-60" : "",
 												)}
 												onSelect={() => onSelectProject(project.id)}
 											>
 												<EpicBadge name={name} />
-												<span className="truncate">{name} Agent</span>
+												<span className="truncate flex items-center gap-1.5">
+													{isArchived && <Archive size={12} className="shrink-0" />}
+													{name} Agent
+												</span>
 											</DropdownMenu.Item>
 										);
 									})}
@@ -593,6 +612,7 @@ export function ProjectNavigationPanel({
 											{epicProjects.map((epicProject) => {
 												const isCurrent = currentProjectId === epicProject.id;
 												const counts = `${epicProject.taskCounts.backlog}·${epicProject.taskCounts.in_progress}·${epicProject.taskCounts.review}`;
+												const isArchived = !!epicProject.epic?.archived;
 
 												return (
 													<div
@@ -617,16 +637,24 @@ export function ProjectNavigationPanel({
 														className={cn(
 															"kb-project-row cursor-pointer rounded-md flex items-center justify-between",
 															isCurrent && "kb-project-row-selected",
+															isArchived && !isCurrent && "opacity-50 hover:opacity-85",
 														)}
 														style={{ padding: "6px 8px" }}
 													>
 														<div className="flex-1 min-w-0 flex items-center gap-1.5 justify-between w-full">
 															<span
 																className={cn(
-																	"font-medium text-sm truncate",
-																	isCurrent ? "text-accent-fg" : "text-text-primary",
+																	"font-medium text-sm truncate flex items-center gap-1.5",
+																	isCurrent
+																		? "text-accent-fg"
+																		: isArchived
+																			? "text-text-tertiary"
+																			: "text-text-primary",
 																)}
 															>
+																{isArchived && (
+																	<Archive size={14} className="shrink-0 text-text-tertiary" />
+																)}
 																{epicProject.epic?.name ?? epicProject.name}
 															</span>
 															<span

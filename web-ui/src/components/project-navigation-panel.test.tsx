@@ -335,6 +335,46 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.textContent).toContain("Kanban");
 	});
 
+	it("renders archived epics with archived flag and keeps them listed", () => {
+		const projectsWithArchivedEpic: RuntimeProjectSummary[] = [
+			{
+				id: "project-1",
+				name: "My App",
+				path: "/tmp/myapp",
+				taskCounts: {
+					backlog: 5,
+					in_progress: 3,
+					review: 2,
+					done: 0,
+					trash: 1,
+				},
+			},
+			{
+				id: "epic-archived",
+				name: "Epic Arch Refactor",
+				path: "/tmp/epic-archived",
+				taskCounts: {
+					backlog: 3,
+					in_progress: 2,
+					review: 1,
+					done: 0,
+					trash: 0,
+				},
+				epic: {
+					name: "Archived Epic",
+					branch: "epic/archived",
+					archived: true,
+				},
+			},
+		];
+
+		renderPanel({ projects: projectsWithArchivedEpic });
+
+		expect(container.textContent).toContain("Epics");
+		expect(container.textContent).toContain("Archived Epic");
+		expect(container.textContent).toContain("3·2·1");
+	});
+
 	it("renders the thin context switcher under the Agent section, reflecting the active context in the trigger and handling selection clicks", () => {
 		const projectsWithEpic: RuntimeProjectSummary[] = [
 			{
