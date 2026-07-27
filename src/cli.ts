@@ -8,6 +8,7 @@ import ora, { type Ora } from "ora";
 import packageJson from "../package.json" with { type: "json" };
 import "./cli-warning-filter";
 import { disposeCliTelemetryService } from "./cline-sdk/cline-telemetry-service.js";
+import { registerCardTypeCommand } from "./commands/card-type";
 import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
 import { loadGlobalRuntimeConfig, loadRuntimeConfig } from "./config/runtime-config";
@@ -708,6 +709,7 @@ function createProgram(invocationArgs: string[]): Command {
 
 	registerTaskCommand(program);
 	registerHooksCommand(program);
+	registerCardTypeCommand(program);
 
 	program
 		.command("mcp")

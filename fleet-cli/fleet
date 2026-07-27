@@ -1804,6 +1804,13 @@ card_type_rm() {
     return 1
   fi
 }
+card_type_validate() {
+  local name="${1:-}"
+  _xtools_valid_name "$name" || { dim "usage: fleet card-type validate <name>"; return 1; }
+  local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+  local project_root; project_root="$(dirname "$CFG_DIR")"
+  "$bin" card-type validate "$name" --project-path "$project_root"
+}
 fleet_card_type() {
   case "${1:-}" in
     ''|ls|list|-h|--help|help) card_type_list;;
@@ -1812,8 +1819,9 @@ fleet_card_type() {
     show|cat) shift; card_type_show "$@";;
     edit) shift; card_type_edit "$@";;
     rm|remove|delete) shift; card_type_rm "$@";;
+    validate) shift; card_type_validate "$@";;
     *)
-      dim "unknown card-type command '${1:-}' (try: ls, new, show, path, edit, rm)"
+      dim "unknown card-type command '${1:-}' (try: ls, new, show, path, edit, rm, validate)"
       return 1
       ;;
   esac
