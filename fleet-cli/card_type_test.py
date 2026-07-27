@@ -30,7 +30,9 @@ class TestCardTypeCommand(unittest.TestCase):
     def run_fleet(self, args, check=True):
         import os
         env = dict(os.environ)
-        env["FLEET_REPO"] = str(Path(__file__).parent.parent)
+        root_dir = str(Path(__file__).parent.parent)
+        env["FLEET_REPO"] = root_dir
+        env["KANBAN_SOURCE"] = root_dir
         # Run fleet script inside our temp project directory
         res = subprocess.run(
             [self.fleet_script] + args,
@@ -49,7 +51,7 @@ class TestCardTypeCommand(unittest.TestCase):
     def test_given_card_type_ls_then_lists_feature_manifest(self):
         """Behavior: `fleet card-type ls` lists built-in feature manifest."""
         res = self.run_fleet(["card-type", "ls"])
-        self.assertIn("feature", res.stdout)
+        self.assertIn("build", res.stdout)
         self.assertIn("The default card workflow", res.stdout)
 
     def test_given_card_type_new_then_scaffolds_and_lists_it(self):
@@ -80,6 +82,15 @@ class TestCardTypeCommand(unittest.TestCase):
         res_rm = self.run_fleet(["card-type", "rm", "test-type"])
         self.assertIn("removed", res_rm.stdout)
         self.assertFalse(manifest_path.exists())
+
+    def test_given_card_type_validate_then_validates_and_previews(self):
+        """Behavior: `fleet card-type validate` validates a build card type successfully."""
+        res = self.run_fleet(["card-type", "validate", "build"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Card Type: build", res.stdout)
+        self.assertIn("Phases:", res.stdout)
+        self.assertIn("Composed Directive (default):", res.stdout)
+        self.assertIn("Composed Directive (with --auto-review pr):", res.stdout)
 
 if __name__ == "__main__":
     unittest.main()
