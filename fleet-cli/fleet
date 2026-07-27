@@ -943,14 +943,119 @@ PY
 }
 
 # --- ad-hoc kanban cards on THIS project's board (isolated env + source build) ---
-# Resolve a configured repo to an absolute path. $1 = optional repo name; with no
-# name, succeeds only when the project has exactly one repo (else ambiguous -> 1).
+# Resolve a configured repo to an absolute path. $1 = optional repo name; $2 = subcommand context (for errors);
+# with no name, succeeds only when the project has exactly one repo (else ambiguous -> 1).
 _fleet_repo_path() {
-  local want="$1" root; root="$(dirname "$CFG_DIR")"
-  if [ -n "$want" ]; then echo "$root/$want"; return 0; fi
-  local repos; repos="$(python3 -c "import json;print('\n'.join(json.load(open('$CFG_DIR/config.json')).get('repos',[])))" 2>/dev/null)"
-  [ "$(printf '%s\n' "$repos" | grep -c .)" = "1" ] || return 1
-  echo "$root/$(printf '%s\n' "$repos" | head -1)"
+  local want="${1:-}"
+  local cmd_prefix="${2:-task}"
+  local root; root="$(dirname "$CFG_DIR")"
+  FLEET_WANT="$want" FLEET_ROOT="$root" FLEET_CFG_DIR="$CFG_DIR" FLEET_CMD_PREFIX="$cmd_prefix" FLEET_KANBAN_URL="$KANBAN_URL" \
+  python3 - <<'PY'
+import json, os, sys, urllib.request
+
+want = os.environ.get("FLEET_WANT", "").strip()
+root = os.environ["FLEET_ROOT"]
+cfg_dir = os.environ["FLEET_CFG_DIR"]
+cmd_prefix = os.environ.get("FLEET_CMD_PREFIX", "task")
+kanban_url = os.environ.get("FLEET_KANBAN_URL", "http://127.0.0.1:3484")
+
+def get_offline_repos():
+    config_path = os.path.join(cfg_dir, "config.json")
+    cfg = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+    
+    seen = set()
+    paths = []
+    
+    # Architect workspace (project root) if it's a git repo
+    if os.path.isdir(os.path.join(root, ".git")):
+        p = os.path.realpath(root)
+        if p not in seen:
+            seen.add(p)
+            paths.append((p, ""))
+            
+    for r in cfg.get("repos", []) or []:
+        p = os.path.realpath(r if os.path.isabs(r) else os.path.join(root, r))
+        if os.path.isdir(p) and p not in seen:
+            seen.add(p)
+            paths.append((p, r))
+    return paths, cfg
+
+repo_entries = []
+online = False
+
+# Try to query the running Kanban board
+try:
+    url = f"{kanban_url}/api/trpc/projects.list"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        data = json.load(resp)
+        projects = data["result"]["data"]["projects"]
+        online = True
+        for p in projects:
+            p_id = p["id"]
+            p_path = os.path.realpath(p["path"])
+            candidates = {p_id, p_path, os.path.basename(p_path)}
+            try:
+                candidates.add(os.path.relpath(p_path, root))
+            except Exception:
+                pass
+            repo_entries.append({
+                "path": p_path,
+                "display_name": p_id,
+                "candidates": {c.strip() for c in candidates if c}
+            })
+except Exception:
+    pass
+
+if not online:
+    paths, cfg = get_offline_repos()
+    for p, r in paths:
+        display_name = os.path.basename(p)
+        candidates = {p, display_name}
+        if r:
+            candidates.add(r)
+            candidates.add(os.path.basename(r))
+            try:
+                candidates.add(os.path.relpath(p, root))
+            except Exception:
+                pass
+        repo_entries.append({
+            "path": p,
+            "display_name": display_name,
+            "candidates": {c.strip() for c in candidates if c}
+        })
+
+if want:
+    matched = None
+    for entry in repo_entries:
+        if want in entry["candidates"]:
+            matched = entry["path"]
+            break
+            
+    if matched:
+        print(matched)
+        sys.exit(0)
+    else:
+        valid_ids = sorted(list(set(entry["display_name"] for entry in repo_entries)))
+        valid_str = ", ".join(valid_ids)
+        sys.stderr.write(f'{cmd_prefix}: unknown --repo "{want}". valid: {valid_str}\n')
+        sys.exit(1)
+else:
+    if len(repo_entries) == 1:
+        print(repo_entries[0]["path"])
+        sys.exit(0)
+    else:
+        valid_ids = sorted(list(set(entry["display_name"] for entry in repo_entries)))
+        valid_str = ", ".join(valid_ids)
+        sys.stderr.write(f'{cmd_prefix}: multiple repos configured — pass --repo <name>\n')
+        sys.exit(1)
+PY
 }
 
 fleet_task() {
@@ -986,7 +1091,7 @@ fleet_task() {
         --start) start=1; shift;;
         *) extra+=("$1"); shift;;   # forward unrecognized flags straight to kanban
       esac; done
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task create: multiple repos configured — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task create")" || return 1
       [ -d "$pp" ] || { echo "task create: no such repo dir: $pp" >&2; return 1; }
       # kanban defaults base-ref (current branch → default → first known) when omitted
       local args=(task create --project-path "$pp")
@@ -1047,7 +1152,7 @@ PY
         *) echo "task start: unknown flag $1" >&2; return 1;;
       esac; done
       [ -n "$tid" ] || { echo "task start: --task-id <id> required" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task start: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task start")" || return 1
       CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task start --task-id "$tid" --project-path "$pp"
       ;;
     list|ls)
@@ -1058,9 +1163,13 @@ PY
         --column) col="$2"; shift 2;;
         *) echo "task list: unknown flag $1" >&2; return 1;;
       esac; done
+      local rpath=""
+      if [ -n "$repo" ]; then
+        rpath="$(_fleet_repo_path "$repo" "task list")" || return 1
+      fi
       local projs
       projs="$(curl -fsS --max-time 5 "$KANBAN_URL/api/trpc/projects.list" 2>/dev/null)" || { dim "board not reachable at $KANBAN_URL"; return 1; }
-      FLEET_PROJECTS="$projs" FLEET_REPO="$repo" FLEET_COL="$col" FLEET_BIN="$bin" \
+      FLEET_PROJECTS="$projs" FLEET_REPO="${rpath:-$repo}" FLEET_COL="$col" FLEET_BIN="$bin" \
       FLEET_CH="$CLINE_HOME_DIR" FLEET_PORT="$KANBAN_PORT" FLEET_HOME="$HOME" FLEET_SELF="$DIR" python3 - <<'PY'
 import os, json, subprocess, sys
 B="\033[1m";D="\033[2m";R="\033[0m";C="\033[36m";Y="\033[33m";RED="\033[31m"
@@ -1079,7 +1188,7 @@ env={**os.environ,"CLINE_HOME":os.environ["FLEET_CH"],"KANBAN_RUNTIME_PORT":os.e
 ORDER=["backlog","in_progress","review","done"]
 for p in projects:
     name=p["id"];path=p["path"]
-    if rf and rf not in (name,os.path.basename(path)): continue
+    if rf and rf not in (name, os.path.basename(path)) and (not os.path.exists(rf) or os.path.realpath(path) != os.path.realpath(rf)): continue
     # The kanban CLI truncates large stdout when it exits before the pipe flushes
     # (a ~64KB-boundary bug on big boards), so a single read can yield partial/invalid
     # JSON. Retry a few times, and NEVER silently swallow a failed read as an empty
@@ -1200,7 +1309,7 @@ PY
       esac; done
       [ -n "$tid" ] || { echo "usage: fleet task say <id> \"<text>\" [--submit|--no-submit]" >&2; return 1; }
       [ -n "$text" ] || { echo "task say: message text required — fleet task say $tid \"<text>\"" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task say: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task say")" || return 1
       local args=(task send-input --task-id "$tid" --project-path "$pp" --text "$text")
       [ "$submit" = 0 ] && args+=(--no-submit)
       local out
@@ -1227,7 +1336,7 @@ PY
         *) if [ -z "$tid" ]; then tid="$1"; else echo "task tail: unexpected arg $1" >&2; return 1; fi; shift;;
       esac; done
       [ -n "$tid" ] || { echo "usage: fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task tail: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task tail")" || return 1
       local args=(task tail --task-id "$tid" --project-path "$pp")
       [ -n "$lines" ] && args+=(--lines "$lines")
       [ -n "$since" ] && args+=(--since "$since")
@@ -1275,7 +1384,7 @@ PY
       esac; done
       [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review pr|off] [--agent claude|codex|cline] [--plan|--no-plan] [--cline-model <id>] [--repo <name>]" >&2; return 1; }
       [ "${#uargs[@]}" -gt 0 ] || { echo "task update: nothing to change — pass at least one field" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task update: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task update")" || return 1
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task update --task-id "$tid" --project-path "$pp" "${uargs[@]}" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ updated task $tid"; else echo "task update failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
@@ -1289,7 +1398,7 @@ PY
         *) echo "task link: unknown flag $1" >&2; return 1;;
       esac; done
       { [ -n "$a" ] && [ -n "$b" ]; } || { echo "usage: fleet task link --task-id <id> --linked-task-id <id> [--repo <name>]" >&2; echo "  --task-id waits on --linked-task-id; when the prerequisite is moved to done the waiter auto-starts" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task link: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task link")" || return 1
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task link --task-id "$a" --linked-task-id "$b" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"|"depend'; then say "✓ linked $a → waits on → $b"; else echo "task link failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
@@ -1301,7 +1410,7 @@ PY
         *) echo "task unlink: unknown flag $1" >&2; return 1;;
       esac; done
       [ -n "$dep" ] || { echo "usage: fleet task unlink --dependency-id <id> [--repo <name>]   (find the id with: fleet task cat <id>)" >&2; return 1; }
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task unlink: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task unlink")" || return 1
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task unlink --dependency-id "$dep" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ unlinked dependency $dep"; else echo "task unlink failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
       ;;
@@ -1316,7 +1425,7 @@ PY
       esac; done
       if { [ -n "$tid" ] && [ -n "$col" ]; } || { [ -z "$tid" ] && [ -z "$col" ]; }; then
         echo "usage: fleet task done (--task-id <id> | --column backlog|in_progress|review|done) [--repo <name>]" >&2; return 1; fi
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task done: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task done")" || return 1
       local -a sel; if [ -n "$tid" ]; then sel=(--task-id "$tid"); else sel=(--column "$col"); fi
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task done "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ moved ${tid:-column $col} to done"; else echo "task done failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
@@ -1332,7 +1441,7 @@ PY
       esac; done
       if { [ -n "$tid" ] && [ -n "$col" ]; } || { [ -z "$tid" ] && [ -z "$col" ]; }; then
         echo "usage: fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanently removes cards + worktrees" >&2; return 1; fi
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task delete: multiple repos — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task delete")" || return 1
       local -a sel; if [ -n "$tid" ]; then sel=(--task-id "$tid"); else sel=(--column "$col"); fi
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task delete "${sel[@]}" --project-path "$pp" 2>&1 || true)"
       if printf '%s' "$out" | grep -qE '"ok" *: *true|"workspacePath"'; then say "✓ deleted ${tid:-column $col}"; else echo "task delete failed:" >&2; printf '%s\n' "$out" | head -20 >&2; return 1; fi
@@ -1362,7 +1471,7 @@ PY
 
       case "$merge_method" in squash|merge|rebase) ;; *) echo "task land: --merge must be squash|merge|rebase" >&2; return 2;; esac
 
-      local pp; pp="$(_fleet_repo_path "$repo")" || { echo "task land: multiple repos configured — pass --repo <name>" >&2; return 1; }
+      local pp; pp="$(_fleet_repo_path "$repo" "task land")" || return 1
       [ -d "$pp" ] || { echo "task land: no such repo dir: $pp" >&2; return 1; }
 
       if ! git -C "$pp" rev-parse --git-dir >/dev/null 2>&1; then
