@@ -267,6 +267,23 @@ describe("resolveArchitectHomeAgentWorkspaceId", () => {
 			),
 		).toBe("repo2");
 	});
+
+	it("returns the epic workspace itself when resolving for an epic workspace", () => {
+		expect(
+			resolveArchitectHomeAgentWorkspaceId(
+				[
+					{ workspaceId: "tools", repoPath: "/home/user/code/tools" },
+					{ workspaceId: "fleet-kanban", repoPath: "/home/user/code/tools/fleet-kanban" },
+					{
+						workspaceId: "epic-cool-feature",
+						repoPath: "/home/user/code/tools/epics/cool-feature",
+						epic: { name: "Cool Feature", branch: "epic/cool-feature" },
+					},
+				],
+				"epic-cool-feature",
+			),
+		).toBe("epic-cool-feature");
+	});
 });
 
 describe("resolveAgentConfigRoot", () => {

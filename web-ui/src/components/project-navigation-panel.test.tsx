@@ -11,6 +11,41 @@ vi.mock("@/resize/layout-customizations", () => ({
 	useLayoutResetEffect: () => {},
 }));
 
+vi.mock("@radix-ui/react-dropdown-menu", () => {
+	return {
+		Root: ({ children }: any) => {
+			return <div className="mock-dropdown-root">{children}</div>;
+		},
+		Trigger: ({ children }: any) => {
+			return children;
+		},
+		Portal: ({ children }: any) => {
+			return <>{children}</>;
+		},
+		Content: ({ children, className }: any) => {
+			return (
+				<div className={className} role="menu">
+					{children}
+				</div>
+			);
+		},
+		Item: ({ children, className, onSelect }: any) => {
+			return (
+				<button
+					type="button"
+					className={className}
+					role="menuitem"
+					onClick={() => {
+						onSelect?.();
+					}}
+				>
+					{children}
+				</button>
+			);
+		},
+	};
+});
+
 /** Wrapper that owns the sidebar layout state via the hook and passes it as props. */
 function PanelWithLayout(
 	props: Omit<
@@ -298,5 +333,107 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.textContent).not.toContain("Epics");
 		expect(container.textContent).toContain("Projects");
 		expect(container.textContent).toContain("Kanban");
+	});
+
+	it("renders the thin context switcher under the Agent section, reflecting the active context in the trigger and handling selection clicks", () => {
+		const projectsWithEpic: RuntimeProjectSummary[] = [
+			{
+				id: "project-1",
+				name: "My App",
+				path: "/tmp/myapp",
+				taskCounts: {
+					backlog: 5,
+					in_progress: 3,
+					review: 2,
+					done: 0,
+					trash: 1,
+				},
+			},
+			{
+				id: "epic-1",
+				name: "Epic Card Refactor",
+				path: "/tmp/epic-1",
+				taskCounts: {
+					backlog: 3,
+					in_progress: 2,
+					review: 1,
+					done: 0,
+					trash: 0,
+				},
+				epic: {
+					name: "Card Refactor Epic",
+					branch: "epic/card-refactor",
+				},
+			},
+		];
+
+		const onSelectProject = vi.fn();
+
+		// Case 1: Active section is 'agent', currentProjectId is 'project-1' (Architect Agent active)
+		renderPanel({
+			projects: projectsWithEpic,
+			currentProjectId: "project-1",
+			activeSection: "agent",
+			architectWorkspaceId: "project-1",
+			onSelectProject,
+		});
+
+		// The tab toggle itself should just say "Agent", not "Architect Agent" or "Epic Agent"
+		const tabButtons = Array.from(container.querySelectorAll("button"));
+		const agentTabButton = tabButtons.find((btn) => btn.textContent === "Agent");
+		expect(agentTabButton).toBeDefined();
+
+		// The trigger button should show "Architect Agent"
+		const triggerButton = container.querySelector("button[aria-label='Agent context switcher']");
+		expect(triggerButton).toBeDefined();
+		expect(triggerButton?.textContent).toContain("Architect Agent");
+
+		// Click the trigger to open the dropdown menu
+		act(() => {
+			triggerButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		// Find the dropdown menu items in the document (Radix Portal mounts them to document.body)
+		const menuItems = Array.from(container.querySelectorAll("[role='menuitem']"));
+		expect(menuItems.length).toBe(2);
+
+		const architectItem = menuItems.find((item) => item.textContent?.includes("Architect Agent"));
+		const epicItem = menuItems.find((item) => item.textContent?.includes("Card Refactor Epic Agent"));
+
+		expect(architectItem).toBeDefined();
+		expect(epicItem).toBeDefined();
+
+		// Selecting the epic item should trigger onSelectProject with the epic ID
+		act(() => {
+			epicItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onSelectProject).toHaveBeenCalledWith("epic-1");
+
+		// Case 2: active context is epic-1
+		onSelectProject.mockClear();
+		renderPanel({
+			projects: projectsWithEpic,
+			currentProjectId: "epic-1",
+			activeSection: "agent",
+			architectWorkspaceId: "project-1",
+			onSelectProject,
+		});
+
+		const updatedTrigger = container.querySelector("button[aria-label='Agent context switcher']");
+		expect(updatedTrigger?.textContent).toContain("Card Refactor Epic Agent");
+
+		// Open the menu again
+		act(() => {
+			updatedTrigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const updatedMenuItems = Array.from(document.querySelectorAll("[role='menuitem']"));
+		const updatedArchitectItem = updatedMenuItems.find((item) => item.textContent?.includes("Architect Agent"));
+
+		// Selecting the Architect item should trigger onSelectProject with the architect ID
+		act(() => {
+			updatedArchitectItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onSelectProject).toHaveBeenCalledWith("project-1");
 	});
 });

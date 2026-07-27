@@ -140,6 +140,28 @@ describe("task command machine output", () => {
 		// then
 		expect(output).toBe("abc123\n");
 	});
+
+	it("given a card with PR information, when task list record is formatted, then the record includes PR fields", () => {
+		// given
+		const card = createCard("task-with-pr", undefined, {
+			title: "A card with PR information",
+			prompt: "Check PR fields",
+			prUrl: "https://github.com/owner/repo/pull/123",
+			prState: "open",
+			prNumber: 123,
+			prGateStatus: "passing",
+		});
+		const state = createState([card]);
+
+		// when
+		const record = formatTaskRecord(state, card, "backlog");
+
+		// then
+		expect(record.prUrl).toBe("https://github.com/owner/repo/pull/123");
+		expect(record.prState).toBe("open");
+		expect(record.prNumber).toBe(123);
+		expect(record.prGateStatus).toBe("passing");
+	});
 });
 
 describe("resolveExternalIssueForTaskCommand", () => {

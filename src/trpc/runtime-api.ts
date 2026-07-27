@@ -65,12 +65,7 @@ import {
 } from "../server/architect-workspace";
 import { openInBrowser } from "../server/browser";
 import { applyFleetUpdate, getFleetUpdateStatus } from "../server/fleet-update-status";
-import {
-	getWorkspaceEpic,
-	listWorkspaceIndexEntries,
-	loadWorkspaceContextById,
-	loadWorkspaceState,
-} from "../state/workspace-state";
+import { listWorkspacesWithEpic, loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../terminal/agent-session-adapters";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
@@ -236,7 +231,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 
-			const workspaces = await listWorkspaceIndexEntries();
+			const workspaces = await listWorkspacesWithEpic();
 			const architectWorkspaceId = resolveArchitectHomeAgentWorkspaceId(workspaces, workspaceScope.workspaceId);
 			let architectWorkspaceScope: RuntimeTrpcWorkspaceScope;
 			if (architectWorkspaceId === workspaceScope.workspaceId) {
@@ -398,20 +393,11 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				let taskCwd: string;
 				// The registered index drives doctrine scoping for both roles, so read it
 				// once here (degrading to empty on failure) rather than in each branch.
-				const listWorkspaces = deps.listWorkspaces ?? listWorkspaceIndexEntries;
+				const listWorkspaces = deps.listWorkspaces ?? listWorkspacesWithEpic;
 				const readDoctrineFile = deps.readDoctrineFile ?? readFileIfExists;
 				let workspaceIndex: RegisteredWorkspace[];
 				try {
-					const rawWorkspaces = await listWorkspaces();
-					workspaceIndex = await Promise.all(
-						rawWorkspaces.map(async (ws) => {
-							const epic = await getWorkspaceEpic(ws.workspaceId);
-							return {
-								...ws,
-								epic: epic ?? undefined,
-							};
-						}),
-					);
+					workspaceIndex = await listWorkspaces();
 				} catch {
 					workspaceIndex = [];
 				}

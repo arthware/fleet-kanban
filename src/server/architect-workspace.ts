@@ -93,6 +93,10 @@ export function resolveArchitectHomeAgentWorkspaceId(
 	workspaces: RegisteredWorkspace[],
 	activeWorkspaceId: string,
 ): string {
+	const activeWs = workspaces.find((ws) => ws.workspaceId === activeWorkspaceId);
+	if (activeWs?.epic) {
+		return activeWorkspaceId;
+	}
 	return classifyArchitectWorkspace(workspaces).architectWorkspaceId ?? activeWorkspaceId;
 }
 

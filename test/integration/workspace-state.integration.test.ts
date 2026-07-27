@@ -5,15 +5,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeBoardData, RuntimeTaskSessionSummary } from "../../src/core/api-contract";
+import { resolveArchitectHomeAgentWorkspaceId } from "../../src/server/architect-workspace";
 import type { WorkspaceStateConflictError } from "../../src/state/workspace-state";
 import {
 	getWorkspacesRootPath,
 	listWorkspaceIndexEntries,
+	listWorkspacesWithEpic,
 	loadWorkspaceContext,
 	loadWorkspaceContextById,
 	loadWorkspaceState,
 	removeWorkspaceIndexEntry,
 	saveWorkspaceState,
+	setWorkspaceEpic,
 } from "../../src/state/workspace-state";
 import { createGitTestEnv } from "../utilities/git-env";
 import { createTempDir } from "../utilities/temp-dir";
@@ -395,6 +398,46 @@ describe.sequential("workspace-state integration", () => {
 
 			await expect(listWorkspaceIndexEntries()).rejects.toThrow("index.json");
 			await expect(listWorkspaceIndexEntries()).rejects.toThrow("repoPath");
+		});
+	});
+
+	it("given listWorkspacesWithEpic, when called on a mix of plain and epic workspaces, then epic metadata is correctly returned and used to resolve pings", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspaces-epic-test-");
+			try {
+				const workspaceAPath = join(sandboxRoot, "plain-workspace");
+				const workspaceBPath = join(sandboxRoot, "epic-workspace");
+				mkdirSync(workspaceAPath, { recursive: true });
+				mkdirSync(workspaceBPath, { recursive: true });
+				initGitRepository(workspaceAPath);
+				initGitRepository(workspaceBPath);
+
+				const contextA = await loadWorkspaceContext(workspaceAPath);
+				const contextB = await loadWorkspaceContext(workspaceBPath);
+
+				// Define epic metadata on workspace B
+				const epicMetadata = { name: "Sample Epic", branch: "epic/sample-epic" };
+				await setWorkspaceEpic(contextB.workspaceId, epicMetadata);
+
+				// Fetch workspace entries with epic metadata
+				const entries = await listWorkspacesWithEpic();
+				expect(entries).toHaveLength(2);
+
+				const plainEntry = entries.find((e) => e.workspaceId === contextA.workspaceId);
+				const epicEntry = entries.find((e) => e.workspaceId === contextB.workspaceId);
+
+				expect(plainEntry).toBeDefined();
+				expect(plainEntry?.epic).toBeUndefined();
+
+				expect(epicEntry).toBeDefined();
+				expect(epicEntry?.epic).toEqual(epicMetadata);
+
+				// Assert that ping routing correctly routes to the epic owner instead of the fallback architect
+				const pingTargetId = resolveArchitectHomeAgentWorkspaceId(entries, contextB.workspaceId);
+				expect(pingTargetId).toBe(contextB.workspaceId);
+			} finally {
+				cleanup();
+			}
 		});
 	});
 });
