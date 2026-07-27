@@ -12,7 +12,6 @@ vi.mock("@/resize/layout-customizations", () => ({
 }));
 
 vi.mock("@radix-ui/react-dropdown-menu", () => {
-	const React = require("react");
 	return {
 		Root: ({ children }: any) => {
 			return <div className="mock-dropdown-root">{children}</div>;

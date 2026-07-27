@@ -106,8 +106,6 @@ export function ProjectNavigationPanel({
 	architectWorkspaceId?: string | null;
 }): React.ReactElement {
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
-	const activeProject = sortedProjects.find((p) => p.id === currentProjectId);
-	const agentTabLabel = activeProject?.epic ? "Epic Agent" : "Architect Agent";
 
 	const hasEpics = sortedProjects.some((p) => p.epic);
 	const showSwitcher = activeSection === "agent" && architectWorkspaceId !== null && hasEpics;
