@@ -2,7 +2,7 @@
 name: fleet-implement
 description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch and hand off to the PR phase
 directive: >-
-  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card.
+  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work.
 ---
 
 You are working a build card: take it from pickup to a verified, committed build — intake →
@@ -21,6 +21,19 @@ pattern it established — this primes context from git history instead of re-de
 don't spawn broad codebase-discovery sub-agents. Use your current worktree/branch if you're on one.
 
 If the intended surface or acceptance is ambiguous, ask (`AskUserQuestion`) before writing code.
+
+**Card premises are claims, not givens.** A card's `## Confirmed` section is the operator's verified
+facts and its `## Assumed` section is explicitly unverified — but either can be wrong, and so can a
+card that separates neither. If a card states something you can check and find false — an API behaving
+differently, a cited symbol that doesn't exist, a mechanism that cannot work as described — **stop and
+report it instead of implementing around it.** Contradicting the card is expected work, not deviation.
+
+This sits *beside* the ambiguity rule above, not inside it: that one fires when the card is unclear;
+this one fires when the card is perfectly clear and simply wrong. Confident wrongness draws less
+questioning than vagueness precisely because there is nothing to be confused about — which is why it
+needs its own rule. "Don't re-investigate" in a card scopes to the **symptom** it already diagnosed; it
+never licenses building a mechanism you can see won't work. See
+[`docs/card-authoring.md`](../../../docs/card-authoring.md) for the body standard cards are written to.
 
 ## Tests first — BDD surface, then RED units, THEN implement
 
