@@ -70,6 +70,8 @@ import type {
 	RuntimeProjectRemoveRequest,
 	RuntimeProjectRemoveResponse,
 	RuntimeProjectsResponse,
+	RuntimeProjectWorktreePrepareRequest,
+	RuntimeProjectWorktreePrepareResponse,
 	RuntimeRunUpdateResponse,
 	RuntimeShellSessionStartRequest,
 	RuntimeShellSessionStartResponse,
@@ -181,6 +183,8 @@ import {
 	runtimeProjectRemoveRequestSchema,
 	runtimeProjectRemoveResponseSchema,
 	runtimeProjectsResponseSchema,
+	runtimeProjectWorktreePrepareRequestSchema,
+	runtimeProjectWorktreePrepareResponseSchema,
 	runtimeRunUpdateResponseSchema,
 	runtimeShellSessionStartRequestSchema,
 	runtimeShellSessionStartResponseSchema,
@@ -442,6 +446,7 @@ export interface RuntimeTrpcContext {
 			preferredWorkspaceId: string | null,
 			input: RuntimeDirectoryListRequest,
 		) => Promise<RuntimeDirectoryListResponse>;
+		prepareWorktree: (input: RuntimeProjectWorktreePrepareRequest) => Promise<RuntimeProjectWorktreePrepareResponse>;
 		setWorkspaceEpic: (workspaceId: string, epic: WorkspaceEpicDescriptor | null) => Promise<void>;
 	};
 	hooksApi: {
@@ -863,6 +868,12 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				await ctx.projectsApi.setWorkspaceEpic(input.workspaceId, input.epic);
 				return { ok: true };
+			}),
+		prepareWorktree: t.procedure
+			.input(runtimeProjectWorktreePrepareRequestSchema)
+			.output(runtimeProjectWorktreePrepareResponseSchema)
+			.mutation(async ({ ctx, input }) => {
+				return await ctx.projectsApi.prepareWorktree(input);
 			}),
 	}),
 	hooks: t.router({

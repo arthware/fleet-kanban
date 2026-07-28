@@ -607,6 +607,67 @@ async function addTaskWorktree(options: {
 	);
 }
 
+async function runWorktreePreparation(options: {
+	repoPath: string;
+	worktreePath: string;
+	taskId: string;
+	workspaceId: string;
+	baseRef: string;
+	skillsRelativePath: string;
+}): Promise<{ warning?: string }> {
+	await initializeSubmodulesIfNeeded(options.worktreePath);
+	await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
+	await ensureWorktreeSkillsDirectory({
+		worktreePath: options.worktreePath,
+		skillsRelativePath: options.skillsRelativePath,
+	});
+	const runtimeConfig = await loadRuntimeConfig(options.repoPath);
+	const hook = runtimeConfig.worktree;
+	if (hook.postCreateCommand === undefined) {
+		return {};
+	}
+	const result = await runWorktreePostCreateHook(hook, {
+		taskId: options.taskId,
+		workspaceId: options.workspaceId,
+		worktreePath: options.worktreePath,
+		repoPath: options.repoPath,
+		baseRef: options.baseRef,
+	});
+	if (result.ok) {
+		if (result.outputTail.trim()) {
+			LOGGER.log("Worktree post-create command completed.", {
+				taskId: options.taskId,
+				outputTail: result.outputTail.trim(),
+			});
+		}
+		return {};
+	}
+	const warning = formatWorktreePostCreateFailure(result);
+	LOGGER.log("Worktree post-create command failed.", {
+		severity: "warn",
+		taskId: options.taskId,
+		warning,
+	});
+	if (hook.postCreateFailureMode === "block") {
+		throw new Error(warning);
+	}
+	return { warning };
+}
+
+export async function prepareExistingWorktree(options: {
+	repoPath: string;
+	worktreePath: string;
+	taskId: string;
+	workspaceId: string;
+	baseRef: string;
+	agentId?: RuntimeAgentId | null;
+}): Promise<{ warning?: string }> {
+	return await runWorktreePreparation({
+		...options,
+		skillsRelativePath: resolveWorktreeSkillsRelativePath(options.agentId),
+	});
+}
+
 async function prepareNewTaskWorktree(options: {
 	repoPath: string;
 	worktreePath: string;
@@ -616,43 +677,7 @@ async function prepareNewTaskWorktree(options: {
 	skillsRelativePath: string;
 }): Promise<{ warning?: string }> {
 	try {
-		await initializeSubmodulesIfNeeded(options.worktreePath);
-		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
-		await ensureWorktreeSkillsDirectory({
-			worktreePath: options.worktreePath,
-			skillsRelativePath: options.skillsRelativePath,
-		});
-		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
-		const hook = runtimeConfig.worktree;
-		if (hook.postCreateCommand === undefined) {
-			return {};
-		}
-		const result = await runWorktreePostCreateHook(hook, {
-			taskId: options.taskId,
-			workspaceId: options.workspaceId,
-			worktreePath: options.worktreePath,
-			repoPath: options.repoPath,
-			baseRef: options.baseRef,
-		});
-		if (result.ok) {
-			if (result.outputTail.trim()) {
-				LOGGER.log("Worktree post-create command completed.", {
-					taskId: options.taskId,
-					outputTail: result.outputTail.trim(),
-				});
-			}
-			return {};
-		}
-		const warning = formatWorktreePostCreateFailure(result);
-		LOGGER.log("Worktree post-create command failed.", {
-			severity: "warn",
-			taskId: options.taskId,
-			warning,
-		});
-		if (hook.postCreateFailureMode === "block") {
-			throw new Error(warning);
-		}
-		return { warning };
+		return await runWorktreePreparation(options);
 	} catch (error) {
 		await removeTaskWorktreeInternal(options.repoPath, options.worktreePath).catch(() => {});
 		throw error;
