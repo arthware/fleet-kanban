@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { composeCardDirective } from "../../../src/prompts/compose-card-directive";
 
-const OLD_IMPLEMENT_LITERAL =
-	"You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card.\n\n";
+const IMPLEMENT_DIRECTIVE =
+	"You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work.\n\n";
 
 const OLD_PLAN_LITERAL =
 	"You are working a plan card. Use the fleet-plan skill: investigate and write a design doc; do not implement.\n\n";
@@ -12,11 +12,19 @@ function getOldPrLiteral(baseRef: string): string {
 }
 
 describe("composeCardDirective", () => {
-	it("given a build card skill (fleet-implement), when composed, then it matches the old implement literal exactly", () => {
+	it("given a build card skill (fleet-implement), when composed, then it matches the implement directive exactly", () => {
 		// when
 		const result = composeCardDirective(["fleet-implement"], { baseRef: "production-line" });
 		// then
-		expect(result).toBe(OLD_IMPLEMENT_LITERAL);
+		expect(result).toBe(IMPLEMENT_DIRECTIVE);
+	});
+
+	it("given a build card skill, when composed, then the directive mandates reporting a card premise found false", () => {
+		// when
+		const result = composeCardDirective(["fleet-implement"], { baseRef: "production-line" });
+		// then
+		expect(result).toContain("Card premises are claims, not givens");
+		expect(result).toContain("stop and report it instead of implementing around it");
 	});
 
 	it("given a plan card skill (fleet-plan), when composed, then it matches the old plan literal exactly", () => {
@@ -32,7 +40,7 @@ describe("composeCardDirective", () => {
 		// when
 		const result = composeCardDirective(["fleet-implement", "fleet-pr"], { baseRef });
 		// then
-		const expected = `${OLD_IMPLEMENT_LITERAL}${getOldPrLiteral(baseRef)}`;
+		const expected = `${IMPLEMENT_DIRECTIVE}${getOldPrLiteral(baseRef)}`;
 		expect(result).toBe(expected);
 	});
 
@@ -42,7 +50,7 @@ describe("composeCardDirective", () => {
 		// when
 		const result = composeCardDirective(["fleet-implement", "fleet-pr"], { baseRef });
 		// then
-		const expected = `${OLD_IMPLEMENT_LITERAL}${getOldPrLiteral(baseRef)}`;
+		const expected = `${IMPLEMENT_DIRECTIVE}${getOldPrLiteral(baseRef)}`;
 		expect(result).toBe(expected);
 	});
 
