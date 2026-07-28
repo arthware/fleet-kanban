@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
+import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
 import { createHooksApi } from "../../../src/trpc/hooks-api";
 
@@ -254,6 +255,38 @@ describe("createHooksApi", () => {
 		expect(manager.transitionToReview).not.toHaveBeenCalled();
 		expect(notifyTaskReadyForReview).not.toHaveBeenCalled();
 		expect(ensureAutoReviewPrForTask).not.toHaveBeenCalled();
+	});
+
+	it("given a home-agent session resting at hook review, when an automatic to_in_progress hook arrives, then it resumes running", async () => {
+		// given
+		const taskId = createHomeAgentSessionId("workspace-1");
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ taskId, state: "awaiting_review", reviewReason: "hook" })),
+			transitionToReview: vi.fn(),
+			transitionToRunning: vi.fn(() => createSummary({ taskId, state: "running", reviewReason: null })),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		// when
+		const response = await api.ingest({
+			taskId,
+			workspaceId: "workspace-1",
+			event: "to_in_progress",
+			metadata: { source: "claude", hookEventName: "UserPromptSubmit" },
+		});
+
+		// then
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToRunning).toHaveBeenCalledWith(taskId);
+		expect(manager.transitionToReview).not.toHaveBeenCalled();
 	});
 
 	it("captures a turn checkpoint when transitioning to review", async () => {
