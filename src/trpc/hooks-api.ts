@@ -8,7 +8,7 @@ import { parseHookIngestRequest } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { loadWorkspaceContextById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
-import { isNeedsInputReviewHook } from "../terminal/session-state-machine";
+import { canWakeFromAnyReviewReason, isNeedsInputReviewHook } from "../terminal/session-state-machine";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
 
@@ -42,16 +42,12 @@ function canTransitionTaskForHookEvent(
 	if (event === "to_review") {
 		return summary.state === "running";
 	}
-	if (isHomeAgentSessionId(taskId)) {
-		return (
-			summary.state === "awaiting_review" &&
-			(summary.reviewReason === "attention" ||
-				summary.reviewReason === "hook" ||
-				summary.reviewReason === "error" ||
-				summary.reviewReason === "needs_input")
-		);
+	if (summary.state !== "awaiting_review") {
+		return false;
 	}
-	return summary.state === "awaiting_review" && summary.reviewReason === "needs_input";
+	return isHomeAgentSessionId(taskId)
+		? canWakeFromAnyReviewReason(summary.reviewReason)
+		: summary.reviewReason === "needs_input";
 }
 
 export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcContext["hooksApi"] {
