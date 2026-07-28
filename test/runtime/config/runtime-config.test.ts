@@ -487,9 +487,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 
 	it("given additional unshared paths are configured, when config loads, then they survive alongside the replacing list", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-additional-");
-		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
-			"kanban-project-runtime-config-additional-",
-		);
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-additional-");
 
 		try {
 			const runtimeProjectConfigDir = join(tempProject, ".cline", "kanban");

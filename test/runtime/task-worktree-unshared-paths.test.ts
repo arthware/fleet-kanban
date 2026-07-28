@@ -98,11 +98,13 @@ describe("isPathInsideTrackedSourceTree", () => {
 		expect(isPathInsideTrackedSourceTree("packages/viewer/src/schema.graphql", trackedDirectories)).toBe(true);
 	});
 
-	it("given an ignored path in a directory git tracks nothing under, when it is checked, then it is outside every tracked source tree", () => {
-		expect(isPathInsideTrackedSourceTree("scratch/notes/todo.md", trackedDirectories)).toBe(false);
-		expect(isPathInsideTrackedSourceTree("packages/skill-runner/coverage/lcov.info", trackedDirectories)).toBe(
-			false,
-		);
+	it("given an ignored path in a subtree git tracks nothing in, when it is checked, then it is outside every tracked source tree", () => {
+		expect(isPathInsideTrackedSourceTree("scratch/notes", trackedDirectories)).toBe(false);
+		expect(isPathInsideTrackedSourceTree("vendor-cache/artifacts", trackedDirectories)).toBe(false);
+	});
+
+	it("given an ignored path deeper inside a tracked package, when an intermediate directory tracks nothing, then it is still inside a tracked source tree", () => {
+		expect(isPathInsideTrackedSourceTree("packages/skill-runner/coverage/lcov.info", trackedDirectories)).toBe(true);
 	});
 });
 
@@ -148,6 +150,36 @@ describe("shouldMirrorIgnoredPathIntoWorktree", () => {
 
 		expect(mirrored).toBe(true);
 	});
+
+	it("given a repo that shares a nested path explicitly, when mirroring is decided, then the structural rule steps aside", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("packages/skill-runner/.env.local", {
+			unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+			trackedDirectories,
+			sharedPaths: ["packages/skill-runner/.env.local"],
+		});
+
+		expect(mirrored).toBe(true);
+	});
+
+	it("given a shared directory, when a path below it is decided, then the whole subtree is mirrored", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("packages/skill-runner/secrets/token", {
+			unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+			trackedDirectories,
+			sharedPaths: ["packages/skill-runner/secrets"],
+		});
+
+		expect(mirrored).toBe(true);
+	});
+
+	it("given a shared path that does not match, when mirroring is decided, then the structural rule still applies", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("packages/skill-runner/src/generated", {
+			unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+			trackedDirectories,
+			sharedPaths: ["packages/skill-runner/.env.local"],
+		});
+
+		expect(mirrored).toBe(false);
+	});
 });
 
 describe("resolveWorktreeUnsharedPaths", () => {
@@ -167,8 +199,9 @@ describe("resolveWorktreeUnsharedPaths", () => {
 	});
 
 	it("given both keys, when the list is resolved, then the additions extend the replaced list", () => {
-		expect(
-			resolveWorktreeUnsharedPaths({ unsharedPaths: ["dist"], additionalUnsharedPaths: ["coverage"] }),
-		).toEqual(["dist", "coverage"]);
+		expect(resolveWorktreeUnsharedPaths({ unsharedPaths: ["dist"], additionalUnsharedPaths: ["coverage"] })).toEqual([
+			"dist",
+			"coverage",
+		]);
 	});
 });

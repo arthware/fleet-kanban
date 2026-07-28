@@ -2,12 +2,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
-import { requestJson } from "../utilities/trpc-request";
-import { createGitTestEnv } from "../utilities/git-env";
-import { createTempDir } from "../utilities/temp-dir";
 import { seedIsolatedBoardState } from "../utilities/board-seed";
+import { createGitTestEnv } from "../utilities/git-env";
+import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
+import { createTempDir } from "../utilities/temp-dir";
+import { requestJson } from "../utilities/trpc-request";
 
 interface RuntimeProjectsResponse {
 	projects: Array<{
@@ -157,7 +156,7 @@ describe.sequential("worktree shapes integration suite", () => {
 		mkdirSync(join(repoPath, "dist"), { recursive: true });
 		writeFileSync(join(repoPath, "dist", "built.js"), "compiled-js\n", "utf8");
 		mkdirSync(join(repoPath, ".turbo"), { recursive: true });
-		writeFileSync(join(repoPath, ".turbo", "cache.json"), "{\"cached\": true}\n", "utf8");
+		writeFileSync(join(repoPath, ".turbo", "cache.json"), '{"cached": true}\n', "utf8");
 
 		// Generated artifacts nested inside tracked source trees — the #171 shape. No name in the
 		// unshared list matches them; only the structural rule keeps them out of the worktree.
