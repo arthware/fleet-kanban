@@ -1,13 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import matter from "gray-matter";
-import { resolveBundledSkillsDirSync, resolveSkillSync } from "./skill-discovery";
-
-/**
- * Resolves the canonical skills directory synchronously.
- */
-export function resolveCanonicalSkillsDirSync(options?: { moduleDir?: string }): string | null {
-	return resolveBundledSkillsDirSync(options);
-}
+import { resolveSkillSync } from "./skill-discovery";
 
 /**
  * Composes card directives from the given ordered list of skills.
@@ -27,7 +20,7 @@ export function composeCardDirective(
 		const resolvedSkill = resolveSkillSync(skillName, {
 			workspacePath: ctx.workspacePath,
 			moduleDir: ctx.moduleDir,
-			canonicalSkillsDir: ctx.canonicalSkillsDir,
+			bundledSkillsDir: ctx.canonicalSkillsDir,
 		});
 		if (resolvedSkill && existsSync(resolvedSkill.skillFilePath)) {
 			const fileContent = readFileSync(resolvedSkill.skillFilePath, "utf-8");

@@ -10,7 +10,7 @@ import type {
 	RuntimeWorktreeEnsureResponse,
 } from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
-import { listResolvedSkillsSync } from "../prompts/skill-discovery";
+import { listResolvedSkills } from "../prompts/skill-discovery";
 import { getRuntimeHomePath, getTaskWorktreesHomePath, loadWorkspaceContext } from "../state/workspace-state";
 import {
 	assessTaskWorkDurability,
@@ -72,12 +72,14 @@ export interface ArchivedTaskWorktreeCleanupSummary {
 interface WorktreeSkillsFs {
 	lstat: typeof lstat;
 	mkdir: typeof mkdir;
+	readdir: typeof readdir;
 	symlink: typeof symlink;
 }
 
 const DEFAULT_WORKTREE_SKILLS_FS: WorktreeSkillsFs = {
 	lstat,
 	mkdir,
+	readdir,
 	symlink,
 };
 
@@ -160,10 +162,13 @@ export async function ensureWorktreeSkillsDirectory(options: {
 		options.canonicalSkillsDir === undefined
 			? await (options.resolveCanonicalSkillsDir ?? resolveCanonicalSkillsDir)()
 			: options.canonicalSkillsDir;
-	const resolvedSkills = listResolvedSkillsSync({
-		workspacePath: options.workspacePath,
-		canonicalSkillsDir,
-	});
+	const resolvedSkills = await listResolvedSkills(
+		{
+			workspacePath: options.workspacePath,
+			bundledSkillsDir: canonicalSkillsDir,
+		},
+		fs,
+	);
 	if (resolvedSkills.length === 0) {
 		if (await lstatExists(targetPath, fs)) {
 			return "existing";

@@ -71,10 +71,8 @@ export interface CardTypeValidationResult {
 
 export function validateSkill(
 	skillName: string,
-	skillsDirOrOptions: string | SkillResolutionOptions,
+	resolutionOptions: SkillResolutionOptions,
 ): "ok" | "MISSING" | "EMPTY-DIRECTIVE" {
-	const resolutionOptions =
-		typeof skillsDirOrOptions === "string" ? { bundledSkillsDir: skillsDirOrOptions } : skillsDirOrOptions;
 	const resolvedSkill = resolveSkillSync(skillName, resolutionOptions);
 	if (!resolvedSkill || !existsSync(resolvedSkill.skillFilePath)) {
 		return "MISSING";
@@ -93,7 +91,7 @@ export function validateSkill(
 
 export function validateCardType(
 	manifest: CardTypeManifest,
-	skillsDirOrOptions: string | SkillResolutionOptions,
+	resolutionOptions: SkillResolutionOptions,
 ): CardTypeValidationResult {
 	let isValid = true;
 	const phases: PhaseValidation[] = [];
@@ -101,7 +99,7 @@ export function validateCardType(
 	for (const phase of manifest.phases) {
 		const skillValidations: SkillValidation[] = [];
 		for (const skillName of phase.skills) {
-			const status = validateSkill(skillName, skillsDirOrOptions);
+			const status = validateSkill(skillName, resolutionOptions);
 			if (status !== "ok") {
 				isValid = false;
 			}

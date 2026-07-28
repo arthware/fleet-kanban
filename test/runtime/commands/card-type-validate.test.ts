@@ -308,7 +308,7 @@ describe("validateCardType & validateSkill module core", () => {
 		};
 
 		// Act
-		const result = validateCardType(manifest, skillsDir);
+		const result = validateCardType(manifest, { bundledSkillsDir: skillsDir });
 
 		// Assert
 		expect(result.isValid).toBe(false);
@@ -348,7 +348,7 @@ directive: ""
 		};
 
 		// Act
-		const result = validateCardType(manifest, skillsDir);
+		const result = validateCardType(manifest, { bundledSkillsDir: skillsDir });
 
 		// Assert
 		expect(result.isValid).toBe(false);
