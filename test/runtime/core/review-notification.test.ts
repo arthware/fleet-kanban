@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RuntimeBoardCard, RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
+import type { RuntimeBoardCard } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../../../src/core/review-notification";
 
@@ -18,27 +18,6 @@ function createCard(overrides: Partial<RuntimeBoardCard> = {}): RuntimeBoardCard
 	};
 }
 
-function createSummary(taskId: string, overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
-	return {
-		taskId,
-		state: "running",
-		agentId: "claude",
-		workspacePath: "/tmp/repo",
-		pid: 1234,
-		startedAt: 1,
-		updatedAt: 1,
-		lastOutputAt: 1,
-		reviewReason: null,
-		exitCode: null,
-		agentSessionId: null,
-		lastHookAt: null,
-		latestHookActivity: null,
-		latestTurnCheckpoint: null,
-		previousTurnCheckpoint: null,
-		...overrides,
-	};
-}
-
 describe("review notification helpers", () => {
 	it("formats the architect wake message with the card id and resolved title", () => {
 		expect(buildTaskReadyForReviewMessage(createCard())).toBe(
@@ -46,65 +25,26 @@ describe("review notification helpers", () => {
 		);
 	});
 
-	it("resolves the running home-agent session for the workspace", () => {
+	it("resolves the home-agent session id for the workspace", () => {
 		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
 
 		expect(
 			resolveRunningHomeAgentTaskId({
 				architectWorkspaceId: "workspace-1",
 				taskId: "card-1",
-				summaries: [createSummary("card-1"), createSummary(homeAgentTaskId, { agentSessionLifecycle: "attached" })],
-				isAttached: (summary) => summary.agentSessionLifecycle === "attached",
 			}),
 		).toBe(homeAgentTaskId);
 	});
 
-	it("resolves a sub-workspace card to the attached architect home-agent session", () => {
+	it("resolves a sub-workspace card to the architect home-agent session", () => {
 		const architectHomeAgentTaskId = createHomeAgentSessionId("tools");
-		const subWorkspaceHomeAgentTaskId = createHomeAgentSessionId("fleet-kanban");
 
 		expect(
 			resolveRunningHomeAgentTaskId({
 				architectWorkspaceId: "tools",
 				taskId: "card-1",
-				summaries: [
-					createSummary(subWorkspaceHomeAgentTaskId, { agentSessionLifecycle: "attached" }),
-					createSummary(architectHomeAgentTaskId, { agentSessionLifecycle: "attached" }),
-				],
-				isAttached: (summary) => summary.agentSessionLifecycle === "attached",
 			}),
 		).toBe(architectHomeAgentTaskId);
-	});
-
-	it("returns null when no home-agent session is active", () => {
-		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
-
-		expect(
-			resolveRunningHomeAgentTaskId({
-				architectWorkspaceId: "workspace-1",
-				taskId: "card-1",
-				summaries: [createSummary(homeAgentTaskId, { agentSessionLifecycle: "resumable", pid: null })],
-				isAttached: (summary) => summary.agentSessionLifecycle === "attached",
-			}),
-		).toBeNull();
-	});
-
-	it("does not resolve a hydrated home-agent summary with a live-looking pid when derived liveness is not attached", () => {
-		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
-
-		expect(
-			resolveRunningHomeAgentTaskId({
-				architectWorkspaceId: "workspace-1",
-				taskId: "card-1",
-				summaries: [
-					createSummary(homeAgentTaskId, {
-						pid: process.pid,
-						agentSessionLifecycle: "resumable",
-					}),
-				],
-				isAttached: (summary) => summary.agentSessionLifecycle === "attached",
-			}),
-		).toBeNull();
 	});
 
 	it("does not notify when the moved card is itself the home-agent session", () => {
@@ -114,8 +54,6 @@ describe("review notification helpers", () => {
 			resolveRunningHomeAgentTaskId({
 				architectWorkspaceId: "workspace-1",
 				taskId: homeAgentTaskId,
-				summaries: [createSummary(homeAgentTaskId, { agentSessionLifecycle: "attached" })],
-				isAttached: (summary) => summary.agentSessionLifecycle === "attached",
 			}),
 		).toBeNull();
 	});

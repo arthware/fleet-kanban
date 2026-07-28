@@ -399,15 +399,6 @@ describe("createRuntimeApi notifyTaskReadyForReview", () => {
 			},
 		});
 		const terminalManager = {
-			listSummaries: vi.fn(() => [
-				createSummary({
-					taskId: homeAgentTaskId,
-					agentSessionLifecycle: "attached",
-				}),
-			]),
-			refreshAgentSessionLifecycle: vi.fn(async (taskId: string) =>
-				createSummary({ taskId, agentSessionLifecycle: "attached" }),
-			),
 			writeInput: vi.fn(() => createSummary({ taskId: homeAgentTaskId })),
 		};
 		const api = createTestRuntimeApi({
@@ -484,15 +475,6 @@ describe("createRuntimeApi notifyTaskReadyForReview", () => {
 				}),
 		);
 		const terminalManager = {
-			listSummaries: vi.fn(() => [
-				createSummary({
-					taskId: homeAgentTaskId,
-					agentSessionLifecycle: "attached",
-				}),
-			]),
-			refreshAgentSessionLifecycle: vi.fn(async (taskId: string) =>
-				createSummary({ taskId, agentSessionLifecycle: "attached" }),
-			),
 			writeInput: vi.fn(() => createSummary({ taskId: homeAgentTaskId })),
 		};
 		const api = createTestRuntimeApi({
@@ -538,6 +520,152 @@ describe("createRuntimeApi notifyTaskReadyForReview", () => {
 				}),
 			);
 		}
+	});
+
+	it("given the overseer summary looks resumable, when notifying succeeds, then it still delivers the review ping", async () => {
+		// given
+		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{
+						id: "review",
+						cards: [
+							{
+								id: "task-1",
+								title: "Fix review loop",
+								prompt: "Prompt body",
+								startInPlanMode: false,
+								autoReviewEnabled: false,
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							},
+						],
+					},
+				],
+				dependencies: [],
+			},
+			sessions: {
+				"task-1": createSummary({ state: "awaiting_review", reviewReason: "hook" }),
+			},
+		});
+		workspaceStateMocks.mutateWorkspaceState.mockImplementation(
+			async (
+				_workspacePath: string,
+				mutate: (state: { board: unknown; sessions: Record<string, RuntimeTaskSessionSummary> }) => unknown,
+			) =>
+				mutate({
+					board: {},
+					sessions: { "task-1": createSummary({ state: "awaiting_review", reviewReason: "hook" }) },
+				}),
+		);
+		const terminalManager = {
+			listSummaries: vi.fn(() => [
+				createSummary({
+					taskId: homeAgentTaskId,
+					pid: null,
+					agentSessionLifecycle: "resumable",
+					state: "interrupted",
+				}),
+			]),
+			refreshAgentSessionLifecycle: vi.fn(async (taskId: string) =>
+				createSummary({
+					taskId,
+					pid: null,
+					agentSessionLifecycle: "resumable",
+					state: "interrupted",
+				}),
+			),
+			writeInput: vi.fn(() => createSummary({ taskId: homeAgentTaskId })),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		// when
+		const response = await api.notifyTaskReadyForReview(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		// then
+		expect(response).toEqual({
+			ok: true,
+			taskId: "task-1",
+			homeAgentTaskId,
+			notified: true,
+			message: 'Card task-1 ("Fix review loop") was moved to review and is awaiting your review.',
+		});
+		expect(terminalManager.listSummaries).not.toHaveBeenCalled();
+		expect(terminalManager.refreshAgentSessionLifecycle).not.toHaveBeenCalled();
+		expect(terminalManager.writeInput).toHaveBeenCalled();
+		expect(workspaceStateMocks.mutateWorkspaceState).toHaveBeenCalledWith("/tmp/repo", expect.any(Function));
+	});
+
+	it("given no overseer session is running, when notifying fails to send, then it reports non-delivery without throwing", async () => {
+		// given
+		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{
+						id: "review",
+						cards: [
+							{
+								id: "task-1",
+								title: "Fix review loop",
+								prompt: "Prompt body",
+								startInPlanMode: false,
+								autoReviewEnabled: false,
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							},
+						],
+					},
+				],
+				dependencies: [],
+			},
+			sessions: {
+				"task-1": createSummary({ state: "awaiting_review", reviewReason: "hook" }),
+			},
+		});
+		const terminalManager = {
+			listSummaries: vi.fn(() => []),
+			refreshAgentSessionLifecycle: vi.fn(),
+			writeInput: vi.fn(() => null),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		// when
+		const response = await api.notifyTaskReadyForReview(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		// then
+		expect(response).toEqual({
+			ok: true,
+			taskId: "task-1",
+			homeAgentTaskId,
+			notified: false,
+			message: 'Card task-1 ("Fix review loop") was moved to review and is awaiting your review.',
+		});
+		expect(terminalManager.listSummaries).not.toHaveBeenCalled();
+		expect(terminalManager.refreshAgentSessionLifecycle).not.toHaveBeenCalled();
+		expect(terminalManager.writeInput).toHaveBeenCalled();
+		expect(workspaceStateMocks.mutateWorkspaceState).not.toHaveBeenCalled();
 	});
 });
 
