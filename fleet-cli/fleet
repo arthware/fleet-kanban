@@ -32,6 +32,32 @@ DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 # Used to auto-resolve the board binary (co-located tier) and as fleet update's fork origin.
 FLEET_REPO="$(cd "$DIR/.." 2>/dev/null && pwd)"
 
+# Intercept and process --help, -h, and help commands through fleet_help.py before any validation
+_has_help=0
+if [ "${1:-}" = "help" ] && [ "${2:-}" = "--agent" ]; then
+  _has_help=0
+else
+  for arg in "$@"; do
+    if [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+      _has_help=1
+      break
+    fi
+  done
+fi
+
+if [ "$_has_help" = "1" ]; then
+  declare -a help_args=()
+  for arg in "$@"; do
+    if [ "$arg" = "help" ]; then
+      help_args+=("--help")
+    else
+      help_args+=("$arg")
+    fi
+  done
+  python3 "$DIR/fleet_help.py" "${help_args[@]}"
+  exit $?
+fi
+
 GLOBAL_DIR="$HOME/.config/fleet"         # shared: vendored kanban binary, key fallback
 # the project's .fleet dir, found by walking up from CWD (like .git); global if none
 _fleet_dir() {
@@ -2010,7 +2036,7 @@ case "$cmd" in
   new|up|run|ls|rm) exec "$DIR/wt" "$cmd" "$@";;
   linear|mine|tasks)
     case "${1:-}" in
-      api-key|--api-key|set-key|key) shift; fleet_set_linear_key "$@";;
+      api-key|--api-key|set-key|key) shift; fleet_set_linear_key "$@"; exit $?;;
       *) exec python3 "$DIR/fleet.py" --mine "$@";;
     esac;;
   agent)
@@ -2022,13 +2048,13 @@ case "$cmd" in
   initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
   epic) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
   port) exec "$DIR/port-for" "$@";;
-  kanban) fleet_kanban "$@";;
-  service|svc) fleet_service "$@";;
-  task) fleet_task "$@";;
-  card-type|card-types|ct) fleet_card_type "$@";;
-  xtools|xtool|x) fleet_xtools "$@";;
-  init) fleet_init "$@";;
-  update) fleet_update "$@";;
+  kanban) fleet_kanban "$@"; exit $?;;
+  service|svc) fleet_service "$@"; exit $?;;
+  task) fleet_task "$@"; exit $?;;
+  card-type|card-types|ct) fleet_card_type "$@"; exit $?;;
+  xtools|xtool|x) fleet_xtools "$@"; exit $?;;
+  init) fleet_init "$@"; exit $?;;
+  update) fleet_update "$@"; exit $?;;
   budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
   *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools)" >&2; exit 1;;
 esac
