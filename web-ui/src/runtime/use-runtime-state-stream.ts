@@ -601,6 +601,9 @@ export function useRuntimeStateStream(
 						});
 						return;
 					}
+					if (payload.type === "heartbeat") {
+						return;
+					}
 					if (payload.type === "error") {
 						dispatch({
 							type: "stream_error",
