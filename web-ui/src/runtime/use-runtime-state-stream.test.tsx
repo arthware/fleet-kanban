@@ -109,6 +109,20 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 		});
 	};
 
+	const sendSnapshot = (ws: MockWebSocket) => {
+		ws.onmessage?.({
+			data: JSON.stringify({
+				type: "snapshot",
+				currentProjectId: "workspace-a",
+				projects: [],
+				architectWorkspaceId: null,
+				workspaceState: null,
+				workspaceMetadata: null,
+				clineSessionContextVersion: 1,
+			}),
+		});
+	};
+
 	it("given an opened socket and received snapshot, when no messages arrive for longer than the staleness window, then it treats the socket as dead and reconnects", () => {
 		renderHook();
 		expect(MockWebSocket.instances.length).toBe(1);
@@ -121,17 +135,7 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 
 		// 2. Send the snapshot message to complete initialization
 		act(() => {
-			ws.onmessage?.({
-				data: JSON.stringify({
-					type: "snapshot",
-					currentProjectId: "workspace-a",
-					projects: [],
-					architectWorkspaceId: null,
-					workspaceState: null,
-					workspaceMetadata: null,
-					clineSessionContextVersion: 1,
-				}),
-			});
+			sendSnapshot(ws);
 		});
 
 		expect(latestSnapshot.hasReceivedSnapshot).toBe(true);
@@ -157,17 +161,7 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 		});
 
 		act(() => {
-			ws.onmessage?.({
-				data: JSON.stringify({
-					type: "snapshot",
-					currentProjectId: "workspace-a",
-					projects: [],
-					architectWorkspaceId: null,
-					workspaceState: null,
-					workspaceMetadata: null,
-					clineSessionContextVersion: 1,
-				}),
-			});
+			sendSnapshot(ws);
 		});
 
 		// Advance timer by 40s (less than the 60s staleness window)
@@ -198,6 +192,35 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 		// No reconnect should have happened
 		expect(MockWebSocket.instances.length).toBe(1);
 		expect(ws.closeCalled).toBe(false);
+	});
+
+	it("given an opened socket and received snapshot, when only heartbeat messages arrive across the staleness window, then it keeps the socket connected", () => {
+		renderHook();
+		expect(MockWebSocket.instances.length).toBe(1);
+		const ws = MockWebSocket.instances[0]!;
+
+		act(() => {
+			ws.open();
+		});
+
+		act(() => {
+			sendSnapshot(ws);
+		});
+
+		expect(latestSnapshot.hasReceivedSnapshot).toBe(true);
+
+		for (const elapsedMs of [20_000, 20_000, 20_000, 20_000]) {
+			act(() => {
+				vi.advanceTimersByTime(elapsedMs);
+				ws.onmessage?.({
+					data: JSON.stringify({ type: "heartbeat" }),
+				});
+			});
+		}
+
+		expect(MockWebSocket.instances.length).toBe(1);
+		expect(ws.closeCalled).toBe(false);
+		expect(latestSnapshot.isRuntimeDisconnected).toBe(false);
 	});
 
 	it("given the tab changes from hidden to visible, when the socket is closed, then it forces an immediate reconnect", () => {
@@ -237,17 +260,7 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 		});
 
 		act(() => {
-			ws.onmessage?.({
-				data: JSON.stringify({
-					type: "snapshot",
-					currentProjectId: "workspace-a",
-					projects: [],
-					architectWorkspaceId: null,
-					workspaceState: null,
-					workspaceMetadata: null,
-					clineSessionContextVersion: 1,
-				}),
-			});
+			sendSnapshot(ws);
 		});
 
 		const countBefore = MockWebSocket.instances.length;
