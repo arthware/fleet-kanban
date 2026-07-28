@@ -529,6 +529,42 @@ describe("BoardCard", () => {
 		expect(agentBadge?.className).toContain("text-status-orange");
 	});
 
+	it("given an Opus 5 agentModel override, when the card renders, then it shows the Opus 5 label", async () => {
+		// given an Opus 5 agentModel override
+		// when the card renders
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-opus-5" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		// then it shows the friendly model label instead of the raw id
+		expect(container.textContent).toContain("Claude Opus 5");
+		expect(container.textContent).not.toContain("claude-opus-5");
+	});
+
+	it("given a Fable 5 agentModel override, when the card renders, then it shows the Fable 5 label", async () => {
+		// given a Fable 5 agentModel override
+		// when the card renders
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ agentId: "claude", agentModel: "claude-fable-5" })}
+					index={0}
+					columnId="backlog"
+				/>,
+			);
+		});
+
+		// then it shows the friendly model label instead of the raw id
+		expect(container.textContent).toContain("Claude Fable 5");
+		expect(container.textContent).not.toContain("claude-fable-5");
+	});
+
 	it("shows the raw model id when a card's agentModel override is unknown to the display-name table", async () => {
 		await act(async () => {
 			root.render(

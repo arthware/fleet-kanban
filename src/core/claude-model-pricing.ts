@@ -1,11 +1,10 @@
 import type { RuntimeTaskTokenUsage } from "./api-contract";
 
 /**
- * Per-model Claude API prices in USD per MILLION tokens. Cached 2026-07-11 from
- * the `claude-api` skill's pricing table (which matches
- * `docs/design/per-card-token-usage.md` §7). Cache-write uses the 5-minute-TTL
- * rate — Claude Code's default — which is 1.25× base input; cache-read is 0.1×
- * base input.
+ * Per-model Claude API prices in USD per MILLION tokens. Cached 2026-07-28 from
+ * Anthropic's published pricing table. Cache-write uses the 5-minute-TTL rate —
+ * Claude Code's default — which is 1.25× base input; cache-read is 0.1× base
+ * input.
  *
  * This is a best-effort estimate for a "watch it burn" glance, not a billing
  * figure: a model absent from this table yields a `null` cost (tokens render
@@ -24,7 +23,9 @@ export interface ClaudeModelPrice {
 }
 
 export const CLAUDE_MODEL_PRICES: Readonly<Record<string, ClaudeModelPrice>> = {
+	"claude-opus-5": { inputPerMTok: 5.0, outputPerMTok: 25.0, cacheWritePerMTok: 6.25, cacheReadPerMTok: 0.5 },
 	"claude-opus-4-8": { inputPerMTok: 5.0, outputPerMTok: 25.0, cacheWritePerMTok: 6.25, cacheReadPerMTok: 0.5 },
+	"claude-fable-5": { inputPerMTok: 10.0, outputPerMTok: 50.0, cacheWritePerMTok: 12.5, cacheReadPerMTok: 1.0 },
 	// Sonnet 5 carries introductory pricing ($2 input / $10 output per MTok)
 	// through 2026-08-31; we price at the STANDARD rate ($3 / $15) since cost is
 	// an estimate, not a bill, and the intro rate would understate the steady state.
