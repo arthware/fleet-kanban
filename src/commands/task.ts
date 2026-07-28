@@ -1033,6 +1033,9 @@ async function startTaskFromState(input: StartTaskFromStateInput): Promise<JsonR
 		if (!ensured.ok) {
 			throw new Error(ensured.error ?? "Could not ensure task worktree.");
 		}
+		if (ensured.warning) {
+			process.stderr.write(`\n⚠️  ${ensured.warning}\n\n`);
+		}
 
 		const started = await input.runtimeClient.runtime.startTaskSession.mutate({
 			taskId: task.id,

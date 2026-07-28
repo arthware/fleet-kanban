@@ -7,6 +7,7 @@ import type { RuntimeTaskSessionSummary, RuntimeWorkspaceChangesResponse } from 
 
 const workspaceTaskWorktreeMocks = vi.hoisted(() => ({
 	resolveTaskCwd: vi.fn(),
+	ensureTaskWorktreeIfDoesntExist: vi.fn(),
 }));
 
 const workspaceChangesMocks = vi.hoisted(() => ({
@@ -19,7 +20,7 @@ const workspaceChangesMocks = vi.hoisted(() => ({
 
 vi.mock("../../../src/workspace/task-worktree.js", () => ({
 	deleteTaskWorktree: vi.fn(),
-	ensureTaskWorktreeIfDoesntExist: vi.fn(),
+	ensureTaskWorktreeIfDoesntExist: workspaceTaskWorktreeMocks.ensureTaskWorktreeIfDoesntExist,
 	getTaskWorkspaceInfo: vi.fn(),
 	resolveTaskCwd: workspaceTaskWorktreeMocks.resolveTaskCwd,
 }));
@@ -32,6 +33,8 @@ vi.mock("../../../src/workspace/get-workspace-changes.js", () => ({
 	resolveTaskForkPoint: workspaceChangesMocks.resolveTaskForkPoint,
 }));
 
+import { createGitProcessEnv } from "../../../src/core/git-process-env";
+import { loadWorkspaceContext } from "../../../src/state/workspace-state";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 
 let tempDirs: string[] = [];
@@ -512,5 +515,115 @@ describe("createWorkspaceApi notifyStateUpdated", () => {
 				workspacePath: "/tmp/live",
 			}),
 		).rejects.toThrow("workspace push failed");
+	});
+});
+
+describe("createWorkspaceApi ensureWorktree", () => {
+	beforeEach(() => {
+		workspaceTaskWorktreeMocks.ensureTaskWorktreeIfDoesntExist.mockReset();
+	});
+
+	it("persists ensure warning into workspace sessions.json and broadcasts updates", async () => {
+		const repoPath = await createTempProjectRoot();
+		const { execSync } = await import("node:child_process");
+		execSync("git init", {
+			cwd: repoPath,
+			env: createGitProcessEnv(),
+			stdio: "ignore",
+		});
+		const boardPath = join(repoPath, ".cline", "kanban", "board.json");
+		await mkdir(join(repoPath, ".cline", "kanban"), { recursive: true });
+		await writeFile(
+			boardPath,
+			JSON.stringify({
+				revision: 1,
+				columns: [
+					{
+						id: "backlog",
+						cards: [
+							{
+								id: "task-123",
+								prompt: "do something",
+								baseRef: "main",
+								createdAt: Date.now(),
+								updatedAt: Date.now(),
+							},
+						],
+					},
+				],
+			}),
+		);
+
+		workspaceTaskWorktreeMocks.ensureTaskWorktreeIfDoesntExist.mockResolvedValue({
+			ok: true,
+			path: join(repoPath, "task-123"),
+			baseRef: "main",
+			baseCommit: "base-commit",
+			warning: "Git submodule initialization failed: clone failed",
+		});
+
+		const broadcastWorkspace = vi.fn();
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(),
+			getScopedClineTaskSessionService: vi.fn(),
+			broadcastRuntimeWorkspaceStateUpdated: broadcastWorkspace,
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(async () => {
+				return {
+					repoPath,
+					statePath: join(repoPath, ".cline", "kanban"),
+					taskWorktreesRoot: "/tmp/worktrees",
+					git: { currentBranch: "main", defaultBranch: "main", branches: ["main"] },
+					board: {
+						columns: [
+							{
+								id: "backlog",
+								cards: [
+									{
+										id: "task-123",
+										prompt: "do something",
+										baseRef: "main",
+										createdAt: Date.now(),
+										updatedAt: Date.now(),
+									},
+								],
+							},
+						],
+					},
+					sessions: {},
+				} as any;
+			}),
+		});
+
+		const result = await api.ensureWorktree(
+			{
+				workspaceId: "workspace-123",
+				workspacePath: repoPath,
+			},
+			{
+				taskId: "task-123",
+				baseRef: "main",
+			},
+		);
+
+		expect(result).toEqual({
+			ok: true,
+			path: join(repoPath, "task-123"),
+			baseRef: "main",
+			baseCommit: "base-commit",
+			warning: "Git submodule initialization failed: clone failed",
+		});
+
+		expect(broadcastWorkspace).toHaveBeenCalledWith("workspace-123", repoPath);
+
+		// Read sessions.json and check that warningMessage is written!
+		const context = await loadWorkspaceContext(repoPath);
+		const sessionsPath = join(context.statePath, "sessions.json");
+		const sessionsContent = await import("node:fs/promises").then((fs) => fs.readFile(sessionsPath, "utf8"));
+		const sessions = JSON.parse(sessionsContent);
+		expect(sessions["task-123"]).toMatchObject({
+			taskId: "task-123",
+			warningMessage: "Git submodule initialization failed: clone failed",
+		});
 	});
 });
