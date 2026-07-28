@@ -560,6 +560,167 @@ describe.sequential("task-worktree serialization", () => {
 		}
 	});
 
+	it("continues worktree setup when submodule initialization fails and returns warning", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-submodule-fail-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+
+			// Create ignored .env file in repo
+			writeFileSync(join(repoPath, ".env"), "PORT=3000\n", "utf8");
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(join(sandboxRoot, "runtime-home"));
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+			runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({
+				worktree: {},
+			});
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+					if (command[0] === "rev-parse" && command[1] === "--git-common-dir")
+						return { stdout: ".git\n", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "HEAD") throw createGitError("fatal: no worktree");
+					if (command[0] === "rev-parse" && command[1] === "--verify")
+						return { stdout: "base-commit\n", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "prune") return { stdout: "", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "add") {
+						const worktreePath = command[3];
+						if (!worktreePath) throw createGitError("fatal: missing worktree path");
+						mkdirSync(worktreePath, { recursive: true });
+						writeFileSync(
+							join(worktreePath, ".gitmodules"),
+							'[submodule "evals/cline-bench"]\n\tpath = evals/cline-bench\n\turl = ../cline-bench\n',
+							"utf8",
+						);
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "config" && command[1] === "--file") {
+						return {
+							stdout: "submodule.evals/cline-bench.path evals/cline-bench\n",
+							stderr: "",
+						};
+					}
+					if (command[0] === "submodule" && command[1] === "update") {
+						throw createGitError("fatal: clone of 'file://remote' failed");
+					}
+					if (command[0] === "ls-files") {
+						// Return .env when listing ignored files
+						return { stdout: ".env\n", stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "--git-path")
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					throw createGitError(`Unhandled git command in ${cwd}: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-submodule-fail",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			const worktreePath = join(worktreesHomePath, "task-submodule-fail", "repo");
+			expect(ensured).toMatchObject({
+				ok: true,
+				path: worktreePath,
+				warning: expect.stringContaining("Git submodule initialization failed: Failed to run Git Command:"),
+			});
+			if (ensured.ok) {
+				expect(ensured.warning).toContain("fatal: clone of 'file://remote' failed");
+			}
+			expect(existsSync(worktreePath)).toBe(true);
+			// Verify that .env is still mirrored/linked in the worktree
+			expect(existsSync(join(worktreePath, ".env"))).toBe(true);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("initializes submodules successfully on the healthy path", async () => {
+		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-submodule-success-");
+		try {
+			const repoPath = join(sandboxRoot, "repo");
+			const worktreesHomePath = join(sandboxRoot, "worktrees-home");
+			mkdirSync(join(repoPath, ".git"), { recursive: true });
+
+			workspaceStateMocks.getRuntimeHomePath.mockReturnValue(join(sandboxRoot, "runtime-home"));
+			workspaceStateMocks.getTaskWorktreesHomePath.mockReturnValue(worktreesHomePath);
+			workspaceStateMocks.loadWorkspaceContext.mockResolvedValue({ repoPath });
+			taskWorktreePathMocks.getWorkspaceFolderLabelForWorktreePath.mockReturnValue("repo");
+			taskWorktreePathMocks.normalizeTaskIdForWorktreePath.mockImplementation((taskId: string) => taskId);
+			runtimeConfigMocks.loadRuntimeConfig.mockResolvedValue({
+				worktree: {},
+			});
+
+			let submoduleUpdateRan = false;
+
+			childProcessMocks.execFilePromise.mockImplementation(
+				async (_file: string, args: readonly string[], options?: ExecFileOptions) => {
+					const { cwd, command } = getCommandArgs(args, options);
+					if (command[0] === "rev-parse" && command[1] === "--git-common-dir")
+						return { stdout: ".git\n", stderr: "" };
+					if (command[0] === "rev-parse" && command[1] === "HEAD") throw createGitError("fatal: no worktree");
+					if (command[0] === "rev-parse" && command[1] === "--verify")
+						return { stdout: "base-commit\n", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "prune") return { stdout: "", stderr: "" };
+					if (command[0] === "worktree" && command[1] === "add") {
+						const worktreePath = command[3];
+						if (!worktreePath) throw createGitError("fatal: missing worktree path");
+						mkdirSync(worktreePath, { recursive: true });
+						writeFileSync(
+							join(worktreePath, ".gitmodules"),
+							'[submodule "evals/cline-bench"]\n\tpath = evals/cline-bench\n\turl = ../cline-bench\n',
+							"utf8",
+						);
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "config" && command[1] === "--file") {
+						return {
+							stdout: "submodule.evals/cline-bench.path evals/cline-bench\n",
+							stderr: "",
+						};
+					}
+					if (command[0] === "submodule" && command[1] === "update") {
+						submoduleUpdateRan = true;
+						return { stdout: "submodule successfully initialized", stderr: "" };
+					}
+					if (command[0] === "ls-files") {
+						return { stdout: "", stderr: "" };
+					}
+					if (command[0] === "rev-parse" && command[1] === "--git-path")
+						return { stdout: ".git/info/exclude\n", stderr: "" };
+					throw createGitError(`Unhandled git command in ${cwd}: ${command.join(" ")}`);
+				},
+			);
+
+			const ensured = await ensureTaskWorktreeIfDoesntExist({
+				cwd: repoPath,
+				taskId: "task-submodule-success",
+				workspaceId: "workspace-1",
+				baseRef: "main",
+			});
+
+			const worktreePath = join(worktreesHomePath, "task-submodule-success", "repo");
+			expect(ensured).toMatchObject({
+				ok: true,
+				path: worktreePath,
+			});
+			if (ensured.ok) {
+				expect(ensured.warning).toBeUndefined();
+			}
+			expect(submoduleUpdateRan).toBe(true);
+			expect(existsSync(worktreePath)).toBe(true);
+		} finally {
+			cleanup();
+		}
+	});
+
 	it("removes the task worktree setup lock from the repository git directory", async () => {
 		const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-lock-cleanup-");
 		try {
