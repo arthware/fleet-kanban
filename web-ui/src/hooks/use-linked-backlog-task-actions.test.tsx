@@ -54,7 +54,7 @@ interface HookSnapshot {
 	confirmMoveTaskToTrash: (task: BoardCard, currentBoard?: BoardData) => Promise<void>;
 	requestMoveTaskToTrash: (
 		taskId: string,
-		fromColumnId: "backlog" | "in_progress" | "review" | "trash",
+		fromColumnId: "backlog" | "in_progress" | "review" | "done" | "trash",
 	) => Promise<void>;
 }
 
@@ -303,9 +303,9 @@ describe("useLinkedBacklogTaskActions", () => {
 		expect(stopTaskSession).toHaveBeenNthCalledWith(2, getDetailTerminalTaskId(reviewTask.id));
 	});
 
-	it("trashes tasks directly through the request handler", async () => {
+	it("given a review task, when it is archived, then its worktree cleanup is an explicit discard", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
-		const cleanupTaskWorkspace = vi.fn(async (_taskId: string) => null);
+		const cleanupTaskWorkspace = vi.fn(async (_taskId: string, _options?: { discard?: boolean }) => null);
 
 		await act(async () => {
 			root.render(
@@ -333,7 +333,7 @@ describe("useLinkedBacklogTaskActions", () => {
 		const nextSnapshot = latestSnapshot as HookSnapshot;
 		expect(nextSnapshot.board.columns.find((column) => column.id === "review")?.cards).toHaveLength(0);
 		expect(nextSnapshot.board.columns.find((column) => column.id === "trash")?.cards[0]?.id).toBe("task-2");
-		expect(cleanupTaskWorkspace).toHaveBeenCalledWith("task-2");
+		expect(cleanupTaskWorkspace).toHaveBeenCalledWith("task-2", { discard: true });
 	});
 
 	it("does not queue dependency-unblocked animations when trashing", async () => {

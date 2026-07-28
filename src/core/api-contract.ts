@@ -753,10 +753,13 @@ export type RuntimeWorktreeDeleteRequest = z.infer<typeof runtimeWorktreeDeleteR
 export const runtimeWorktreeDeleteResponseSchema = z.object({
 	ok: z.boolean(),
 	removed: z.boolean(),
+	staleRegistrationPruned: z.boolean().optional(),
 	// True when the delete was refused because the work is not durably saved and
 	// the caller did not explicitly Discard. The worktree is retained.
 	blocked: z.boolean().optional(),
 	durability: runtimeTaskWorkDurabilityAssessmentSchema.optional(),
+	discardedStatus: runtimeTaskWorkDurabilityStatusSchema.optional(),
+	discardedDetail: z.string().optional(),
 	error: z.string().optional(),
 });
 export type RuntimeWorktreeDeleteResponse = z.infer<typeof runtimeWorktreeDeleteResponseSchema>;
