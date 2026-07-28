@@ -465,8 +465,9 @@ async function syncIgnoredPathsIntoWorktree(
 	repoPath: string,
 	worktreePath: string,
 	skillsRelativePath: string = WORKTREE_SKILLS_RELATIVE_PATH,
-	unsharedPaths: readonly string[] = DEFAULT_WORKTREE_UNSHARED_PATHS,
 ): Promise<void> {
+	const runtimeConfig = await loadRuntimeConfig(repoPath);
+	const unsharedPaths = runtimeConfig.worktree.unsharedPaths ?? DEFAULT_WORKTREE_UNSHARED_PATHS;
 	const ignoredPaths = getUniquePaths(await listIgnoredPaths(repoPath)).filter(
 		(relativePath) => !shouldSkipSymlink(relativePath),
 	);
@@ -603,18 +604,13 @@ async function prepareNewTaskWorktree(options: {
 }): Promise<{ warning?: string }> {
 	try {
 		await initializeSubmodulesIfNeeded(options.worktreePath);
-		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
-		const hook = runtimeConfig.worktree;
-		await syncIgnoredPathsIntoWorktree(
-			options.repoPath,
-			options.worktreePath,
-			options.skillsRelativePath,
-			hook.unsharedPaths ?? DEFAULT_WORKTREE_UNSHARED_PATHS,
-		);
+		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
 		await ensureWorktreeSkillsDirectory({
 			worktreePath: options.worktreePath,
 			skillsRelativePath: options.skillsRelativePath,
 		});
+		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
+		const hook = runtimeConfig.worktree;
 		if (hook.postCreateCommand === undefined) {
 			return {};
 		}
@@ -698,8 +694,8 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 		const taskId = normalizeTaskIdForWorktreePath(options.taskId);
 		const worktreePath = getTaskWorktreePath(context.repoPath, taskId);
 		// Skill placement follows the card's resolved agent; callers pass it in.
-		// Resolving it here would drag a config read onto the existing-worktree
-		// re-sync hot path, so we keep this pure and default to .agents/skills.
+		// Resolving it here would make skills placement depend on the mutable
+		// workspace default instead of the card's resolved agent.
 		const skillsRelativePath = resolveWorktreeSkillsRelativePath(options.agentId);
 		// Investigation note: ensure is called on every task start. The previous implementation
 		// compared the worktree HEAD to the latest baseRef commit and recreated the worktree

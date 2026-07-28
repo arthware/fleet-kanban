@@ -17,6 +17,8 @@ describe("shouldKeepPathUnsharedInWorktree", () => {
 		["apps/web/.turbo/logs", true],
 		["packages/core/tsconfig.tsbuildinfo", true],
 		["packages/core/tsconfig.build.tsbuildinfo", true],
+		["packages/core/build.log", false],
+		["packages/core/app.js.map", false],
 		[".env", false],
 		["packages/core-model/src/node_modules-helper.ts", false],
 		["distribution", false],
@@ -31,5 +33,14 @@ describe("shouldKeepPathUnsharedInWorktree", () => {
 
 		expect(shouldKeepPathUnsharedInWorktree("dist", repoDefinedUnsharedPaths)).toBe(true);
 		expect(shouldKeepPathUnsharedInWorktree("node_modules", repoDefinedUnsharedPaths)).toBe(false);
+	});
+
+	it("given repo-defined suffix globs, when paths are checked, then matching basenames stay unshared", () => {
+		const repoDefinedUnsharedPaths = ["*.log", "*.map"];
+
+		expect(shouldKeepPathUnsharedInWorktree("logs/build.log", repoDefinedUnsharedPaths)).toBe(true);
+		expect(shouldKeepPathUnsharedInWorktree("web-ui/dist/app.js.map", repoDefinedUnsharedPaths)).toBe(true);
+		expect(shouldKeepPathUnsharedInWorktree("logs/catalog", repoDefinedUnsharedPaths)).toBe(false);
+		expect(shouldKeepPathUnsharedInWorktree("web-ui/map", repoDefinedUnsharedPaths)).toBe(false);
 	});
 });

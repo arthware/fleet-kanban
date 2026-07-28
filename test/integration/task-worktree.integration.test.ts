@@ -597,7 +597,7 @@ describe.sequential("task-worktree integration", () => {
 		});
 	});
 
-	it("given a repo-defined unshared list, when a task worktree is created, then that list replaces the default", async () => {
+	it("given a repo-defined unshared list, when a task worktree is ensured twice, then that list replaces the default on every sync", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-configured-unshared-");
 			try {
@@ -609,17 +609,17 @@ describe.sequential("task-worktree integration", () => {
 				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
 
 				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
-				writeFileSync(join(repoPath, ".gitignore"), "/node_modules/\n/dist/\n.env\n", "utf8");
+				writeFileSync(join(repoPath, ".gitignore"), "/node_modules/\n/generated/\n.env\n", "utf8");
 				mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
 				writeFileSync(
 					join(repoPath, ".cline", "kanban", "config.json"),
-					JSON.stringify({ worktree: { unsharedPaths: ["dist"] } }, null, 2),
+					JSON.stringify({ worktree: { unsharedPaths: ["generated"] } }, null, 2),
 					"utf8",
 				);
 				writeFileSync(join(repoPath, ".env"), "TOKEN=fixture\n", "utf8");
-				mkdirSync(join(repoPath, "dist"), { recursive: true });
+				mkdirSync(join(repoPath, "generated"), { recursive: true });
 				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
-				writeFileSync(join(repoPath, "dist", "cli.js"), "build\n", "utf8");
+				writeFileSync(join(repoPath, "generated", "client.ts"), "build\n", "utf8");
 				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "fixture"\n}\n', "utf8");
 
 				runGit(repoPath, ["add", "README.md", ".gitignore", ".cline/kanban/config.json"]);
@@ -636,14 +636,23 @@ describe.sequential("task-worktree integration", () => {
 				}
 
 				const envPath = join(ensured.path, ".env");
-				const distPath = join(ensured.path, "dist");
+				const generatedPath = join(ensured.path, "generated");
 				const nodeModulesPath = join(ensured.path, "node_modules");
 				expectMirroredPathBehavior(envPath);
-				expectUnsharedPathBehavior(distPath);
+				expectUnsharedPathBehavior(generatedPath);
 				expectMirroredPathBehavior(nodeModulesPath);
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".env"])).toBe("");
-				expect(runGit(ensured.path, ["status", "--porcelain", "--", "dist"])).toBe("");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", "generated"])).toBe("");
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", "node_modules"])).toBe("");
+
+				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
+					cwd: repoPath,
+					taskId: "task-configured-unshared",
+					baseRef: "HEAD",
+				});
+				expect(ensuredAgain.ok).toBe(true);
+				expectUnsharedPathBehavior(generatedPath);
+				expectMirroredPathBehavior(nodeModulesPath);
 			} finally {
 				cleanup();
 			}

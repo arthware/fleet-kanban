@@ -27,10 +27,10 @@ function toPlatformRelativePath(path: string): string {
 }
 
 function pathPatternMatchesBasename(pattern: string, basename: string): boolean {
-	if (pattern !== TSBUILDINFO_PATTERN) {
+	if (!pattern.startsWith("*.") || pattern.length <= 2) {
 		return false;
 	}
-	return basename.endsWith(".tsbuildinfo");
+	return basename.endsWith(pattern.slice(1));
 }
 
 export function shouldKeepPathUnsharedInWorktree(relativePath: string, unsharedPaths: readonly string[]): boolean {
