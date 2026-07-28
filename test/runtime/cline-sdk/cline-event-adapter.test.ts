@@ -296,7 +296,7 @@ describe("applyClineSessionEvent", () => {
 		});
 
 		expect(toolStart.entry.summary.state).toBe("awaiting_review");
-		expect(toolStart.entry.summary.reviewReason).toBe("hook");
+		expect(toolStart.entry.summary.reviewReason).toBe("attention");
 		expect(toolStart.messages[0]?.role).toBe("tool");
 		expect(toolStart.summaries.at(-1)?.latestHookActivity?.activityText).toBe(
 			"Using ask_followup_question(Need approval?)",

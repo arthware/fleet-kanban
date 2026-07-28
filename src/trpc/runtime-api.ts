@@ -52,7 +52,12 @@ import {
 } from "../core/api-validation";
 import { resolveStartActiveSkills, validateSkill } from "../core/card-type";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
-import { buildTaskReadyForReviewMessage, resolveRunningHomeAgentTaskId } from "../core/review-notification";
+import {
+	buildTaskReadyForReviewMessage,
+	buildTaskReviewNotificationKey,
+	hasReviewNotificationBeenSent,
+	resolveRunningHomeAgentTaskId,
+} from "../core/review-notification";
 import { resolveTaskTitle } from "../core/task-title.js";
 import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadCardTypeManifest } from "../prompts/card-type-discovery";
@@ -150,6 +155,34 @@ async function persistTaskSessionSummary(workspacePath: string, summary: Runtime
 	}));
 }
 
+async function persistReviewNotificationKey(
+	workspacePath: string,
+	taskId: string,
+	reviewNotificationKey: string,
+): Promise<void> {
+	await mutateWorkspaceState(workspacePath, (state) => {
+		const existing = state.sessions[taskId];
+		if (!existing) {
+			return {
+				board: state.board,
+				sessions: state.sessions,
+				value: null,
+			};
+		}
+		return {
+			board: state.board,
+			sessions: {
+				...state.sessions,
+				[taskId]: {
+					...existing,
+					lastReviewNotificationKey: reviewNotificationKey,
+				},
+			},
+			value: null,
+		};
+	});
+}
+
 export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrpcContext["runtimeApi"] {
 	const clineProviderService = createClineProviderService();
 	const clineMcpSettingsService = createClineMcpSettingsService();
@@ -197,9 +230,13 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						error: "Task session is not running.",
 					};
 				}
+				const resumedSummary =
+					summary.state === "awaiting_review"
+						? (terminalManager.resumeFromHumanInput(body.taskId) ?? summary)
+						: summary;
 				return {
 					ok: true,
-					summary,
+					summary: resumedSummary,
 				};
 			}
 			// PTY path: `fleet task say` wraps steering in a bracketed paste so a
@@ -235,6 +272,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					summary = afterSubmit;
 				}
 			}
+			if (summary.state === "awaiting_review") {
+				summary = terminalManager.resumeFromHumanInput(body.taskId) ?? summary;
+			}
 			return {
 				ok: true,
 				summary,
@@ -269,6 +309,11 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					error: `Task "${body.taskId}" was not found in workspace ${workspaceScope.workspacePath}.`,
 				};
 			}
+			const taskSummary = state.sessions[body.taskId] ?? null;
+			const reviewNotificationKey = buildTaskReviewNotificationKey({
+				taskId: body.taskId,
+				summary: taskSummary,
+			});
 
 			const workspaces = await listWorkspacesWithEpic();
 			const architectWorkspaceId = resolveArchitectHomeAgentWorkspaceId(workspaces, workspaceScope.workspaceId);
@@ -320,6 +365,15 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					message: null,
 				};
 			}
+			if (hasReviewNotificationBeenSent({ taskId: body.taskId, summary: taskSummary })) {
+				return {
+					ok: true,
+					taskId: body.taskId,
+					homeAgentTaskId,
+					notified: false,
+					message: null,
+				};
+			}
 
 			const message = buildTaskReadyForReviewMessage(task);
 			const response = await sendTaskSessionInput(architectWorkspaceScope, {
@@ -337,6 +391,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					message,
 				};
 			}
+			await persistReviewNotificationKey(workspaceScope.workspacePath, body.taskId, reviewNotificationKey);
 			return {
 				ok: true,
 				taskId: body.taskId,

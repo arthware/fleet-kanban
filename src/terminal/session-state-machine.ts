@@ -8,6 +8,7 @@ export type SessionTransitionEvent =
 	| { type: "hook.to_review" }
 	| { type: "hook.to_needs_input" }
 	| { type: "hook.to_in_progress" }
+	| { type: "human.input_submitted" }
 	| { type: "agent.prompt-ready" }
 	| { type: "process.exit"; exitCode: number | null; interrupted: boolean };
 
@@ -44,6 +45,10 @@ export interface SessionTransitionResult {
 }
 
 function canReturnToRunning(reason: RuntimeTaskSessionReviewReason): boolean {
+	return reason === "needs_input";
+}
+
+function canReturnToRunningFromHumanInput(reason: RuntimeTaskSessionReviewReason): boolean {
 	return reason === "attention" || reason === "hook" || reason === "error" || reason === "needs_input";
 }
 
@@ -97,6 +102,21 @@ export function reduceSessionTransition(
 				patch: {
 					state: "running",
 					reviewReason: null,
+					lastReviewNotificationKey: null,
+				},
+				clearAttentionBuffer: true,
+			};
+		}
+		case "human.input_submitted": {
+			if (summary.state !== "awaiting_review" || !canReturnToRunningFromHumanInput(summary.reviewReason)) {
+				return { changed: false, patch: {}, clearAttentionBuffer: false };
+			}
+			return {
+				changed: true,
+				patch: {
+					state: "running",
+					reviewReason: null,
+					lastReviewNotificationKey: null,
 				},
 				clearAttentionBuffer: true,
 			};

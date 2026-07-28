@@ -567,6 +567,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 				state: "running",
 				mode: effectiveMode,
 				reviewReason: null,
+				lastReviewNotificationKey: null,
 				warningMessage: null,
 				lastOutputAt: now(),
 				lastHookAt: now(),

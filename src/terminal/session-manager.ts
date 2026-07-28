@@ -140,6 +140,7 @@ function createDefaultSummary(taskId: string): RuntimeTaskSessionSummary {
 		warningMessage: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
+		lastReviewNotificationKey: null,
 	};
 }
 
@@ -1094,6 +1095,22 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 		const before = entry.summary;
 		const summary = this.applySessionEvent(entry, { type: "hook.to_in_progress" });
+		if (summary !== before && entry.active) {
+			for (const listener of entry.listeners.values()) {
+				listener.onState?.(cloneSummary(summary));
+			}
+			this.emitSummary(summary);
+		}
+		return cloneSummary(summary);
+	}
+
+	resumeFromHumanInput(taskId: string): RuntimeTaskSessionSummary | null {
+		const entry = this.entries.get(taskId);
+		if (!entry) {
+			return null;
+		}
+		const before = entry.summary;
+		const summary = this.applySessionEvent(entry, { type: "human.input_submitted" });
 		if (summary !== before && entry.active) {
 			for (const listener of entry.listeners.values()) {
 				listener.onState?.(cloneSummary(summary));
