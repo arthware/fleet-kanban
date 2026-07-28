@@ -10,6 +10,7 @@ import type {
 	RuntimeWorktreeEnsureResponse,
 } from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
+import { listResolvedSkillsSync } from "../prompts/skill-discovery";
 import { getRuntimeHomePath, getTaskWorktreesHomePath, loadWorkspaceContext } from "../state/workspace-state";
 import {
 	assessTaskWorkDurability,
@@ -147,6 +148,7 @@ export async function resolveCanonicalSkillsDir(options?: {
 
 export async function ensureWorktreeSkillsDirectory(options: {
 	worktreePath: string;
+	workspacePath?: string;
 	skillsRelativePath?: string;
 	canonicalSkillsDir?: string | null;
 	resolveCanonicalSkillsDir?: () => Promise<string | null>;
@@ -154,22 +156,40 @@ export async function ensureWorktreeSkillsDirectory(options: {
 }): Promise<WorktreeSkillsPlacementStatus> {
 	const fs = options.fs ?? DEFAULT_WORKTREE_SKILLS_FS;
 	const targetPath = join(options.worktreePath, options.skillsRelativePath ?? WORKTREE_SKILLS_RELATIVE_PATH);
-	if (await lstatExists(targetPath, fs)) {
-		return "existing";
-	}
-
 	const canonicalSkillsDir =
 		options.canonicalSkillsDir === undefined
 			? await (options.resolveCanonicalSkillsDir ?? resolveCanonicalSkillsDir)()
 			: options.canonicalSkillsDir;
-	if (!canonicalSkillsDir || !(await lstatExists(canonicalSkillsDir, fs))) {
+	const resolvedSkills = listResolvedSkillsSync({
+		workspacePath: options.workspacePath,
+		canonicalSkillsDir,
+	});
+	if (resolvedSkills.length === 0) {
+		if (await lstatExists(targetPath, fs)) {
+			return "existing";
+		}
 		return "missing_canonical";
 	}
 
 	try {
-		await fs.mkdir(dirname(targetPath), { recursive: true });
-		await fs.symlink(canonicalSkillsDir, targetPath, "dir");
-		return "linked";
+		const targetStat = await fs.lstat(targetPath).catch(() => null);
+		if (targetStat && !targetStat.isDirectory()) {
+			return "existing";
+		}
+		if (!targetStat) {
+			await fs.mkdir(targetPath, { recursive: true });
+		}
+
+		let linkedAny = false;
+		for (const skill of resolvedSkills) {
+			const targetSkillPath = join(targetPath, skill.name);
+			if (await lstatExists(targetSkillPath, fs)) {
+				continue;
+			}
+			await fs.symlink(skill.skillDir, targetSkillPath, "dir");
+			linkedAny = true;
+		}
+		return linkedAny ? "linked" : "existing";
 	} catch {
 		try {
 			if (await lstatExists(targetPath, fs)) {
@@ -638,6 +658,7 @@ async function runWorktreePreparation(options: {
 	try {
 		await ensureWorktreeSkillsDirectory({
 			worktreePath: options.worktreePath,
+			workspacePath: options.repoPath,
 			skillsRelativePath: options.skillsRelativePath,
 		});
 	} catch (error) {

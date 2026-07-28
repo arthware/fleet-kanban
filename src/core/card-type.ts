@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import matter from "gray-matter";
 import { z } from "zod";
+import { resolveSkillSync, type SkillResolutionOptions } from "../prompts/skill-discovery";
 
 export const cardTypePhaseActivationSchema = z.enum(["default", "auto-review-pr", "dormant"]);
 export type CardTypePhaseActivation = z.infer<typeof cardTypePhaseActivationSchema>;
@@ -69,13 +69,18 @@ export interface CardTypeValidationResult {
 	phases: PhaseValidation[];
 }
 
-export function validateSkill(skillName: string, skillsDir: string): "ok" | "MISSING" | "EMPTY-DIRECTIVE" {
-	const skillPath = join(skillsDir, skillName, "SKILL.md");
-	if (!existsSync(skillPath)) {
+export function validateSkill(
+	skillName: string,
+	skillsDirOrOptions: string | SkillResolutionOptions,
+): "ok" | "MISSING" | "EMPTY-DIRECTIVE" {
+	const resolutionOptions =
+		typeof skillsDirOrOptions === "string" ? { bundledSkillsDir: skillsDirOrOptions } : skillsDirOrOptions;
+	const resolvedSkill = resolveSkillSync(skillName, resolutionOptions);
+	if (!resolvedSkill || !existsSync(resolvedSkill.skillFilePath)) {
 		return "MISSING";
 	}
 	try {
-		const fileContent = readFileSync(skillPath, "utf-8");
+		const fileContent = readFileSync(resolvedSkill.skillFilePath, "utf-8");
 		const { data } = matter(fileContent);
 		if (data && typeof data.directive === "string" && data.directive.trim() !== "") {
 			return "ok";
@@ -86,14 +91,17 @@ export function validateSkill(skillName: string, skillsDir: string): "ok" | "MIS
 	}
 }
 
-export function validateCardType(manifest: CardTypeManifest, skillsDir: string): CardTypeValidationResult {
+export function validateCardType(
+	manifest: CardTypeManifest,
+	skillsDirOrOptions: string | SkillResolutionOptions,
+): CardTypeValidationResult {
 	let isValid = true;
 	const phases: PhaseValidation[] = [];
 
 	for (const phase of manifest.phases) {
 		const skillValidations: SkillValidation[] = [];
 		for (const skillName of phase.skills) {
-			const status = validateSkill(skillName, skillsDir);
+			const status = validateSkill(skillName, skillsDirOrOptions);
 			if (status !== "ok") {
 				isValid = false;
 			}
