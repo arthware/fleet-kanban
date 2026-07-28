@@ -48,7 +48,7 @@ function canReturnToRunning(reason: RuntimeTaskSessionReviewReason): boolean {
 	return reason === "needs_input";
 }
 
-function canReturnToRunningFromHumanInput(reason: RuntimeTaskSessionReviewReason): boolean {
+export function canWakeFromAnyReviewReason(reason: RuntimeTaskSessionReviewReason): boolean {
 	return reason === "attention" || reason === "hook" || reason === "error" || reason === "needs_input";
 }
 
@@ -108,7 +108,7 @@ export function reduceSessionTransition(
 			};
 		}
 		case "human.input_submitted": {
-			if (summary.state !== "awaiting_review" || !canReturnToRunningFromHumanInput(summary.reviewReason)) {
+			if (summary.state !== "awaiting_review" || !canWakeFromAnyReviewReason(summary.reviewReason)) {
 				return { changed: false, patch: {}, clearAttentionBuffer: false };
 			}
 			return {
