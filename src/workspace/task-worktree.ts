@@ -18,7 +18,7 @@ import {
 } from "./durable-save";
 import { getGitCommandErrorMessage, getGitStdout, readGitHeadInfo, runGit } from "./git-utils";
 import { getWorkspaceFolderLabelForWorktreePath, normalizeTaskIdForWorktreePath } from "./task-worktree-path";
-import { listTurbopackNodeModulesSymlinkSkipPaths } from "./task-worktree-turbopack";
+import { DEFAULT_WORKTREE_UNSHARED_PATHS, shouldKeepPathUnsharedInWorktree } from "./task-worktree-unshared-paths";
 import { runWorktreePostCreateHook } from "./worktree-post-create-hook";
 
 const KANBAN_MANAGED_EXCLUDE_BLOCK_START = "# kanban-managed-symlinked-ignored-paths:start";
@@ -465,12 +465,14 @@ async function syncIgnoredPathsIntoWorktree(
 	repoPath: string,
 	worktreePath: string,
 	skillsRelativePath: string = WORKTREE_SKILLS_RELATIVE_PATH,
+	unsharedPaths: readonly string[] = DEFAULT_WORKTREE_UNSHARED_PATHS,
 ): Promise<void> {
 	const ignoredPaths = getUniquePaths(await listIgnoredPaths(repoPath)).filter(
 		(relativePath) => !shouldSkipSymlink(relativePath),
 	);
-	const turbopackNodeModulesSkipPaths = new Set(await listTurbopackNodeModulesSymlinkSkipPaths(repoPath));
-	const mirroredIgnoredPaths = ignoredPaths.filter((relativePath) => !turbopackNodeModulesSkipPaths.has(relativePath));
+	const mirroredIgnoredPaths = ignoredPaths.filter(
+		(relativePath) => !shouldKeepPathUnsharedInWorktree(relativePath, unsharedPaths),
+	);
 	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, skillsRelativePath]);
 
 	await syncManagedIgnoredPathExcludes(repoPath, managedExcludePaths);
@@ -601,13 +603,18 @@ async function prepareNewTaskWorktree(options: {
 }): Promise<{ warning?: string }> {
 	try {
 		await initializeSubmodulesIfNeeded(options.worktreePath);
-		await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
+		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
+		const hook = runtimeConfig.worktree;
+		await syncIgnoredPathsIntoWorktree(
+			options.repoPath,
+			options.worktreePath,
+			options.skillsRelativePath,
+			hook.unsharedPaths ?? DEFAULT_WORKTREE_UNSHARED_PATHS,
+		);
 		await ensureWorktreeSkillsDirectory({
 			worktreePath: options.worktreePath,
 			skillsRelativePath: options.skillsRelativePath,
 		});
-		const runtimeConfig = await loadRuntimeConfig(options.repoPath);
-		const hook = runtimeConfig.worktree;
 		if (hook.postCreateCommand === undefined) {
 			return {};
 		}

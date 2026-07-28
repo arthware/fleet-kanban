@@ -12,10 +12,9 @@ this, a plain `npm install` inside a fresh worktree is usually redundant: the de
 Symlinking does **not** cover every project, though. Some setup is fundamentally per-worktree and
 cannot be a symlink:
 
-- **Turbopack / Next.js apps.** Their `node_modules` is *deliberately excluded* from symlinking —
-  symlinked `node_modules` break Turbopack — by
-  `listTurbopackNodeModulesSymlinkSkipPaths` (`src/workspace/task-worktree-turbopack.ts:152`). Those
-  worktrees start with **no** `node_modules` and need a real install.
+- **Turbopack / Next.js apps.** Their `node_modules` can be excluded from symlinking with
+  `worktree.unsharedPaths`; symlinked `node_modules` break Turbopack. Those worktrees start with
+  **no** `node_modules` and need a real install.
 - **Codegen / prepare steps** that write generated sources into the tree: `prisma generate`,
   protobuf/`.proto` compilation, local workspace-package builds (`turbo run build --filter=...`),
   `svelte-kit sync`, etc.
@@ -98,8 +97,7 @@ preference. The post-create hook is the opposite — it is repo-specific — so 
 `shortcuts` in the **project** file. We follow the prompt templates' *trust model and plumbing shape*
 (see §6), not their storage location.
 
-The config is grouped under a `worktree` namespace so future worktree-lifecycle knobs (e.g. the
-deferred `symlinkExclude`, see Out of scope) have a natural home:
+The config is grouped under a `worktree` namespace so worktree-lifecycle knobs have a natural home:
 
 ```jsonc
 // <repo>/.cline/kanban/config.json
@@ -108,13 +106,31 @@ deferred `symlinkExclude`, see Out of scope) have a natural home:
   "worktree": {
     "postCreateCommand": "pnpm install --frozen-lockfile",
     "postCreateTimeoutMs": 300000,     // optional; default 300_000
-    "postCreateFailureMode": "warn"    // optional; "warn" (default) | "block"
+    "postCreateFailureMode": "warn",   // optional; "warn" (default) | "block"
+    "unsharedPaths": [
+      "node_modules",
+      "dist",
+      "build",
+      "out",
+      ".next",
+      ".turbo",
+      ".cache",
+      ".vite",
+      ".parcel-cache",
+      ".svelte-kit",
+      ".nuxt",
+      ".output",
+      "*.tsbuildinfo"
+    ]
   }
 }
 ```
 
 `postCreateCommand` accepts a **string** (run through a shell) or a **string array** (spawned
 directly, no shell) — see §2. The two extra fields are optional and are the only tuning knobs.
+`unsharedPaths` is optional; when omitted, Kanban uses the built-in list shown above. When present,
+it replaces the built-in list so a repo can keep sharing selected ignored paths such as
+`node_modules`.
 
 **Global support:** kept out of the MVP but trivially added later — a `worktree.postCreateCommand` on
 `RuntimeGlobalConfigFileShape` used as a fallback when the project has none. The plumbing is
@@ -279,16 +295,16 @@ On a genuine new-worktree creation, after the symlink sync, Kanban runs
 right default inside a worktree: it's a clean tree tracking the same lockfile, so we want an exact,
 reproducible install that fails loudly on a stale lockfile rather than silently rewriting it.
 
-**Turbopack app + codegen** — the case this feature exists for. A Turbopack app's `node_modules` is
-deliberately excluded from symlinking (§Problem), so the worktree starts with none; `prisma generate`
-then writes generated client code no symlink can provide. Chain with `&&` (string form) and raise the
-timeout for a cold install:
+**Turbopack app + codegen** — set `unsharedPaths` to include `node_modules` so the worktree starts
+with no dependency symlink, then let the post-create command install dependencies and run codegen.
+Chain with `&&` (string form) and raise the timeout for a cold install:
 
 ```jsonc
 {
   "worktree": {
     "postCreateCommand": "pnpm install --frozen-lockfile && pnpm prisma generate",
-    "postCreateTimeoutMs": 600000
+    "postCreateTimeoutMs": 600000,
+    "unsharedPaths": ["node_modules", "dist", ".next", ".turbo", "*.tsbuildinfo"]
   }
 }
 ```
@@ -362,11 +378,6 @@ this repo's rule that CLI/runtime logic must be testable without the entry.
 
 ## Out of scope / follow-ups
 
-- User-configurable per-path `worktree.symlinkExclude` (a manual extension of the Turbopack
-  auto-skip) — the natural companion to this hook: exclude a path from symlinking so it starts empty,
-  then let `postCreateCommand` fill it with a real install. Deferred until a non-Turbopack case the
-  auto-detection misses actually appears. Explicitly **not** a global on/off toggle — that's the wrong
-  granularity (it discards the free `node_modules` repo-wide to solve a per-directory problem).
 - Global (operator-level) default hook — plumbing is symmetric; add if requested.
 - Per-hook consent/signing prompt on first run from a repo-supplied command.
 - Live-streaming hook output to the UI (MVP surfaces a tail on failure only).

@@ -449,6 +449,76 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("given unshared paths are configured without a post-create command, when config loads, then the worktree setting survives", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-unshared-only-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-unshared-only-",
+		);
+
+		try {
+			const runtimeProjectConfigDir = join(tempProject, ".cline", "kanban");
+			mkdirSync(runtimeProjectConfigDir, { recursive: true });
+			writeFileSync(
+				join(runtimeProjectConfigDir, "config.json"),
+				JSON.stringify(
+					{
+						worktree: {
+							unsharedPaths: ["dist", ".turbo", "*.tsbuildinfo"],
+						},
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const reloaded = await loadRuntimeConfig(tempProject);
+
+				expect(reloaded.worktree).toEqual({
+					unsharedPaths: ["dist", ".turbo", "*.tsbuildinfo"],
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("keeps the project config file when shortcuts are cleared but unshared paths remain", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-keep-unshared-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-keep-unshared-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				await updateRuntimeConfig(tempProject, {
+					shortcuts: [{ label: "Ship", command: "npm run ship", icon: "rocket" }],
+					worktree: { unsharedPaths: ["dist"] },
+				});
+
+				await updateRuntimeConfig(tempProject, {
+					shortcuts: [],
+				});
+
+				const configPath = join(tempProject, ".cline", "kanban", "config.json");
+				expect(existsSync(configPath)).toBe(true);
+				const persisted = JSON.parse(readFileSync(configPath, "utf8")) as {
+					shortcuts?: unknown;
+					worktree?: unknown;
+				};
+				expect(persisted.shortcuts).toBeUndefined();
+				expect(persisted.worktree).toEqual({
+					unsharedPaths: ["dist"],
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("keeps the project config file when shortcuts are cleared but a worktree hook remains", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-keep-hook-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-keep-hook-");
