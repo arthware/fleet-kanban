@@ -19,7 +19,11 @@ import {
 } from "./durable-save";
 import { getGitCommandErrorMessage, getGitStdout, readGitHeadInfo, runGit } from "./git-utils";
 import { getWorkspaceFolderLabelForWorktreePath, normalizeTaskIdForWorktreePath } from "./task-worktree-path";
-import { DEFAULT_WORKTREE_UNSHARED_PATHS, shouldKeepPathUnsharedInWorktree } from "./task-worktree-unshared-paths";
+import {
+	collectTrackedDirectories,
+	resolveWorktreeUnsharedPaths,
+	shouldMirrorIgnoredPathIntoWorktree,
+} from "./task-worktree-unshared-paths";
 import { runWorktreePostCreateHook } from "./worktree-post-create-hook";
 
 const KANBAN_MANAGED_EXCLUDE_BLOCK_START = "# kanban-managed-symlinked-ignored-paths:start";
@@ -426,6 +430,14 @@ async function listIgnoredPaths(repoPath: string): Promise<string[]> {
 		.filter((line) => line.length > 0);
 }
 
+async function listTrackedPaths(repoPath: string): Promise<string[]> {
+	const output = await getGitStdout(["ls-files"], repoPath);
+	return output
+		.split("\n")
+		.map((line) => toPlatformRelativePath(line))
+		.filter((line) => line.length > 0);
+}
+
 async function worktreeHasConfiguredSubmodules(worktreePath: string): Promise<boolean> {
 	const gitmodulesPath = join(worktreePath, ".gitmodules");
 	if (!(await pathExists(gitmodulesPath))) {
@@ -505,12 +517,19 @@ async function syncIgnoredPathsIntoWorktree(
 	skillsRelativePath: string = WORKTREE_SKILLS_RELATIVE_PATH,
 ): Promise<void> {
 	const runtimeConfig = await loadRuntimeConfig(repoPath);
-	const unsharedPaths = runtimeConfig.worktree.unsharedPaths ?? DEFAULT_WORKTREE_UNSHARED_PATHS;
+	const unsharedPaths = resolveWorktreeUnsharedPaths(runtimeConfig.worktree);
+	// One `git ls-files` pass answers "is this path inside a tracked source tree?" for every
+	// ignored path — a per-path query would be O(paths) git invocations on a large monorepo.
+	const trackedDirectories = collectTrackedDirectories(await listTrackedPaths(repoPath));
 	const ignoredPaths = getUniquePaths(await listIgnoredPaths(repoPath)).filter(
 		(relativePath) => !shouldSkipSymlink(relativePath),
 	);
-	const mirroredIgnoredPaths = ignoredPaths.filter(
-		(relativePath) => !shouldKeepPathUnsharedInWorktree(relativePath, unsharedPaths),
+	const mirroredIgnoredPaths = ignoredPaths.filter((relativePath) =>
+		shouldMirrorIgnoredPathIntoWorktree(relativePath, {
+			unsharedPaths,
+			trackedDirectories,
+			sharedPaths: runtimeConfig.worktree.sharedPaths,
+		}),
 	);
 	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, skillsRelativePath]);
 

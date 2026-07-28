@@ -154,7 +154,7 @@ function normalizeWorktreePostCreateFailureMode(value: unknown): RuntimeWorktree
 	return value === "block" || value === "warn" ? value : undefined;
 }
 
-function normalizeWorktreeUnsharedPaths(value: unknown): string[] | undefined {
+function normalizeWorktreePathList(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) {
 		return undefined;
 	}
@@ -173,11 +173,15 @@ function normalizeWorktreeConfig(value: unknown): RuntimeWorktreeConfig {
 		postCreateTimeoutMs?: unknown;
 		postCreateFailureMode?: unknown;
 		unsharedPaths?: unknown;
+		additionalUnsharedPaths?: unknown;
+		sharedPaths?: unknown;
 	};
 	const postCreateCommand = normalizeWorktreePostCreateCommand(candidate.postCreateCommand);
 	const postCreateTimeoutMs = normalizeWorktreePostCreateTimeoutMs(candidate.postCreateTimeoutMs);
 	const postCreateFailureMode = normalizeWorktreePostCreateFailureMode(candidate.postCreateFailureMode);
-	const unsharedPaths = normalizeWorktreeUnsharedPaths(candidate.unsharedPaths);
+	const unsharedPaths = normalizeWorktreePathList(candidate.unsharedPaths);
+	const additionalUnsharedPaths = normalizeWorktreePathList(candidate.additionalUnsharedPaths);
+	const sharedPaths = normalizeWorktreePathList(candidate.sharedPaths);
 	return {
 		...(postCreateCommand !== undefined ? { postCreateCommand } : {}),
 		...(postCreateCommand !== undefined &&
@@ -191,6 +195,8 @@ function normalizeWorktreeConfig(value: unknown): RuntimeWorktreeConfig {
 			? { postCreateFailureMode }
 			: {}),
 		...(unsharedPaths !== undefined ? { unsharedPaths } : {}),
+		...(additionalUnsharedPaths !== undefined ? { additionalUnsharedPaths } : {}),
+		...(sharedPaths !== undefined ? { sharedPaths } : {}),
 	};
 }
 

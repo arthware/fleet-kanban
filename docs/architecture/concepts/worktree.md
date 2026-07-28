@@ -10,6 +10,11 @@ Created lazily (`ensureTaskWorktreeIfDoesntExist` = `git worktree add --detach`)
 creation the runtime symlinks `.agents/skills` into the worktree (skill injection). Per-turn
 checkpoints are separate. The home/architect agent deliberately has NO worktree.
 
+Git-ignored paths are mirrored in as absolute symlinks, decided by **structure, not artifact name**
+(`task-worktree-unshared-paths.ts`): shared only at the repo root or in a subtree git tracks nothing
+in, so nothing escaping ever lands inside a tracked source tree. See
+`docs/design/171-worktree-mirroring-structural-rule.md`.
+
 ## Reuse / do-not-duplicate
 - Relates to [Task session](task-session.md), [Skill injection & directives](skill-injection.md),
   [Persistence / CLINE_HOME](persistence-cline-home.md).

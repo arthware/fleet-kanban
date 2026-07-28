@@ -1213,7 +1213,12 @@ export const runtimeWorktreeConfigSchema = z.object({
 	postCreateCommand: z.union([z.string(), z.array(z.string())]).optional(),
 	postCreateTimeoutMs: z.number().int().positive().optional(),
 	postCreateFailureMode: runtimeWorktreePostCreateFailureModeSchema.optional(),
+	/** Replaces the built-in unshared artifact names. */
 	unsharedPaths: z.array(z.string()).optional(),
+	/** Extends whichever unshared list is in effect (built-in defaults or `unsharedPaths`). */
+	additionalUnsharedPaths: z.array(z.string()).optional(),
+	/** Repo-relative paths always mirrored, even inside a tracked source tree. */
+	sharedPaths: z.array(z.string()).optional(),
 });
 export type RuntimeWorktreeConfig = z.infer<typeof runtimeWorktreeConfigSchema>;
 

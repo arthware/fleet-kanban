@@ -358,7 +358,9 @@ describe.sequential("task-worktree serialization", () => {
 						return { stdout: "", stderr: "" };
 					}
 					if (command[0] === "ls-files") {
-						order.push("sync");
+						if (command.includes("--ignored")) {
+							order.push("sync");
+						}
 						return { stdout: "", stderr: "" };
 					}
 					if (command[0] === "rev-parse" && command[1] === "--git-path") {
@@ -609,8 +611,8 @@ describe.sequential("task-worktree serialization", () => {
 						throw createGitError("fatal: clone of 'file://remote' failed");
 					}
 					if (command[0] === "ls-files") {
-						// Return .env when listing ignored files
-						return { stdout: ".env\n", stderr: "" };
+						// .env is ignored; the tracked listing is empty.
+						return { stdout: command.includes("--ignored") ? ".env\n" : "", stderr: "" };
 					}
 					if (command[0] === "rev-parse" && command[1] === "--git-path")
 						return { stdout: ".git/info/exclude\n", stderr: "" };
