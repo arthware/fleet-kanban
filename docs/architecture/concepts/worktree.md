@@ -7,8 +7,9 @@ A per-task git worktree giving each card an isolated working directory and deter
 ## Domain model
 Created lazily (`ensureTaskWorktreeIfDoesntExist` = `git worktree add --detach`), removed via
 `git worktree remove/prune`. Path = `$CLINE_HOME/worktrees/<normalizedTaskId>/<repoLabel>/`. On
-creation the runtime symlinks `.agents/skills` into the worktree (skill injection). Per-turn
-checkpoints are separate. The home/architect agent deliberately has NO worktree.
+creation, the runtime merges and symlinks individual active skills into `.agents/skills` inside the
+worktree (see [Skill injection & directives](skill-injection.md) for the precise resolution order and merged mount details).
+Per-turn checkpoints are separate. The home/architect agent deliberately has NO worktree.
 
 ## Reuse / do-not-duplicate
 - Relates to [Task session](task-session.md), [Skill injection & directives](skill-injection.md),
