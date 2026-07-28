@@ -121,16 +121,28 @@ The config is grouped under a `worktree` namespace so worktree-lifecycle knobs h
       ".nuxt",
       ".output",
       "*.tsbuildinfo"
-    ]
+    ],
+    "additionalUnsharedPaths": ["coverage"],          // optional; extends whichever list is in effect
+    "sharedPaths": ["apps/web/.env.local"]            // optional; force-mirror specific paths
   }
 }
 ```
 
 `postCreateCommand` accepts a **string** (run through a shell) or a **string array** (spawned
-directly, no shell) — see §2. The two extra fields are optional and are the only tuning knobs.
-`unsharedPaths` is optional; when omitted, Kanban uses the built-in list shown above. When present,
-it replaces the built-in list so a repo can keep sharing selected ignored paths such as
-`node_modules`.
+directly, no shell) — see §2. The remaining fields are optional tuning knobs.
+
+**Which ignored paths reach a worktree** is decided by structure first (see
+`docs/design/171-worktree-mirroring-structural-rule.md`): a git-ignored path is mirrored only when it
+sits at the repo root or inside a subtree git tracks nothing in. The three lists tune that rule:
+
+- `unsharedPaths` — when omitted, Kanban uses the built-in list shown above. When present it
+  **replaces** the built-in list, so a repo can keep sharing selected ignored paths such as
+  `node_modules`.
+- `additionalUnsharedPaths` — **extends** whichever list is in effect. Use this to add one artifact
+  name without silently dropping the dependency and build-cache defaults.
+- `sharedPaths` — repo-relative paths (a file, or a directory and everything under it) that are
+  always mirrored, even inside a tracked source tree. This is the escape hatch for local state a
+  generator cannot recreate, such as a per-app `.env.local`.
 
 **Global support:** kept out of the MVP but trivially added later — a `worktree.postCreateCommand` on
 `RuntimeGlobalConfigFileShape` used as a fallback when the project has none. The plumbing is
