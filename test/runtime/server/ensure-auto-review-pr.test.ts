@@ -67,6 +67,49 @@ describe("ensureAutoReviewPr", () => {
 		expect(calls.some((c) => c.tool === "gh" && c.args[1] === "create")).toBe(false);
 	});
 
+	it("given an open PR already exists for the card branch on another base, when ensuring, then it fails loudly instead of creating a duplicate", async () => {
+		// given
+		const { calls, runGit, runGh } = makeRunners({
+			gh: (args) =>
+				args[1] === "list"
+					? {
+							ok: true,
+							stdout: JSON.stringify([
+								{
+									url: "https://github.com/o/r/pull/7",
+									number: 7,
+									baseRefName: "main",
+								},
+							]),
+							stderr: "",
+						}
+					: { ok: true, stdout: "", stderr: "" },
+		});
+
+		// when
+		const result = await ensureAutoReviewPr(baseInput({ runGit, runGh }));
+
+		// then
+		expect(result.outcome).toBe("base_mismatch");
+		expect(result.prUrl).toBe("https://github.com/o/r/pull/7");
+		expect(result.detail).toContain("main");
+		expect(result.detail).toContain("production-line");
+		expect(calls.some((c) => c.tool === "gh" && c.args[1] === "create")).toBe(false);
+	});
+
+	it("given the base ref is missing, when ensuring, then it fails before gh can default to the repository base branch", async () => {
+		// given
+		const { calls, runGit, runGh } = makeRunners({});
+
+		// when
+		const result = await ensureAutoReviewPr(baseInput({ baseRef: "  ", runGit, runGh }));
+
+		// then
+		expect(result.outcome).toBe("base_ref_missing");
+		expect(result.detail).toContain("baseRef");
+		expect(calls).toEqual([]);
+	});
+
 	it("given no PR exists, when ensuring, then it creates one non-interactive PR against the base ref", async () => {
 		// given
 		const { calls, runGit, runGh } = makeRunners({

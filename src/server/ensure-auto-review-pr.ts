@@ -35,7 +35,14 @@ export type EnsureAutoReviewPrGhRunner = (
 	env: NodeJS.ProcessEnv,
 ) => Promise<EnsureAutoReviewPrCommandResult>;
 
-export type EnsureAutoReviewPrOutcome = "created" | "exists" | "push_failed" | "list_failed" | "create_failed";
+export type EnsureAutoReviewPrOutcome =
+	| "created"
+	| "exists"
+	| "base_mismatch"
+	| "base_ref_missing"
+	| "push_failed"
+	| "list_failed"
+	| "create_failed";
 
 export interface EnsureAutoReviewPrResult {
 	outcome: EnsureAutoReviewPrOutcome;
@@ -81,23 +88,32 @@ const defaultGhRunner: EnsureAutoReviewPrGhRunner = async (cwd, args, env) => {
 
 interface ParsedPrList {
 	parsed: boolean;
-	hasPr: boolean;
-	prUrl: string | null;
+	pullRequests: Array<{
+		prUrl: string | null;
+		number: number | null;
+		baseRefName: string | null;
+	}>;
 }
 
 function parseOpenPrList(prListJson: string): ParsedPrList {
 	try {
 		const value = JSON.parse(prListJson);
 		if (!Array.isArray(value)) {
-			return { parsed: false, hasPr: false, prUrl: null };
+			return { parsed: false, pullRequests: [] };
 		}
-		if (value.length === 0) {
-			return { parsed: true, hasPr: false, prUrl: null };
-		}
-		const first = value[0] as { url?: unknown };
-		return { parsed: true, hasPr: true, prUrl: typeof first.url === "string" ? first.url : null };
+		return {
+			parsed: true,
+			pullRequests: value.map((entry) => {
+				const candidate = entry as { url?: unknown; number?: unknown; baseRefName?: unknown };
+				return {
+					prUrl: typeof candidate.url === "string" ? candidate.url : null,
+					number: typeof candidate.number === "number" ? candidate.number : null,
+					baseRefName: typeof candidate.baseRefName === "string" ? candidate.baseRefName : null,
+				};
+			}),
+		};
 	} catch {
-		return { parsed: false, hasPr: false, prUrl: null };
+		return { parsed: false, pullRequests: [] };
 	}
 }
 
@@ -120,7 +136,17 @@ export async function ensureAutoReviewPr(input: EnsureAutoReviewPrInput): Promis
 	const runGit = input.runGit ?? defaultGitRunner;
 	const runGh = input.runGh ?? defaultGhRunner;
 	const ghEnv = input.gitEnv ?? {};
-	const { cwd, branch, baseRef } = input;
+	const { cwd, branch } = input;
+	const baseRef = input.baseRef.trim();
+
+	if (!baseRef) {
+		return {
+			outcome: "base_ref_missing",
+			branch,
+			prUrl: null,
+			detail: "auto-review PR cannot run because card baseRef is empty.",
+		};
+	}
 
 	// 1. Push the card branch (idempotent; "everything up-to-date" when already pushed).
 	const push = await runGit(cwd, ["push", "origin", branch]);
@@ -128,7 +154,7 @@ export async function ensureAutoReviewPr(input: EnsureAutoReviewPrInput): Promis
 	// 2. Does an open PR already exist for this head → base? The agent's own PR wins.
 	const listed = await runGh(
 		cwd,
-		["pr", "list", "--head", branch, "--base", baseRef, "--state", "open", "--json", "url,number"],
+		["pr", "list", "--head", branch, "--state", "open", "--json", "url,number,baseRefName"],
 		ghEnv,
 	);
 	if (!listed.ok) {
@@ -139,8 +165,19 @@ export async function ensureAutoReviewPr(input: EnsureAutoReviewPrInput): Promis
 		// Unparseable list output: do not risk a duplicate by creating blindly.
 		return { outcome: "list_failed", branch, prUrl: null, detail: listed.stdout };
 	}
-	if (openPr.hasPr) {
-		return { outcome: "exists", branch, prUrl: openPr.prUrl };
+	const matchingBasePr = openPr.pullRequests.find((pr) => pr.baseRefName === baseRef || pr.baseRefName === null);
+	if (matchingBasePr) {
+		return { outcome: "exists", branch, prUrl: matchingBasePr.prUrl };
+	}
+	const wrongBasePr = openPr.pullRequests[0];
+	if (wrongBasePr) {
+		const prLabel = wrongBasePr.number === null ? "An open PR" : `PR #${wrongBasePr.number}`;
+		return {
+			outcome: "base_mismatch",
+			branch,
+			prUrl: wrongBasePr.prUrl,
+			detail: `${prLabel} already exists for branch "${branch}" against base "${wrongBasePr.baseRefName ?? "unknown"}"; expected "${baseRef}". Refusing to create a second PR.`,
+		};
 	}
 
 	// No PR yet — but with a failed push there is no fresh remote branch to open against.
