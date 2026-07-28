@@ -219,6 +219,43 @@ describe("createHooksApi", () => {
 		expect(manager.transitionToRunning).toHaveBeenCalledTimes(1);
 	});
 
+	it("given a completed Review card, when an automatic to_in_progress hook arrives, then it stays dormant", async () => {
+		// given
+		const notifyTaskReadyForReview = vi.fn(async () => undefined);
+		const ensureAutoReviewPrForTask = vi.fn(async () => undefined);
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
+			transitionToReview: vi.fn(),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+			notifyTaskReadyForReview,
+			ensureAutoReviewPrForTask,
+		});
+
+		// when
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "to_in_progress",
+			metadata: { source: "claude", hookEventName: "UserPromptSubmit" },
+		});
+
+		// then
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToRunning).not.toHaveBeenCalled();
+		expect(manager.transitionToReview).not.toHaveBeenCalled();
+		expect(notifyTaskReadyForReview).not.toHaveBeenCalled();
+		expect(ensureAutoReviewPrForTask).not.toHaveBeenCalled();
+	});
+
 	it("captures a turn checkpoint when transitioning to review", async () => {
 		const transitionedSummary = createSummary({
 			state: "awaiting_review",

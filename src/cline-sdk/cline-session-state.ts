@@ -105,6 +105,7 @@ export function createDefaultSummary(taskId: string): RuntimeTaskSessionSummary 
 		warningMessage: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
+		lastReviewNotificationKey: null,
 	};
 }
 
@@ -169,7 +170,7 @@ export function isClineUserAttentionTool(toolName: string | null): boolean {
 }
 
 export function canReturnToRunning(reviewReason: RuntimeTaskSessionSummary["reviewReason"]): boolean {
-	return reviewReason === "attention" || reviewReason === "hook" || reviewReason === "error";
+	return reviewReason === "attention" || reviewReason === "needs_input";
 }
 
 export function latestAssistantMessageMatches(entry: ClineTaskSessionEntry, content: string): boolean {

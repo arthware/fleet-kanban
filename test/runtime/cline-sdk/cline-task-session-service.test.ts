@@ -1400,7 +1400,7 @@ describe("InMemoryClineTaskSessionService", () => {
 		});
 
 		expect(service.getSummary("task-1")?.state).toBe("awaiting_review");
-		expect(service.getSummary("task-1")?.reviewReason).toBe("hook");
+		expect(service.getSummary("task-1")?.reviewReason).toBe("attention");
 
 		runtime.emitAgentEvent(sessionId, {
 			type: "content_end",

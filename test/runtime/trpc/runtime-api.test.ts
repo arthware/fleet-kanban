@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeConfigState } from "../../../src/config/runtime-config";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
+import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 
 const agentRegistryMocks = vi.hoisted(() => ({
 	resolveAgentCommand: vi.fn(),
@@ -345,6 +346,198 @@ describe("createRuntimeApi startFreshHomeAgentSession", () => {
 		expect(clineTaskSessionService.stopTaskSession).toHaveBeenCalledWith(homeTaskId);
 		expect(terminalManager.startFreshHomeAgentSession).toHaveBeenCalledWith(homeTaskId);
 		expect(workspaceStateMocks.mutateWorkspaceState).toHaveBeenCalledWith("/tmp/repo", expect.any(Function));
+	});
+});
+
+describe("createRuntimeApi notifyTaskReadyForReview", () => {
+	beforeEach(() => {
+		workspaceStateMocks.loadWorkspaceState.mockReset();
+		workspaceStateMocks.listWorkspacesWithEpic.mockReset();
+		workspaceStateMocks.listWorkspacesWithEpic.mockResolvedValue([]);
+		workspaceStateMocks.loadWorkspaceContextById.mockReset();
+		workspaceStateMocks.mutateWorkspaceState.mockReset();
+	});
+
+	it("given a review notification key was already sent, when notifying again, then it suppresses the duplicate", async () => {
+		// given
+		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
+		const reviewKey = "review:task-1:turn-1";
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{
+						id: "review",
+						cards: [
+							{
+								id: "task-1",
+								title: "Fix review loop",
+								prompt: "Prompt body",
+								startInPlanMode: false,
+								autoReviewEnabled: true,
+								autoReviewMode: "pr",
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							},
+						],
+					},
+				],
+				dependencies: [],
+			},
+			sessions: {
+				"task-1": createSummary({
+					state: "awaiting_review",
+					reviewReason: "hook",
+					lastReviewNotificationKey: reviewKey,
+					latestTurnCheckpoint: {
+						turn: 1,
+						ref: "refs/kanban/checkpoints/task-1/turn/1",
+						commit: "abc1234",
+						createdAt: 1,
+					},
+				}),
+			},
+		});
+		const terminalManager = {
+			listSummaries: vi.fn(() => [
+				createSummary({
+					taskId: homeAgentTaskId,
+					agentSessionLifecycle: "attached",
+				}),
+			]),
+			refreshAgentSessionLifecycle: vi.fn(async (taskId: string) =>
+				createSummary({ taskId, agentSessionLifecycle: "attached" }),
+			),
+			writeInput: vi.fn(() => createSummary({ taskId: homeAgentTaskId })),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		// when
+		const response = await api.notifyTaskReadyForReview(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		// then
+		expect(response).toEqual({
+			ok: true,
+			taskId: "task-1",
+			homeAgentTaskId,
+			notified: false,
+			message: null,
+		});
+		expect(terminalManager.writeInput).not.toHaveBeenCalled();
+		expect(workspaceStateMocks.mutateWorkspaceState).not.toHaveBeenCalled();
+	});
+
+	it("given a review notification has not been sent, when notifying succeeds, then it records the review key", async () => {
+		// given
+		const homeAgentTaskId = createHomeAgentSessionId("workspace-1");
+		workspaceStateMocks.loadWorkspaceState.mockResolvedValue({
+			board: {
+				columns: [
+					{
+						id: "review",
+						cards: [
+							{
+								id: "task-1",
+								title: "Fix review loop",
+								prompt: "Prompt body",
+								startInPlanMode: false,
+								autoReviewEnabled: false,
+								baseRef: "main",
+								createdAt: 1,
+								updatedAt: 1,
+							},
+						],
+					},
+				],
+				dependencies: [],
+			},
+			sessions: {
+				"task-1": createSummary({
+					state: "awaiting_review",
+					reviewReason: "hook",
+					latestTurnCheckpoint: {
+						turn: 1,
+						ref: "refs/kanban/checkpoints/task-1/turn/1",
+						commit: "abc1234",
+						createdAt: 1,
+					},
+				}),
+			},
+		});
+		workspaceStateMocks.mutateWorkspaceState.mockImplementation(
+			async (
+				_workspacePath: string,
+				mutate: (state: { board: unknown; sessions: Record<string, RuntimeTaskSessionSummary> }) => unknown,
+			) =>
+				mutate({
+					board: {},
+					sessions: { "task-1": createSummary({ state: "awaiting_review", reviewReason: "hook" }) },
+				}),
+		);
+		const terminalManager = {
+			listSummaries: vi.fn(() => [
+				createSummary({
+					taskId: homeAgentTaskId,
+					agentSessionLifecycle: "attached",
+				}),
+			]),
+			refreshAgentSessionLifecycle: vi.fn(async (taskId: string) =>
+				createSummary({ taskId, agentSessionLifecycle: "attached" }),
+			),
+			writeInput: vi.fn(() => createSummary({ taskId: homeAgentTaskId })),
+		};
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+		});
+
+		// when
+		const response = await api.notifyTaskReadyForReview(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		// then
+		expect(response.notified).toBe(true);
+		expect(workspaceStateMocks.mutateWorkspaceState).toHaveBeenCalledWith("/tmp/repo", expect.any(Function));
+		const mutate = workspaceStateMocks.mutateWorkspaceState.mock.calls[0]?.[1];
+		expect(typeof mutate).toBe("function");
+		if (typeof mutate === "function") {
+			const result = mutate({
+				board: {},
+				sessions: {
+					"task-1": createSummary({
+						state: "awaiting_review",
+						reviewReason: "hook",
+						latestTurnCheckpoint: {
+							turn: 1,
+							ref: "refs/kanban/checkpoints/task-1/turn/1",
+							commit: "abc1234",
+							createdAt: 1,
+						},
+					}),
+				},
+			});
+			expect(result).toEqual(
+				expect.objectContaining({
+					sessions: expect.objectContaining({
+						"task-1": expect.objectContaining({ lastReviewNotificationKey: "review:task-1:turn-1" }),
+					}),
+				}),
+			);
+		}
 	});
 });
 

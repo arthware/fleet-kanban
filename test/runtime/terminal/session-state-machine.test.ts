@@ -98,6 +98,27 @@ describe("reduceSessionTransition", () => {
 		});
 	});
 
+	describe("human review dormancy", () => {
+		it("keeps a completed review card dormant when an automatic to_in_progress hook arrives", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "hook" });
+
+			const result = reduceSessionTransition(summary, { type: "hook.to_in_progress" });
+
+			expect(result.changed).toBe(false);
+			expect(result.patch).toEqual({});
+		});
+
+		it("wakes a completed review card when a human submits steering input", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "hook" });
+
+			const result = reduceSessionTransition(summary, { type: "human.input_submitted" });
+
+			expect(result.changed).toBe(true);
+			expect(result.patch.state).toBe("running");
+			expect(result.patch.reviewReason).toBeNull();
+		});
+	});
+
 	describe("isNeedsInputReviewHook", () => {
 		it("flags a permission-prompt notification as needs-input", () => {
 			expect(isNeedsInputReviewHook({ source: "claude", notificationType: "permission_prompt" })).toBe(true);

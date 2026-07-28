@@ -556,10 +556,11 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 		};
 		if (isUserAttentionTool && (entry.summary.state === "running" || entry.summary.state === "idle")) {
 			summaryPatch.state = "awaiting_review";
-			summaryPatch.reviewReason = "hook";
+			summaryPatch.reviewReason = "attention";
 		} else if (!isUserAttentionTool && canReturnToRunning(entry.summary.reviewReason)) {
 			summaryPatch.state = "running";
 			summaryPatch.reviewReason = null;
+			summaryPatch.lastReviewNotificationKey = null;
 		}
 		emitSummary(input, summaryPatch);
 		return;
@@ -599,6 +600,7 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 		if (isUserAttentionTool && canReturnToRunning(entry.summary.reviewReason)) {
 			summaryPatch.state = "running";
 			summaryPatch.reviewReason = null;
+			summaryPatch.lastReviewNotificationKey = null;
 		}
 		emitSummary(input, summaryPatch);
 		return;
@@ -633,10 +635,11 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 		};
 		if (isUserAttentionTool && (entry.summary.state === "running" || entry.summary.state === "idle")) {
 			summaryPatch.state = "awaiting_review";
-			summaryPatch.reviewReason = "hook";
+			summaryPatch.reviewReason = "attention";
 		} else if (!isUserAttentionTool && canReturnToRunning(entry.summary.reviewReason)) {
 			summaryPatch.state = "running";
 			summaryPatch.reviewReason = null;
+			summaryPatch.lastReviewNotificationKey = null;
 		}
 		emitSummary(input, summaryPatch);
 		return;
@@ -677,6 +680,7 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 		if (isUserAttentionTool && canReturnToRunning(entry.summary.reviewReason)) {
 			summaryPatch.state = "running";
 			summaryPatch.reviewReason = null;
+			summaryPatch.lastReviewNotificationKey = null;
 		}
 		emitSummary(input, summaryPatch);
 		return;

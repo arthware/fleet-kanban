@@ -37,13 +37,7 @@ function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event
 	if (event === "to_review") {
 		return summary.state === "running";
 	}
-	return (
-		summary.state === "awaiting_review" &&
-		(summary.reviewReason === "attention" ||
-			summary.reviewReason === "hook" ||
-			summary.reviewReason === "error" ||
-			summary.reviewReason === "needs_input")
-	);
+	return summary.state === "awaiting_review" && summary.reviewReason === "needs_input";
 }
 
 export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcContext["hooksApi"] {
