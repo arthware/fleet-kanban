@@ -332,6 +332,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				cleanupRuntimeStateClient(client);
 			} else {
 				responsiveClients.delete(client);
+				sendRuntimeStateMessage(client, { type: "heartbeat" });
 				try {
 					client.ping();
 				} catch {

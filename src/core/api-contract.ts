@@ -604,6 +604,11 @@ export type RuntimeStateStreamClineSessionContextUpdatedMessage = z.infer<
 	typeof runtimeStateStreamClineSessionContextUpdatedMessageSchema
 >;
 
+export const runtimeStateStreamHeartbeatMessageSchema = z.object({
+	type: z.literal("heartbeat"),
+});
+export type RuntimeStateStreamHeartbeatMessage = z.infer<typeof runtimeStateStreamHeartbeatMessageSchema>;
+
 export const runtimeStateStreamErrorMessageSchema = z.object({
 	type: z.literal("error"),
 	message: z.string(),
@@ -621,6 +626,7 @@ export const runtimeStateStreamMessageSchema = z.discriminatedUnion("type", [
 	runtimeStateStreamTaskChatClearedMessageSchema,
 	runtimeStateStreamMcpAuthUpdatedMessageSchema,
 	runtimeStateStreamClineSessionContextUpdatedMessageSchema,
+	runtimeStateStreamHeartbeatMessageSchema,
 	runtimeStateStreamErrorMessageSchema,
 ]);
 export type RuntimeStateStreamMessage = z.infer<typeof runtimeStateStreamMessageSchema>;

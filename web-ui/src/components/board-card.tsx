@@ -73,7 +73,9 @@ const DESCRIPTION_COLLAPSE_SUFFIX = `… ${DESCRIPTION_EXPAND_LABEL}`;
 // override can carry. An id absent here (another provider's, or a future
 // Claude model) falls back to the raw id rather than hiding it.
 const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+	"claude-opus-5": "Opus 5",
 	"claude-opus-4-8": "Opus 4.8",
+	"claude-fable-5": "Fable 5",
 	"claude-sonnet-5": "Sonnet 5",
 	"claude-haiku-4-5": "Haiku 4.5",
 };

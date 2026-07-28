@@ -450,6 +450,27 @@ describe("workspace state broadcast while metadata refresh is blocked", () => {
 });
 
 describe("server-side heartbeat liveness", () => {
+	it("given a connected client, when the heartbeat interval sweeps, then the server sends an observable heartbeat message", async () => {
+		const workspaceId = "workspace-heartbeat-message";
+		const workspacePath = "/tmp/workspace-heartbeat-message";
+		const stream = await setupWorkspaceStateStream({
+			workspaceId,
+			workspacePath,
+			board: emptyBoard(),
+			heartbeatIntervalMs: 50,
+		});
+
+		try {
+			const heartbeat = await waitForMessage(
+				stream.messages,
+				(message): message is RuntimeStateStreamMessage => message.type === "heartbeat",
+			);
+			expect(heartbeat).toEqual({ type: "heartbeat" });
+		} finally {
+			await stream.cleanup();
+		}
+	});
+
 	it("given a connected client that responds to pings, when the heartbeat interval sweeps, then the server keeps the client alive", async () => {
 		const workspaceId = "workspace-heartbeat-responsive";
 		const workspacePath = "/tmp/workspace-heartbeat-responsive";
