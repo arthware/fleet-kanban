@@ -337,23 +337,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 
-			const clineTaskSessionService = await deps.getScopedClineTaskSessionService(architectWorkspaceScope);
-			const terminalManager = await deps.getScopedTerminalManager(architectWorkspaceScope);
-			// Derive liveness from the real process/transcript (Phase 1) rather than trusting the
-			// persisted lifecycle: refresh each terminal summary before the architect lookup so
-			// `isAttached` reflects a live session, not a stale hydrated `attached` record.
-			const terminalSummaries = await Promise.all(
-				terminalManager.listSummaries().map(async (summary) => {
-					return (await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
-				}),
-			);
 			const homeAgentTaskId = resolveRunningHomeAgentTaskId({
 				architectWorkspaceId,
 				taskId: body.taskId,
-				summaries: [...clineTaskSessionService.listSummaries(), ...terminalSummaries],
-				isAttached: (summary) =>
-					clineTaskSessionService.hasActiveTaskSession(summary.taskId) ||
-					summary.agentSessionLifecycle === "attached",
 			});
 
 			if (!homeAgentTaskId) {

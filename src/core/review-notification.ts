@@ -29,19 +29,9 @@ export function hasReviewNotificationBeenSent(input: {
 	return summary?.lastReviewNotificationKey === buildTaskReviewNotificationKey(input);
 }
 
-export function resolveRunningHomeAgentTaskId(input: {
-	architectWorkspaceId: string;
-	taskId: string;
-	summaries: RuntimeTaskSessionSummary[];
-	isAttached: (summary: RuntimeTaskSessionSummary) => boolean;
-}): string | null {
+export function resolveRunningHomeAgentTaskId(input: { architectWorkspaceId: string; taskId: string }): string | null {
 	if (isHomeAgentSessionIdForWorkspace(input.taskId, input.architectWorkspaceId)) {
 		return null;
 	}
-	const architectHomeAgentTaskId = createHomeAgentSessionId(input.architectWorkspaceId);
-	const homeAgentSummary = input.summaries.find((summary) => summary.taskId === architectHomeAgentTaskId);
-	if (!homeAgentSummary || !input.isAttached(homeAgentSummary)) {
-		return null;
-	}
-	return architectHomeAgentTaskId;
+	return createHomeAgentSessionId(input.architectWorkspaceId);
 }
