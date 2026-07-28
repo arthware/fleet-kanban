@@ -154,6 +154,16 @@ function normalizeWorktreePostCreateFailureMode(value: unknown): RuntimeWorktree
 	return value === "block" || value === "warn" ? value : undefined;
 }
 
+function normalizeWorktreeUnsharedPaths(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	return value
+		.filter((path): path is string => typeof path === "string")
+		.map((path) => path.trim())
+		.filter((path) => path.length > 0);
+}
+
 function normalizeWorktreeConfig(value: unknown): RuntimeWorktreeConfig {
 	if (!value || typeof value !== "object") {
 		return {};
@@ -162,21 +172,25 @@ function normalizeWorktreeConfig(value: unknown): RuntimeWorktreeConfig {
 		postCreateCommand?: unknown;
 		postCreateTimeoutMs?: unknown;
 		postCreateFailureMode?: unknown;
+		unsharedPaths?: unknown;
 	};
 	const postCreateCommand = normalizeWorktreePostCreateCommand(candidate.postCreateCommand);
-	if (postCreateCommand === undefined) {
-		return {};
-	}
 	const postCreateTimeoutMs = normalizeWorktreePostCreateTimeoutMs(candidate.postCreateTimeoutMs);
 	const postCreateFailureMode = normalizeWorktreePostCreateFailureMode(candidate.postCreateFailureMode);
+	const unsharedPaths = normalizeWorktreeUnsharedPaths(candidate.unsharedPaths);
 	return {
-		postCreateCommand,
-		...(postCreateTimeoutMs !== undefined && postCreateTimeoutMs !== DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS
+		...(postCreateCommand !== undefined ? { postCreateCommand } : {}),
+		...(postCreateCommand !== undefined &&
+		postCreateTimeoutMs !== undefined &&
+		postCreateTimeoutMs !== DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS
 			? { postCreateTimeoutMs }
 			: {}),
-		...(postCreateFailureMode !== undefined && postCreateFailureMode !== DEFAULT_WORKTREE_POST_CREATE_FAILURE_MODE
+		...(postCreateCommand !== undefined &&
+		postCreateFailureMode !== undefined &&
+		postCreateFailureMode !== DEFAULT_WORKTREE_POST_CREATE_FAILURE_MODE
 			? { postCreateFailureMode }
 			: {}),
+		...(unsharedPaths !== undefined ? { unsharedPaths } : {}),
 	};
 }
 
@@ -370,14 +384,14 @@ async function writeRuntimeProjectConfigFile(
 ): Promise<void> {
 	const normalizedShortcuts = normalizeShortcuts(config.shortcuts);
 	const normalizedWorktree = normalizeWorktreeConfig(config.worktree);
-	const hasWorktreeHook = normalizedWorktree.postCreateCommand !== undefined;
+	const hasWorktreeConfig = Object.keys(normalizedWorktree).length > 0;
 	if (!configPath) {
-		if (normalizedShortcuts.length > 0 || hasWorktreeHook) {
+		if (normalizedShortcuts.length > 0 || hasWorktreeConfig) {
 			throw new Error("Cannot save project settings without a selected project.");
 		}
 		return;
 	}
-	if (normalizedShortcuts.length === 0 && !hasWorktreeHook) {
+	if (normalizedShortcuts.length === 0 && !hasWorktreeConfig) {
 		await rm(configPath, { force: true });
 		try {
 			await rm(dirname(configPath));
@@ -390,7 +404,7 @@ async function writeRuntimeProjectConfigFile(
 		configPath,
 		{
 			...(normalizedShortcuts.length > 0 ? { shortcuts: normalizedShortcuts } : {}),
-			...(hasWorktreeHook ? { worktree: normalizedWorktree } : {}),
+			...(hasWorktreeConfig ? { worktree: normalizedWorktree } : {}),
 		} satisfies RuntimeProjectConfigFileShape,
 		{
 			lock: null,
@@ -539,7 +553,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 		if (
 			projectConfigPath === null &&
 			(normalizeShortcuts(updates.shortcuts).length > 0 ||
-				normalizeWorktreeConfig(updates.worktree).postCreateCommand !== undefined)
+				Object.keys(normalizeWorktreeConfig(updates.worktree)).length > 0)
 		) {
 			throw new Error("Cannot save project settings without a selected project.");
 		}

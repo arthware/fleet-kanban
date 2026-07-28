@@ -1197,6 +1197,7 @@ export const runtimeWorktreeConfigSchema = z.object({
 	postCreateCommand: z.union([z.string(), z.array(z.string())]).optional(),
 	postCreateTimeoutMs: z.number().int().positive().optional(),
 	postCreateFailureMode: runtimeWorktreePostCreateFailureModeSchema.optional(),
+	unsharedPaths: z.array(z.string()).optional(),
 });
 export type RuntimeWorktreeConfig = z.infer<typeof runtimeWorktreeConfigSchema>;
 

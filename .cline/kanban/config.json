@@ -10,5 +10,21 @@
       "command": "node scripts/dev-full.mjs",
       "icon": "play"
     }
-  ]
+  ],
+  "worktree": {
+    "unsharedPaths": [
+      "dist",
+      "build",
+      "out",
+      ".next",
+      ".turbo",
+      ".cache",
+      ".vite",
+      ".parcel-cache",
+      ".svelte-kit",
+      ".nuxt",
+      ".output",
+      "*.tsbuildinfo"
+    ]
+  }
 }

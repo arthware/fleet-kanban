@@ -435,7 +435,7 @@ describe.sequential("task-worktree serialization", () => {
 
 			expect(ensured.ok).toBe(true);
 			expect(worktreePostCreateHookMocks.runWorktreePostCreateHook).not.toHaveBeenCalled();
-			expect(runtimeConfigMocks.loadRuntimeConfig).not.toHaveBeenCalled();
+			expect(runtimeConfigMocks.loadRuntimeConfig).toHaveBeenCalledWith(repoPath);
 		} finally {
 			cleanup();
 		}

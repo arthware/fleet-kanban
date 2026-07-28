@@ -18,7 +18,7 @@ import {
 } from "./durable-save";
 import { getGitCommandErrorMessage, getGitStdout, readGitHeadInfo, runGit } from "./git-utils";
 import { getWorkspaceFolderLabelForWorktreePath, normalizeTaskIdForWorktreePath } from "./task-worktree-path";
-import { listTurbopackNodeModulesSymlinkSkipPaths } from "./task-worktree-turbopack";
+import { DEFAULT_WORKTREE_UNSHARED_PATHS, shouldKeepPathUnsharedInWorktree } from "./task-worktree-unshared-paths";
 import { runWorktreePostCreateHook } from "./worktree-post-create-hook";
 
 const KANBAN_MANAGED_EXCLUDE_BLOCK_START = "# kanban-managed-symlinked-ignored-paths:start";
@@ -479,11 +479,14 @@ async function syncIgnoredPathsIntoWorktree(
 	worktreePath: string,
 	skillsRelativePath: string = WORKTREE_SKILLS_RELATIVE_PATH,
 ): Promise<void> {
+	const runtimeConfig = await loadRuntimeConfig(repoPath);
+	const unsharedPaths = runtimeConfig.worktree.unsharedPaths ?? DEFAULT_WORKTREE_UNSHARED_PATHS;
 	const ignoredPaths = getUniquePaths(await listIgnoredPaths(repoPath)).filter(
 		(relativePath) => !shouldSkipSymlink(relativePath),
 	);
-	const turbopackNodeModulesSkipPaths = new Set(await listTurbopackNodeModulesSymlinkSkipPaths(repoPath));
-	const mirroredIgnoredPaths = ignoredPaths.filter((relativePath) => !turbopackNodeModulesSkipPaths.has(relativePath));
+	const mirroredIgnoredPaths = ignoredPaths.filter(
+		(relativePath) => !shouldKeepPathUnsharedInWorktree(relativePath, unsharedPaths),
+	);
 	const managedExcludePaths = getUniquePaths([...mirroredIgnoredPaths, skillsRelativePath]);
 
 	await syncManagedIgnoredPathExcludes(repoPath, managedExcludePaths);
@@ -727,8 +730,8 @@ export async function ensureTaskWorktreeIfDoesntExist(options: {
 		const taskId = normalizeTaskIdForWorktreePath(options.taskId);
 		const worktreePath = getTaskWorktreePath(context.repoPath, taskId);
 		// Skill placement follows the card's resolved agent; callers pass it in.
-		// Resolving it here would drag a config read onto the existing-worktree
-		// re-sync hot path, so we keep this pure and default to .agents/skills.
+		// Resolving it here would make skills placement depend on the mutable
+		// workspace default instead of the card's resolved agent.
 		const skillsRelativePath = resolveWorktreeSkillsRelativePath(options.agentId);
 		// Investigation note: ensure is called on every task start. The previous implementation
 		// compared the worktree HEAD to the latest baseRef commit and recreated the worktree

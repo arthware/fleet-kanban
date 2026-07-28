@@ -21,6 +21,10 @@ function expectMirroredPathBehavior(path: string): void {
 	expect(lstatSync(path).isSymbolicLink()).toBe(true);
 }
 
+function expectUnsharedPathBehavior(path: string): void {
+	expect(existsSync(path)).toBe(false);
+}
+
 function runGit(cwd: string, args: string[]): string {
 	const result = spawnSync("git", args, {
 		cwd,
@@ -508,25 +512,49 @@ describe.sequential("task-worktree integration", () => {
 		});
 	});
 
-	it("keeps symlinked directory-only ignored paths ignored in task worktrees", async () => {
+	it("given default unshared artifact paths are ignored, when a task worktree is created, then artifacts stay local and .env is still linked", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-root-ignore-");
 			try {
 				const repoPath = join(sandboxRoot, "repo");
+				const packagePath = join(repoPath, "packages", "core-model");
 				mkdirSync(repoPath, { recursive: true });
+				mkdirSync(packagePath, { recursive: true });
 
 				runGit(repoPath, ["init"]);
 				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
 				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
 
 				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
-				writeFileSync(join(repoPath, ".gitignore"), "/.next/\n/node_modules/\n", "utf8");
+				writeFileSync(
+					join(repoPath, ".gitignore"),
+					[
+						"/node_modules/",
+						"/dist/",
+						"/.next/",
+						"/.turbo/",
+						"*.tsbuildinfo",
+						"/packages/core-model/node_modules/",
+						".env",
+						"",
+					].join("\n"),
+					"utf8",
+				);
+				writeFileSync(join(repoPath, ".env"), "TOKEN=fixture\n", "utf8");
+				writeFileSync(join(repoPath, "tsconfig.tsbuildinfo"), "info\n", "utf8");
+				writeFileSync(join(packagePath, "package.json"), '{\n  "name": "core-model"\n}\n', "utf8");
 				mkdirSync(join(repoPath, ".next"), { recursive: true });
+				mkdirSync(join(repoPath, ".turbo"), { recursive: true });
+				mkdirSync(join(repoPath, "dist"), { recursive: true });
 				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
+				mkdirSync(join(packagePath, "node_modules"), { recursive: true });
 				writeFileSync(join(repoPath, ".next", "BUILD_ID"), "build\n", "utf8");
+				writeFileSync(join(repoPath, ".turbo", "run.log"), "log\n", "utf8");
+				writeFileSync(join(repoPath, "dist", "cli.js"), "build\n", "utf8");
 				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "fixture"\n}\n', "utf8");
+				writeFileSync(join(packagePath, "node_modules", "package.json"), '{\n  "name": "nested"\n}\n', "utf8");
 
-				runGit(repoPath, ["add", "README.md", ".gitignore"]);
+				runGit(repoPath, ["add", "README.md", ".gitignore", "packages/core-model/package.json"]);
 				runGit(repoPath, ["commit", "-m", "init"]);
 
 				const ensured = await ensureTaskWorktreeIfDoesntExist({
@@ -539,17 +567,29 @@ describe.sequential("task-worktree integration", () => {
 					throw new Error("Task worktree was not created");
 				}
 
+				const envPath = join(ensured.path, ".env");
 				const nextPath = join(ensured.path, ".next");
+				const turboPath = join(ensured.path, ".turbo");
+				const distPath = join(ensured.path, "dist");
 				const nodeModulesPath = join(ensured.path, "node_modules");
-				expectMirroredPathBehavior(nextPath);
-				expectMirroredPathBehavior(nodeModulesPath);
+				const nestedNodeModulesPath = join(ensured.path, "packages", "core-model", "node_modules");
+				const tsbuildinfoPath = join(ensured.path, "tsconfig.tsbuildinfo");
+				expectMirroredPathBehavior(envPath);
+				expectUnsharedPathBehavior(nextPath);
+				expectUnsharedPathBehavior(turboPath);
+				expectUnsharedPathBehavior(distPath);
+				expectUnsharedPathBehavior(nodeModulesPath);
+				expectUnsharedPathBehavior(nestedNodeModulesPath);
+				expectUnsharedPathBehavior(tsbuildinfoPath);
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".env"])).toBe("");
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".next"])).toBe("");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".turbo"])).toBe("");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", "dist"])).toBe("");
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", "node_modules"])).toBe("");
-				if (existsSync(nextPath)) {
-					expect(runGit(ensured.path, ["check-ignore", "-v", ".next"])).toContain("info/exclude");
-				}
-				if (existsSync(nodeModulesPath)) {
-					expect(runGit(ensured.path, ["check-ignore", "-v", "node_modules"])).toContain("info/exclude");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", "packages/core-model/node_modules"])).toBe("");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", "tsconfig.tsbuildinfo"])).toBe("");
+				if (existsSync(envPath)) {
+					expect(runGit(ensured.path, ["check-ignore", "-v", ".env"])).toContain(".env");
 				}
 			} finally {
 				cleanup();
@@ -557,9 +597,9 @@ describe.sequential("task-worktree integration", () => {
 		});
 	});
 
-	it("skips symlinking root node_modules for root Next apps without a next config file", async () => {
+	it("given a repo-defined unshared list, when a task worktree is ensured twice, then that list replaces the default on every sync", async () => {
 		await withTemporaryHome(async () => {
-			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-root-turbopack-");
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-configured-unshared-");
 			try {
 				const repoPath = join(sandboxRoot, "repo");
 				mkdirSync(repoPath, { recursive: true });
@@ -569,23 +609,25 @@ describe.sequential("task-worktree integration", () => {
 				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
 
 				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				writeFileSync(join(repoPath, ".gitignore"), "/node_modules/\n/generated/\n.env\n", "utf8");
+				mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
 				writeFileSync(
-					join(repoPath, "package.json"),
-					'{\n  "dependencies": {\n    "next": "15.0.0"\n  },\n  "scripts": {\n    "dev": "next dev"\n  }\n}\n',
+					join(repoPath, ".cline", "kanban", "config.json"),
+					JSON.stringify({ worktree: { unsharedPaths: ["generated"] } }, null, 2),
 					"utf8",
 				);
-				writeFileSync(join(repoPath, ".gitignore"), "/.next/\n/node_modules/\n", "utf8");
-				mkdirSync(join(repoPath, ".next"), { recursive: true });
+				writeFileSync(join(repoPath, ".env"), "TOKEN=fixture\n", "utf8");
+				mkdirSync(join(repoPath, "generated"), { recursive: true });
 				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
-				writeFileSync(join(repoPath, ".next", "BUILD_ID"), "build\n", "utf8");
+				writeFileSync(join(repoPath, "generated", "client.ts"), "build\n", "utf8");
 				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "fixture"\n}\n', "utf8");
 
-				runGit(repoPath, ["add", "README.md", "package.json", ".gitignore"]);
+				runGit(repoPath, ["add", "README.md", ".gitignore", ".cline/kanban/config.json"]);
 				runGit(repoPath, ["commit", "-m", "init"]);
 
 				const ensured = await ensureTaskWorktreeIfDoesntExist({
 					cwd: repoPath,
-					taskId: "task-root-turbopack",
+					taskId: "task-configured-unshared",
 					baseRef: "HEAD",
 				});
 				expect(ensured.ok).toBe(true);
@@ -593,65 +635,24 @@ describe.sequential("task-worktree integration", () => {
 					throw new Error("Task worktree was not created");
 				}
 
-				const nextPath = join(ensured.path, ".next");
+				const envPath = join(ensured.path, ".env");
+				const generatedPath = join(ensured.path, "generated");
 				const nodeModulesPath = join(ensured.path, "node_modules");
-				expectMirroredPathBehavior(nextPath);
-				expect(existsSync(nodeModulesPath)).toBe(false);
-				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".next"])).toBe("");
+				expectMirroredPathBehavior(envPath);
+				expectUnsharedPathBehavior(generatedPath);
+				expectMirroredPathBehavior(nodeModulesPath);
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".env"])).toBe("");
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", "generated"])).toBe("");
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", "node_modules"])).toBe("");
-			} finally {
-				cleanup();
-			}
-		});
-	});
 
-	it("skips only nested Turbopack app node_modules while keeping root node_modules symlinked", async () => {
-		await withTemporaryHome(async () => {
-			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-nested-turbopack-");
-			try {
-				const repoPath = join(sandboxRoot, "repo");
-				const appPath = join(repoPath, "apps", "web");
-				mkdirSync(appPath, { recursive: true });
-
-				runGit(repoPath, ["init"]);
-				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
-				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
-
-				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
-				writeFileSync(join(repoPath, "package.json"), '{\n  "private": true\n}\n', "utf8");
-				writeFileSync(
-					join(appPath, "package.json"),
-					'{\n  "dependencies": {\n    "next": "15.0.0"\n  },\n  "scripts": {\n    "dev": "next dev --turbopack"\n  }\n}\n',
-					"utf8",
-				);
-				writeFileSync(join(repoPath, ".gitignore"), "/node_modules/\n/apps/web/node_modules/\n", "utf8");
-				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
-				mkdirSync(join(appPath, "node_modules"), { recursive: true });
-				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "root-fixture"\n}\n', "utf8");
-				writeFileSync(join(appPath, "node_modules", "package.json"), '{\n  "name": "app-fixture"\n}\n', "utf8");
-
-				runGit(repoPath, ["add", "README.md", "package.json", "apps/web/package.json", ".gitignore"]);
-				runGit(repoPath, ["commit", "-m", "init"]);
-
-				const ensured = await ensureTaskWorktreeIfDoesntExist({
+				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
 					cwd: repoPath,
-					taskId: "task-nested-turbopack",
+					taskId: "task-configured-unshared",
 					baseRef: "HEAD",
 				});
-				expect(ensured.ok).toBe(true);
-				if (!ensured.ok || !ensured.path) {
-					throw new Error("Task worktree was not created");
-				}
-
-				const rootNodeModulesPath = join(ensured.path, "node_modules");
-				const appNodeModulesPath = join(ensured.path, "apps", "web", "node_modules");
-				expectMirroredPathBehavior(rootNodeModulesPath);
-				expect(existsSync(appNodeModulesPath)).toBe(false);
-				expect(runGit(ensured.path, ["status", "--porcelain", "--", "node_modules"])).toBe("");
-				expect(runGit(ensured.path, ["status", "--porcelain", "--", "apps/web/node_modules"])).toBe("");
-				if (existsSync(rootNodeModulesPath)) {
-					expect(runGit(ensured.path, ["check-ignore", "-v", "node_modules"])).toContain("info/exclude");
-				}
+				expect(ensuredAgain.ok).toBe(true);
+				expectUnsharedPathBehavior(generatedPath);
+				expectMirroredPathBehavior(nodeModulesPath);
 			} finally {
 				cleanup();
 			}
