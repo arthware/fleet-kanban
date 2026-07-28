@@ -55,6 +55,19 @@ const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
 type CreateSymlink = (target: string, path: string, type: "dir" | "file") => Promise<void>;
 type WorktreeSkillsPlacementStatus = "linked" | "existing" | "missing_canonical" | "fallback_created" | "skipped";
 
+export interface ArchivedTaskWorktreeCleanupResult {
+	taskId: string;
+	removed: boolean;
+	staleRegistrationPruned?: boolean;
+	discardedStatus?: TaskWorkDurabilityAssessment["status"];
+	discardedDetail?: string;
+	error?: string;
+}
+
+export interface ArchivedTaskWorktreeCleanupSummary {
+	cleaned: ArchivedTaskWorktreeCleanupResult[];
+}
+
 interface WorktreeSkillsFs {
 	lstat: typeof lstat;
 	mkdir: typeof mkdir;
@@ -655,6 +668,29 @@ async function removeTaskWorktreeInternal(repoPath: string, worktreePath: string
 	return existed;
 }
 
+function parseGitWorktreeListPaths(output: string): string[] {
+	return output
+		.split("\n")
+		.filter((line) => line.startsWith("worktree "))
+		.map((line) => line.slice("worktree ".length).trim())
+		.filter((path) => path.length > 0);
+}
+
+async function listRegisteredGitWorktreePaths(repoPath: string): Promise<Set<string>> {
+	const result = await runGit(repoPath, ["worktree", "list", "--porcelain"]);
+	return new Set(result.ok ? parseGitWorktreeListPaths(result.stdout) : []);
+}
+
+async function pruneStaleTaskWorktreeRegistration(repoPath: string, worktreePath: string): Promise<boolean> {
+	const registeredBefore = await listRegisteredGitWorktreePaths(repoPath);
+	if (!registeredBefore.has(worktreePath)) {
+		return false;
+	}
+	await runGit(repoPath, ["worktree", "prune"]);
+	const registeredAfter = await listRegisteredGitWorktreePaths(repoPath);
+	return !registeredAfter.has(worktreePath);
+}
+
 async function pruneEmptyParents(rootPath: string, fromPath: string): Promise<void> {
 	let current = fromPath;
 	while (current.startsWith(rootPath) && current !== rootPath) {
@@ -881,12 +917,24 @@ export async function deleteTaskWorktree(options: {
 		const rootPath = getWorktreesBaseRootPath();
 		const worktreePath = getTaskWorktreePath(options.repoPath, taskId);
 		if (!(await pathExists(worktreePath))) {
+			const staleRegistrationPruned = await pruneStaleTaskWorktreeRegistration(options.repoPath, worktreePath);
 			await deleteTaskPatchFiles(taskId);
 			await pruneEmptyParents(rootPath, dirname(worktreePath));
 			return {
 				ok: true,
 				removed: false,
+				...(staleRegistrationPruned ? { staleRegistrationPruned } : {}),
 			};
+		}
+
+		let durability: TaskWorkDurabilityAssessment | undefined;
+		if (options.baseRef !== undefined) {
+			durability = await assessTaskWorkDurability({
+				worktreePath,
+				worktreeExists: true,
+				baseRef: options.baseRef,
+				mode: options.mode ?? "commit",
+			});
 		}
 
 		// Durability gate: this is the single choke point both the CLI (`task
@@ -895,13 +943,7 @@ export async function deleteTaskWorktree(options: {
 		// card only reaches Done when its work is committed and landed/merged. See
 		// the incident in durable-save.ts: a card stalled at a `git commit` prompt
 		// was advanced to Done and its worktree deleted, throwing away real work.
-		if (options.baseRef !== undefined && options.discard !== true) {
-			const durability = await assessTaskWorkDurability({
-				worktreePath,
-				worktreeExists: true,
-				baseRef: options.baseRef,
-				mode: options.mode ?? "commit",
-			});
+		if (durability && options.discard !== true) {
 			if (!durability.durable) {
 				return {
 					ok: false,
@@ -925,10 +967,18 @@ export async function deleteTaskWorktree(options: {
 		}
 		const removed = await removeTaskWorktreeInternal(options.repoPath, worktreePath);
 		await pruneEmptyParents(rootPath, dirname(worktreePath));
+		const discardedDurability = durability && !durability.durable ? durability : null;
 
 		return {
 			ok: true,
 			removed,
+			...(discardedDurability
+				? {
+						durability: discardedDurability,
+						discardedStatus: discardedDurability.status,
+						discardedDetail: discardedDurability.detail,
+					}
+				: {}),
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -938,6 +988,38 @@ export async function deleteTaskWorktree(options: {
 			error: message,
 		};
 	}
+}
+
+export async function deleteArchivedTaskWorktrees(options: {
+	repoPath: string;
+	taskIds: string[];
+	baseRefByTaskId?: Record<string, string | undefined>;
+}): Promise<ArchivedTaskWorktreeCleanupSummary> {
+	const cleaned: ArchivedTaskWorktreeCleanupResult[] = [];
+	const seenTaskIds = new Set<string>();
+	for (const rawTaskId of options.taskIds) {
+		const taskId = rawTaskId.trim();
+		if (!taskId || seenTaskIds.has(taskId)) {
+			continue;
+		}
+		seenTaskIds.add(taskId);
+		const deleted = await deleteTaskWorktree({
+			repoPath: options.repoPath,
+			taskId,
+			baseRef: options.baseRefByTaskId?.[taskId],
+			mode: "pr",
+			discard: true,
+		});
+		cleaned.push({
+			taskId,
+			removed: deleted.removed,
+			...(deleted.staleRegistrationPruned ? { staleRegistrationPruned: true } : {}),
+			...(deleted.discardedStatus ? { discardedStatus: deleted.discardedStatus } : {}),
+			...(deleted.discardedDetail ? { discardedDetail: deleted.discardedDetail } : {}),
+			...(deleted.ok ? {} : { error: deleted.error ?? "Could not delete archived task worktree." }),
+		});
+	}
+	return { cleaned };
 }
 
 export async function resolveTaskCwd(options: {

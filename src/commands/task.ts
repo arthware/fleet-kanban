@@ -647,13 +647,23 @@ async function stopTaskRuntimeSession(
 async function deleteTaskWorkspace(
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>,
 	taskId: string,
-): Promise<{ removed: boolean; error?: string }> {
+): Promise<{
+	removed: boolean;
+	staleRegistrationPruned?: boolean;
+	discardedStatus?: string;
+	discardedDetail?: string;
+	error?: string;
+}> {
 	try {
 		const deleted = await runtimeClient.workspace.deleteWorktree.mutate({
 			taskId,
+			discard: true,
 		});
 		return {
 			removed: deleted.removed,
+			...(deleted.staleRegistrationPruned ? { staleRegistrationPruned: true } : {}),
+			...(deleted.discardedStatus ? { discardedStatus: deleted.discardedStatus } : {}),
+			...(deleted.discardedDetail ? { discardedDetail: deleted.discardedDetail } : {}),
 			error: deleted.ok ? undefined : deleted.error,
 		};
 	} catch (error) {
@@ -1261,6 +1271,9 @@ interface TrashTaskExecutionResult {
 	readyTaskIds: string[];
 	autoStartedTasks: JsonRecord[];
 	worktreeDeleted: boolean;
+	worktreeStaleRegistrationPruned?: boolean;
+	worktreeDiscardedStatus?: string;
+	worktreeDiscardedDetail?: string;
 	worktreeDeleteError?: string;
 	alreadyInTrash: boolean;
 }
@@ -1458,6 +1471,9 @@ async function trashTaskById(input: {
 		readyTaskIds: [],
 		autoStartedTasks: [],
 		worktreeDeleted: deletedWorkspace.removed,
+		...(deletedWorkspace.staleRegistrationPruned ? { worktreeStaleRegistrationPruned: true } : {}),
+		...(deletedWorkspace.discardedStatus ? { worktreeDiscardedStatus: deletedWorkspace.discardedStatus } : {}),
+		...(deletedWorkspace.discardedDetail ? { worktreeDiscardedDetail: deletedWorkspace.discardedDetail } : {}),
 		worktreeDeleteError: deletedWorkspace.error,
 		alreadyInTrash: false,
 	};
@@ -1580,6 +1596,9 @@ async function trashTask(input: {
 			readyTaskIds: trashed.readyTaskIds,
 			autoStartedTasks: trashed.autoStartedTasks,
 			worktreeDeleted: trashed.worktreeDeleted,
+			worktreeStaleRegistrationPruned: trashed.worktreeStaleRegistrationPruned,
+			worktreeDiscardedStatus: trashed.worktreeDiscardedStatus,
+			worktreeDiscardedDetail: trashed.worktreeDiscardedDetail,
 			worktreeDeleteError: trashed.worktreeDeleteError,
 		};
 	}
@@ -1627,6 +1646,9 @@ async function trashTask(input: {
 		worktreeCleanup: trashedTasks.map((result) => ({
 			taskId: result.taskId,
 			removed: result.worktreeDeleted,
+			staleRegistrationPruned: result.worktreeStaleRegistrationPruned,
+			discardedStatus: result.worktreeDiscardedStatus,
+			discardedDetail: result.worktreeDiscardedDetail,
 			error: result.worktreeDeleteError,
 		})),
 		count: trashedTasks.length,

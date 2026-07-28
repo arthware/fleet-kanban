@@ -14,6 +14,7 @@ import { parseHomeAgentSessionId } from "../core/home-agent-session";
 import {
 	getWorkspaceEpic,
 	listWorkspaceIndexEntries,
+	loadWorkspaceArchivedBoardById,
 	loadWorkspaceBoardById,
 	loadWorkspaceContext,
 	loadWorkspaceState,
@@ -25,6 +26,7 @@ import {
 import { locateAgentTranscript } from "../terminal/agent-transcript-locator";
 import { deriveHomeAgentClaudeSessionId } from "../terminal/home-agent-session-id";
 import { TerminalSessionManager } from "../terminal/session-manager";
+import { deleteArchivedTaskWorktrees } from "../workspace/task-worktree";
 import { selectArchitectAwareProjects } from "./architect-workspace";
 
 export interface WorkspaceRegistryScope {
@@ -195,6 +197,24 @@ function toProjectSummary(project: {
 	};
 }
 
+async function reconcileArchivedTaskWorktrees(): Promise<void> {
+	const indexedWorkspaces = await listWorkspaceIndexEntries();
+	await Promise.all(
+		indexedWorkspaces.map(async (workspace) => {
+			const archive = await loadWorkspaceArchivedBoardById(workspace.workspaceId);
+			const archivedCards = archive.columns.find((column) => column.id === "trash")?.cards ?? [];
+			if (archivedCards.length === 0) {
+				return;
+			}
+			await deleteArchivedTaskWorktrees({
+				repoPath: workspace.repoPath,
+				taskIds: archivedCards.map((card) => card.id),
+				baseRefByTaskId: Object.fromEntries(archivedCards.map((card) => [card.id, card.baseRef])),
+			});
+		}),
+	);
+}
+
 export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDependencies): Promise<WorkspaceRegistry> {
 	// The git probe must never be able to crash a reconnect. A well-behaved probe
 	// already reports `unknown` on failure; this guard makes even a throwing probe
@@ -210,6 +230,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 	const launchedFromGitRepo = probeGitRepository(deps.cwd) === "yes";
 	const initialWorkspace = launchedFromGitRepo ? await loadWorkspaceContext(deps.cwd) : null;
 	await migrateAllWorkspaceTrashToArchive();
+	await reconcileArchivedTaskWorktrees();
 	await migrateAllWorkspaceAgentSessions();
 	let indexedWorkspace: RuntimeWorkspaceIndexEntry | null = null;
 	if (!initialWorkspace) {
