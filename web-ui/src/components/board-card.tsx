@@ -191,6 +191,12 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 	if (!summary) {
 		return null;
 	}
+	if (summary.warningMessage && summary.state === "idle") {
+		return {
+			dotColor: SESSION_ACTIVITY_COLOR.warning,
+			text: summary.warningMessage.trim(),
+		};
+	}
 	if (isCardCreditLimitError(summary)) {
 		return { dotColor: SESSION_ACTIVITY_COLOR.warning, text: "Out of credits" };
 	}

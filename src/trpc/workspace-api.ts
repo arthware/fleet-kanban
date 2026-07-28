@@ -27,6 +27,7 @@ import {
 import { deriveTaskBranchName } from "../core/task-ref";
 import {
 	loadWorkspaceArchivedBoardById,
+	mutateWorkspaceState,
 	restoreArchivedWorkspaceTask,
 	saveWorkspaceState,
 	WorkspaceStateConflictError,
@@ -373,7 +374,7 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 			// claude card resolves to .claude/skills; codex and others to .agents/skills.
 			const effectiveAgentId =
 				card?.agentId ?? (await loadRuntimeConfig(workspaceScope.workspacePath)).selectedAgentId;
-			return await ensureTaskWorktreeIfDoesntExist({
+			const response = await ensureTaskWorktreeIfDoesntExist({
 				cwd: workspaceScope.workspacePath,
 				taskId: body.taskId,
 				workspaceId: workspaceScope.workspaceId,
@@ -388,6 +389,53 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 						})
 					: undefined,
 			});
+
+			if (response.ok) {
+				await mutateWorkspaceState(workspaceScope.workspacePath, (state) => {
+					const existing = state.sessions[body.taskId];
+					const warningMessage = response.warning ?? null;
+					if (existing) {
+						return {
+							board: state.board,
+							sessions: {
+								...state.sessions,
+								[body.taskId]: {
+									...existing,
+									warningMessage,
+								},
+							},
+							value: null,
+						};
+					}
+					const placeholderSummary: RuntimeTaskSessionSummary = {
+						taskId: body.taskId,
+						state: "idle",
+						agentId: effectiveAgentId,
+						workspacePath: response.path,
+						pid: null,
+						startedAt: null,
+						updatedAt: Date.now(),
+						lastOutputAt: null,
+						reviewReason: null,
+						exitCode: null,
+						warningMessage,
+						agentSessionId: null,
+						lastHookAt: null,
+						latestHookActivity: null,
+					};
+					return {
+						board: state.board,
+						sessions: {
+							...state.sessions,
+							[body.taskId]: placeholderSummary,
+						},
+						value: null,
+					};
+				});
+				await deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
+			}
+
+			return response;
 		},
 		deleteWorktree: async (workspaceScope, input) => {
 			const body = parseWorktreeDeleteRequest(input);

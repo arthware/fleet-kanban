@@ -615,16 +615,47 @@ async function runWorktreePreparation(options: {
 	baseRef: string;
 	skillsRelativePath: string;
 }): Promise<{ warning?: string }> {
-	await initializeSubmodulesIfNeeded(options.worktreePath);
+	let warning: string | undefined;
+
+	// 1. Initialize submodules if needed (Isolated / Non-fatal)
+	try {
+		await initializeSubmodulesIfNeeded(options.worktreePath);
+	} catch (error) {
+		const errMsg = error instanceof Error ? error.message : String(error);
+		const subWarning = `Git submodule initialization failed: ${errMsg}`;
+		LOGGER.log("Git submodule initialization failed.", {
+			severity: "warn",
+			taskId: options.taskId,
+			warning: subWarning,
+		});
+		warning = appendWorktreeWarning(warning, subWarning);
+	}
+
+	// 2. Sync ignored paths (Fatal)
 	await syncIgnoredPathsIntoWorktree(options.repoPath, options.worktreePath, options.skillsRelativePath);
-	await ensureWorktreeSkillsDirectory({
-		worktreePath: options.worktreePath,
-		skillsRelativePath: options.skillsRelativePath,
-	});
+
+	// 3. Ensure worktree skills directory (Isolated / Non-fatal)
+	try {
+		await ensureWorktreeSkillsDirectory({
+			worktreePath: options.worktreePath,
+			skillsRelativePath: options.skillsRelativePath,
+		});
+	} catch (error) {
+		const errMsg = error instanceof Error ? error.message : String(error);
+		const skillsWarning = `Failed to ensure worktree skills directory: ${errMsg}`;
+		LOGGER.log("Failed to ensure worktree skills directory.", {
+			severity: "warn",
+			taskId: options.taskId,
+			warning: skillsWarning,
+		});
+		warning = appendWorktreeWarning(warning, skillsWarning);
+	}
+
+	// 4. Load runtime config and run post-create hook (Non-fatal unless postCreateFailureMode === "block")
 	const runtimeConfig = await loadRuntimeConfig(options.repoPath);
 	const hook = runtimeConfig.worktree;
 	if (hook.postCreateCommand === undefined) {
-		return {};
+		return { warning };
 	}
 	const result = await runWorktreePostCreateHook(hook, {
 		taskId: options.taskId,
@@ -640,17 +671,18 @@ async function runWorktreePreparation(options: {
 				outputTail: result.outputTail.trim(),
 			});
 		}
-		return {};
+		return { warning };
 	}
-	const warning = formatWorktreePostCreateFailure(result);
+	const hookWarning = formatWorktreePostCreateFailure(result);
 	LOGGER.log("Worktree post-create command failed.", {
 		severity: "warn",
 		taskId: options.taskId,
-		warning,
+		warning: hookWarning,
 	});
 	if (hook.postCreateFailureMode === "block") {
-		throw new Error(warning);
+		throw new Error(hookWarning);
 	}
+	warning = appendWorktreeWarning(warning, hookWarning);
 	return { warning };
 }
 
