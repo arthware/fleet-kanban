@@ -485,6 +485,42 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("given additional unshared paths are configured, when config loads, then they survive alongside the replacing list", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-additional-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-additional-",
+		);
+
+		try {
+			const runtimeProjectConfigDir = join(tempProject, ".cline", "kanban");
+			mkdirSync(runtimeProjectConfigDir, { recursive: true });
+			writeFileSync(
+				join(runtimeProjectConfigDir, "config.json"),
+				JSON.stringify(
+					{
+						worktree: {
+							additionalUnsharedPaths: ["coverage", "  ", "*.gen.ts"],
+						},
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const reloaded = await loadRuntimeConfig(tempProject);
+
+				expect(reloaded.worktree).toEqual({
+					additionalUnsharedPaths: ["coverage", "*.gen.ts"],
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("keeps the project config file when shortcuts are cleared but unshared paths remain", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-keep-unshared-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir(

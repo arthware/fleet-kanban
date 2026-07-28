@@ -82,6 +82,17 @@ function assertUnsharedPathsAbsent(worktreePath: string, unsharedPaths: string[]
 	}
 }
 
+/**
+ * Generated artifacts that live inside a tracked source tree must never be mirrored:
+ * an escaping symlink there is walked by bundlers/tsc as an in-root module (#171).
+ */
+function assertGeneratedSourceArtifactsAbsent(worktreePath: string): void {
+	assertUnsharedPathsAbsent(worktreePath, [
+		join("packages", "skill-runner", "src", "generated"),
+		join("packages", "viewer", "src", "tailwind.build.css"),
+	]);
+}
+
 function assertPostCreateCommandRan(worktreePath: string): void {
 	const markerPath = join(worktreePath, "post-create-marker.txt");
 	expect(existsSync(markerPath)).toBe(true);
@@ -124,7 +135,20 @@ describe.sequential("worktree shapes integration suite", () => {
 
 		// 4. Create base files & unshared artifacts
 		writeFileSync(join(repoPath, "README.md"), "main-content\n", "utf8");
-		writeFileSync(join(repoPath, ".gitignore"), ".env\n.env.local\n/node_modules/\n/dist/\n/.turbo/\n", "utf8");
+		writeFileSync(
+			join(repoPath, ".gitignore"),
+			[
+				".env",
+				".env.local",
+				"/node_modules/",
+				"/dist/",
+				"/.turbo/",
+				"packages/skill-runner/src/generated/",
+				"packages/viewer/src/tailwind.build.css",
+				"",
+			].join("\n"),
+			"utf8",
+		);
 		writeFileSync(join(repoPath, ".env"), "ENV_VAR=value\n", "utf8");
 		writeFileSync(join(repoPath, ".env.local"), "ENV_LOCAL=local-value\n", "utf8");
 
@@ -134,6 +158,20 @@ describe.sequential("worktree shapes integration suite", () => {
 		writeFileSync(join(repoPath, "dist", "built.js"), "compiled-js\n", "utf8");
 		mkdirSync(join(repoPath, ".turbo"), { recursive: true });
 		writeFileSync(join(repoPath, ".turbo", "cache.json"), "{\"cached\": true}\n", "utf8");
+
+		// Generated artifacts nested inside tracked source trees — the #171 shape. No name in the
+		// unshared list matches them; only the structural rule keeps them out of the worktree.
+		mkdirSync(join(repoPath, "packages", "skill-runner", "src", "generated"), { recursive: true });
+		mkdirSync(join(repoPath, "packages", "viewer", "src"), { recursive: true });
+		writeFileSync(join(repoPath, "packages", "skill-runner", "package.json"), '{"name":"skill-runner"}\n', "utf8");
+		writeFileSync(join(repoPath, "packages", "skill-runner", "src", "index.ts"), "export const x = 1;\n", "utf8");
+		writeFileSync(
+			join(repoPath, "packages", "skill-runner", "src", "generated", "runner-assets.json"),
+			'{"assets":[]}\n',
+			"utf8",
+		);
+		writeFileSync(join(repoPath, "packages", "viewer", "src", "app.tsx"), "export const App = null;\n", "utf8");
+		writeFileSync(join(repoPath, "packages", "viewer", "src", "tailwind.build.css"), ".a{color:red}\n", "utf8");
 
 		// 5. Write .cline/kanban/config.json with custom unshared list + postCreateCommand
 		mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
@@ -146,7 +184,15 @@ describe.sequential("worktree shapes integration suite", () => {
 		writeFileSync(join(repoPath, ".cline", "kanban", "config.json"), JSON.stringify(configData, null, 2), "utf8");
 
 		// Commit base files
-		runGit(repoPath, ["add", "README.md", ".gitignore", ".cline/kanban/config.json"]);
+		runGit(repoPath, [
+			"add",
+			"README.md",
+			".gitignore",
+			".cline/kanban/config.json",
+			"packages/skill-runner/package.json",
+			"packages/skill-runner/src/index.ts",
+			"packages/viewer/src/app.tsx",
+		]);
 		runGit(repoPath, ["commit", "-m", "init-main"]);
 
 		// Add dependency-repo as a submodule
@@ -240,6 +286,7 @@ describe.sequential("worktree shapes integration suite", () => {
 		assertSymlink(join(shape1Path, ".env.local"));
 		assertSubmoduleCheckedOut(join(shape1Path, "vendor", "submodule"));
 		assertUnsharedPathsAbsent(shape1Path, ["node_modules", "dist", ".turbo"]);
+		assertGeneratedSourceArtifactsAbsent(shape1Path);
 		assertPostCreateCommandRan(shape1Path);
 	}, 35_000);
 
@@ -277,6 +324,7 @@ describe.sequential("worktree shapes integration suite", () => {
 		assertSymlink(join(shape2Path, ".env.local"));
 		assertSubmoduleCheckedOut(join(shape2Path, "vendor", "submodule"));
 		assertUnsharedPathsAbsent(shape2Path, ["node_modules", "dist", ".turbo"]);
+		assertGeneratedSourceArtifactsAbsent(shape2Path);
 		assertPostCreateCommandRan(shape2Path);
 	}, 40_000);
 
@@ -350,15 +398,18 @@ describe.sequential("worktree shapes integration suite", () => {
 		assertSymlink(join(shape3Path, ".env.local"));
 		assertSubmoduleCheckedOut(join(shape3Path, "vendor", "submodule"));
 		assertUnsharedPathsAbsent(shape3Path, ["node_modules", "dist", ".turbo"]);
+		assertGeneratedSourceArtifactsAbsent(shape3Path);
 		assertPostCreateCommandRan(shape3Path);
 	}, 40_000);
 
-	it("Re-entry: updates unsharedPaths to match a new list and symlinks customized shared paths on a second ensure pass", async () => {
-		// 1. Update config inside main-repo to omit node_modules from unsharedPaths
+	it("Re-entry: honors unsharedPaths plus additionalUnsharedPaths and symlinks customized shared paths on a second ensure pass", async () => {
+		// 1. Update config inside main-repo to omit node_modules from unsharedPaths.
+		//    `.turbo` moves to additionalUnsharedPaths, which extends the replacing list.
 		const updatedConfig = {
 			worktree: {
 				postCreateCommand: "echo 'hook-ran' > post-create-marker.txt",
-				unsharedPaths: ["dist", ".turbo"], // node_modules is omitted, so it becomes SHARED/symlinked
+				unsharedPaths: ["dist"], // node_modules is omitted, so it becomes SHARED/symlinked
+				additionalUnsharedPaths: [".turbo"],
 			},
 		};
 		writeFileSync(join(repoPath, ".cline", "kanban", "config.json"), JSON.stringify(updatedConfig, null, 2), "utf8");
@@ -388,6 +439,8 @@ describe.sequential("worktree shapes integration suite", () => {
 
 		// dist and .turbo MUST still be absent!
 		assertUnsharedPathsAbsent(shape1Path, ["dist", ".turbo"]);
+		// The structural rule is independent of config: generated sources stay local.
+		assertGeneratedSourceArtifactsAbsent(shape1Path);
 		assertPostCreateCommandRan(shape1Path);
 	}, 35_000);
 });
