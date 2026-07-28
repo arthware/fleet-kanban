@@ -147,16 +147,20 @@ vi.mock("../../../src/server/browser.js", () => ({
 	openInBrowser: browserMocks.openInBrowser,
 }));
 
+import { composeCardDirective } from "../../../src/prompts/compose-card-directive";
 import { CONSTITUTION_DIRECTIVE_HEADER } from "../../../src/prompts/doctrine";
 import { SUBMIT_ENTER_DELAY_MS, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 import type { RuntimeTrpcContext } from "../../../src/trpc/app-router";
 import { type CreateRuntimeApiDependencies, createRuntimeApi } from "../../../src/trpc/runtime-api";
 
-const IMPLEMENT_CARD_PROMPT_DIRECTIVE =
-	"You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card.\n\n";
+// These assert WHICH directives get composed into a launch prompt, in what order — not their wording,
+// which is single-sourced from each skill's `directive:` frontmatter and pinned in
+// test/runtime/prompts/compose-card-directive.test.ts. Derive them so an edit to a SKILL.md has one
+// golden string to update, not several.
+const IMPLEMENT_CARD_PROMPT_DIRECTIVE = composeCardDirective(["fleet-implement"], { baseRef: "main" });
 
 function buildPrCardPromptDirective(baseRef: string): string {
-	return `You are working an auto-review PR card. Use the fleet-pr skill: the card is your authorization to commit and push — never pause to ask whether to commit, push, or open the PR; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch \`${baseRef}\` non-interactively — \`gh pr create --base ${baseRef} --title <subject> --body <summary>\` (never a bare or interactive \`gh pr create\`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.\n\n`;
+	return composeCardDirective(["fleet-pr"], { baseRef });
 }
 
 function createTestRuntimeApi(

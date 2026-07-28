@@ -24,6 +24,13 @@ describe("estimateClaudeCostUsd", () => {
 		expect(estimateClaudeCostUsd({ ...NONE, cacheReadTokens: 1_000_000 }, "claude-haiku-4-5")).toBe(0.1);
 	});
 
+	it("prices Opus 5 and Fable 5 lanes from Anthropic's published pricing rows", () => {
+		expect(estimateClaudeCostUsd({ ...NONE, inputTokens: 1_000_000 }, "claude-opus-5")).toBe(5.0);
+		expect(estimateClaudeCostUsd({ ...NONE, outputTokens: 1_000_000 }, "claude-opus-5")).toBe(25.0);
+		expect(estimateClaudeCostUsd({ ...NONE, cacheCreationTokens: 1_000_000 }, "claude-fable-5")).toBe(12.5);
+		expect(estimateClaudeCostUsd({ ...NONE, cacheReadTokens: 1_000_000 }, "claude-fable-5")).toBe(1.0);
+	});
+
 	it("sums a realistic mixed-usage session into one dollar total", () => {
 		// 1M input ($5) + 200K output ($5) + 400K cache-write ($2.50) + 2M cache-read ($1) = $13.50
 		const cost = estimateClaudeCostUsd(

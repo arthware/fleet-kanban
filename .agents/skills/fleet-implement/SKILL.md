@@ -2,7 +2,7 @@
 name: fleet-implement
 description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch and hand off to the PR phase
 directive: >-
-  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card.
+  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work.
 ---
 
 You are working a build card: take it from pickup to a verified, committed build — intake →
@@ -21,6 +21,16 @@ pattern it established — this primes context from git history instead of re-de
 don't spawn broad codebase-discovery sub-agents. Use your current worktree/branch if you're on one.
 
 If the intended surface or acceptance is ambiguous, ask (`AskUserQuestion`) before writing code.
+
+**Card premises are claims, not givens.** A card's `## Confirmed` is the operator's verified facts and
+`## Assumed` is explicitly unverified — but either can be wrong. If a card states something you can
+check and find false — an API behaving differently, a cited symbol that doesn't exist, a mechanism that
+cannot work as described — **stop and report it instead of implementing around it.** Contradicting the
+card is expected work, not deviation. This is separate from the ambiguity rule above: that one fires
+when the card is unclear, this one when it is clear and simply wrong. "Don't re-investigate" scopes to
+the **symptom** already diagnosed; it never licenses building a mechanism you can see won't work.
+
+(The card body standard itself is author-facing — `docs/card-authoring.md`. You don't need to read it.)
 
 ## Tests first — BDD surface, then RED units, THEN implement
 
