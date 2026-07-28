@@ -5,7 +5,11 @@ import { isAbsolute, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deriveTaskBranchName } from "../../src/core/task-ref";
-import { deleteTaskWorktree, ensureTaskWorktreeIfDoesntExist } from "../../src/workspace/task-worktree";
+import {
+	deleteTaskWorktree,
+	ensureTaskWorktreeIfDoesntExist,
+	prepareExistingWorktree,
+} from "../../src/workspace/task-worktree";
 import { createGitTestEnv } from "../utilities/git-env";
 import { createTempDir } from "../utilities/temp-dir";
 
@@ -39,6 +43,10 @@ function runGit(cwd: string, args: string[]): string {
 		);
 	}
 	return result.stdout.trim();
+}
+
+function runGitAllowFileProtocol(cwd: string, args: string[]): string {
+	return runGit(cwd, ["-c", "protocol.file.allow=always", ...args]);
 }
 
 function readGitPath(cwd: string, pathName: string): string {
@@ -79,7 +87,124 @@ async function withTemporaryHome<T>(run: () => Promise<T>): Promise<T> {
 	}
 }
 
+async function withGitFileProtocolAllowed<T>(run: () => Promise<T>): Promise<T> {
+	const previous = process.env.GIT_ALLOW_PROTOCOL;
+	process.env.GIT_ALLOW_PROTOCOL = "file";
+	try {
+		return await run();
+	} finally {
+		if (previous === undefined) {
+			delete process.env.GIT_ALLOW_PROTOCOL;
+		} else {
+			process.env.GIT_ALLOW_PROTOCOL = previous;
+		}
+	}
+}
+
 describe.sequential("task-worktree integration", () => {
+	it("given a repo with submodules and gitignored env files, when an epic worktree is prepared, then it matches task setup", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-epic-worktree-setup-");
+			try {
+				const submoduleRepoPath = join(sandboxRoot, "submodule-repo");
+				mkdirSync(submoduleRepoPath, { recursive: true });
+				runGit(submoduleRepoPath, ["init"]);
+				runGit(submoduleRepoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(submoduleRepoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(submoduleRepoPath, "submodule.txt"), "submodule\n", "utf8");
+				runGit(submoduleRepoPath, ["add", "submodule.txt"]);
+				runGit(submoduleRepoPath, ["commit", "-m", "submodule init"]);
+
+				const repoPath = join(sandboxRoot, "repo");
+				const epicWorktreePath = join(sandboxRoot, "epics", "repo@usable");
+				mkdirSync(repoPath, { recursive: true });
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				writeFileSync(join(repoPath, ".gitignore"), ".env\n.env.local\n/node_modules/\n", "utf8");
+				writeFileSync(join(repoPath, ".env"), "TOKEN=fixture\n", "utf8");
+				writeFileSync(join(repoPath, ".env.local"), "LOCAL=fixture\n", "utf8");
+				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
+				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "fixture"\n}\n', "utf8");
+				runGitAllowFileProtocol(repoPath, ["submodule", "add", submoduleRepoPath, "vendor/submodule"]);
+				runGit(repoPath, ["add", "README.md", ".gitignore", ".gitmodules", "vendor/submodule"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+				runGit(repoPath, ["branch", "epic/usable", "HEAD"]);
+				mkdirSync(join(sandboxRoot, "epics"), { recursive: true });
+				runGitAllowFileProtocol(repoPath, ["worktree", "add", epicWorktreePath, "epic/usable"]);
+
+				await withGitFileProtocolAllowed(async () => {
+					await prepareExistingWorktree({
+						repoPath,
+						worktreePath: epicWorktreePath,
+						taskId: "epic:usable",
+						workspaceId: "epic-workspace",
+						baseRef: "HEAD",
+					});
+				});
+
+				expectMirroredPathBehavior(join(epicWorktreePath, ".env"));
+				expectMirroredPathBehavior(join(epicWorktreePath, ".env.local"));
+				expectUnsharedPathBehavior(join(epicWorktreePath, "node_modules"));
+				expect(existsSync(join(epicWorktreePath, "vendor", "submodule", "submodule.txt"))).toBe(true);
+				expect(
+					runGit(epicWorktreePath, ["status", "--porcelain", "--", ".env", ".env.local", "node_modules"]),
+				).toBe("");
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("given an already prepared epic worktree, when preparation runs again, then it is a no-op", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-epic-worktree-idempotent-");
+			try {
+				const repoPath = join(sandboxRoot, "repo");
+				const epicWorktreePath = join(sandboxRoot, "epics", "repo@idempotent");
+				mkdirSync(repoPath, { recursive: true });
+				runGit(repoPath, ["init"]);
+				runGit(repoPath, ["config", "user.name", "Kanban Test"]);
+				runGit(repoPath, ["config", "user.email", "kanban-test@example.com"]);
+				writeFileSync(join(repoPath, "README.md"), "hello\n", "utf8");
+				writeFileSync(join(repoPath, ".gitignore"), ".env\n/node_modules/\n", "utf8");
+				writeFileSync(join(repoPath, ".env"), "TOKEN=fixture\n", "utf8");
+				mkdirSync(join(repoPath, "node_modules"), { recursive: true });
+				writeFileSync(join(repoPath, "node_modules", "package.json"), '{\n  "name": "fixture"\n}\n', "utf8");
+				runGit(repoPath, ["add", "README.md", ".gitignore"]);
+				runGit(repoPath, ["commit", "-m", "init"]);
+				runGit(repoPath, ["branch", "epic/idempotent", "HEAD"]);
+				mkdirSync(join(sandboxRoot, "epics"), { recursive: true });
+				runGit(repoPath, ["worktree", "add", epicWorktreePath, "epic/idempotent"]);
+
+				await prepareExistingWorktree({
+					repoPath,
+					worktreePath: epicWorktreePath,
+					taskId: "epic:idempotent",
+					workspaceId: "epic-workspace",
+					baseRef: "HEAD",
+				});
+				const firstStatus = runGit(epicWorktreePath, ["status", "--porcelain"]);
+				const firstEnvTarget = readFileSync(join(epicWorktreePath, ".env"), "utf8");
+
+				await prepareExistingWorktree({
+					repoPath,
+					worktreePath: epicWorktreePath,
+					taskId: "epic:idempotent",
+					workspaceId: "epic-workspace",
+					baseRef: "HEAD",
+				});
+
+				expect(runGit(epicWorktreePath, ["status", "--porcelain"])).toBe(firstStatus);
+				expect(readFileSync(join(epicWorktreePath, ".env"), "utf8")).toBe(firstEnvTarget);
+				expectUnsharedPathBehavior(join(epicWorktreePath, "node_modules"));
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
 	it("creates a fresh task worktree on the expected external-issue branch", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-branch-issue-");

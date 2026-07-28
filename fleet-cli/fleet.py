@@ -821,7 +821,7 @@ def git_run(repo_path, args, check=True):
         sys.exit(r.returncode)
     return r
 
-def trpc_call(cfg, path, data=None):
+def trpc_call(cfg, path, data=None, timeout=10):
     port = cfg.get("kanban_port", 3484)
     url = f"http://127.0.0.1:{port}"
     if data is not None:
@@ -837,11 +837,29 @@ def trpc_call(cfg, path, data=None):
             method="GET"
         )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.load(resp).get("result", {}).get("data", {})
     except Exception as e:
         print(f"{RED}tRPC error calling {path}: {e}{RESET}", file=sys.stderr)
         return None
+
+def prepare_epic_worktree(cfg: dict, repo_path: Path, wt_path: Path, workspace_id: str, name: str, base_ref: str):
+    print(f"  Preparing epic worktree...")
+    prepare_res = trpc_call(cfg, "projects.prepareWorktree", {
+        "repoPath": str(repo_path),
+        "worktreePath": str(wt_path),
+        "taskId": f"epic:{name}",
+        "workspaceId": workspace_id,
+        "baseRef": base_ref
+    }, timeout=330)
+    if not prepare_res or not prepare_res.get("ok"):
+        err = prepare_res.get("error") if prepare_res else "unknown error"
+        print(f"{RED}Error: Failed to prepare epic worktree: {err}{RESET}", file=sys.stderr)
+        return False
+    warning = prepare_res.get("warning")
+    if warning:
+        print(f"{YELLOW}Warning: {warning}{RESET}")
+    return True
 
 def epic_create(name: str, repo: str, base: str, cfg: dict):
     rp = _resolve_repo(repo, cfg)
@@ -920,6 +938,9 @@ def epic_create(name: str, repo: str, base: str, cfg: dict):
     })
     if not set_res or not set_res.get("ok"):
         print(f"{RED}Error: Failed to set epic metadata.{RESET}", file=sys.stderr)
+        return 1
+
+    if not prepare_epic_worktree(cfg, rp, wt_path, workspace_id, name, base):
         return 1
 
     print(f"\n{GREEN}✓ Epic '{name}' created successfully!{RESET}")
@@ -1075,6 +1096,9 @@ def epic_sync(name: str, repo: str, cfg: dict):
     current_branch = head_res.stdout.strip() if head_res.returncode == 0 else ""
     if current_branch != epic_branch:
         print(f"{RED}Error: HEAD in worktree is at '{current_branch or 'DETACHED'}', expected '{epic_branch}'. Never repointing HEAD automatically.{RESET}", file=sys.stderr)
+        return 1
+
+    if not prepare_epic_worktree(cfg, rp, wt_path, workspace_id, name, base_branch):
         return 1
 
     # Fetch origin base branch

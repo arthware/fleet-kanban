@@ -45,7 +45,7 @@ class TestEpicCommand(unittest.TestCase):
         mock_socket.return_value = mock_sock_inst
 
         # Mock tRPC add and setEpic responses
-        mock_trpc.side_effect = lambda cfg, path, data=None: (
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
             {"ok": True, "project": {"id": "mock-ws-id"}} if path == "projects.add" else {"ok": True}
         )
 
@@ -69,6 +69,13 @@ class TestEpicCommand(unittest.TestCase):
                 "base": "production-line"
             }
         })
+        mock_trpc.assert_any_call(self.cfg, "projects.prepareWorktree", {
+            "repoPath": str(self.repo_path),
+            "worktreePath": unittest.mock.ANY,
+            "taskId": "epic:cool-feature",
+            "workspaceId": "mock-ws-id",
+            "baseRef": "production-line"
+        }, timeout=330)
 
     @patch("fleet._resolve_repo")
     def test_given_invalid_repo_when_epic_create_then_returns_error(self, mock_resolve):
@@ -133,7 +140,7 @@ class TestEpicCommand(unittest.TestCase):
                 }
             ]
         }
-        mock_trpc.side_effect = lambda cfg, path, data=None: (
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
             mock_projects_payload if path == "projects.list" else {"ok": True}
         )
 
@@ -210,7 +217,9 @@ class TestEpicCommand(unittest.TestCase):
                 }
             ]
         }
-        mock_trpc.return_value = mock_projects_payload
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
 
         # Mock git commands
         # 1. symbolic-ref -> epic/cool-feature
@@ -256,6 +265,13 @@ class TestEpicCommand(unittest.TestCase):
 
         # Assert (Then)
         self.assertEqual(res, 0)
+        mock_trpc.assert_any_call(self.cfg, "projects.prepareWorktree", {
+            "repoPath": str(self.repo_path),
+            "worktreePath": str(wt_path),
+            "taskId": "epic:cool-feature",
+            "workspaceId": "epic-ws-id",
+            "baseRef": "production-line"
+        }, timeout=330)
         mock_git.assert_any_call(wt_path, ["fetch", "origin", "production-line"])
         mock_git.assert_any_call(wt_path, ["merge", "--ff-only", "origin/production-line"], check=False)
         mock_git.assert_any_call(wt_path, ["merge", "--no-edit", "origin/production-line"], check=False)
@@ -272,7 +288,7 @@ class TestEpicCommand(unittest.TestCase):
         # Arrange
         mock_resolve.return_value = self.repo_path
         mock_socket.return_value = MagicMock()
-        mock_trpc.return_value = {
+        mock_projects_payload = {
             "projects": [
                 {
                     "id": "epic-ws-id",
@@ -285,6 +301,9 @@ class TestEpicCommand(unittest.TestCase):
                 }
             ]
         }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
         
         wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
         mock_git_symbolic_ref = MagicMock(returncode=0, stdout="epic/cool-feature\n")
@@ -326,7 +345,7 @@ class TestEpicCommand(unittest.TestCase):
         # Arrange
         mock_resolve.return_value = self.repo_path
         mock_socket.return_value = MagicMock()
-        mock_trpc.return_value = {
+        mock_projects_payload = {
             "projects": [
                 {
                     "id": "epic-ws-id",
@@ -339,6 +358,9 @@ class TestEpicCommand(unittest.TestCase):
                 }
             ]
         }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
         
         wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
         mock_git_symbolic_ref = MagicMock(returncode=0, stdout="epic/cool-feature\n")
@@ -382,7 +404,7 @@ class TestEpicCommand(unittest.TestCase):
         # Arrange
         mock_resolve.return_value = self.repo_path
         mock_socket.return_value = MagicMock()
-        mock_trpc.return_value = {
+        mock_projects_payload = {
             "projects": [
                 {
                     "id": "epic-ws-id",
@@ -395,6 +417,9 @@ class TestEpicCommand(unittest.TestCase):
                 }
             ]
         }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
         
         wt_path = Path("/mock/project/cline/epics/my-repo@cool-feature")
         mock_git_symbolic_ref = MagicMock(returncode=0, stdout="main\n")

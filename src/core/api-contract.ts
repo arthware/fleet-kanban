@@ -697,6 +697,22 @@ export const runtimeProjectRemoveResponseSchema = z.object({
 });
 export type RuntimeProjectRemoveResponse = z.infer<typeof runtimeProjectRemoveResponseSchema>;
 
+export const runtimeProjectWorktreePrepareRequestSchema = z.object({
+	repoPath: z.string().min(1),
+	worktreePath: z.string().min(1),
+	taskId: z.string().min(1),
+	workspaceId: z.string().min(1),
+	baseRef: z.string().min(1),
+});
+export type RuntimeProjectWorktreePrepareRequest = z.infer<typeof runtimeProjectWorktreePrepareRequestSchema>;
+
+export const runtimeProjectWorktreePrepareResponseSchema = z.object({
+	ok: z.boolean(),
+	warning: z.string().optional(),
+	error: z.string().optional(),
+});
+export type RuntimeProjectWorktreePrepareResponse = z.infer<typeof runtimeProjectWorktreePrepareResponseSchema>;
+
 export const runtimeWorktreeEnsureRequestSchema = z.object({
 	taskId: z.string(),
 	baseRef: z.string(),

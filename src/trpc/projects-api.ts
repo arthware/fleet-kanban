@@ -6,7 +6,6 @@ import type {
 	RuntimeProjectAddResponse,
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
-	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import { parseDirectoryListRequest, parseProjectAddRequest, parseProjectRemoveRequest } from "../core/api-validation";
 import {
@@ -22,7 +21,7 @@ import type { TerminalSessionManager } from "../terminal/session-manager";
 import { cloneGitRepository } from "../workspace/git-clone";
 import { ensureInitialCommit, initializeGitRepository } from "../workspace/initialize-repo";
 import { isPathWithinRoot } from "../workspace/path-sandbox";
-import { deleteTaskWorktree } from "../workspace/task-worktree";
+import { deleteTaskWorktree, prepareExistingWorktree } from "../workspace/task-worktree";
 import type { RuntimeTrpcContext } from "./app-router";
 
 interface DisposeWorkspaceOptions {
@@ -365,6 +364,21 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 							? "Directory not found."
 							: message,
 				} satisfies RuntimeDirectoryListResponse;
+			}
+		},
+		prepareWorktree: async (input) => {
+			try {
+				const result = await prepareExistingWorktree(input);
+				return {
+					ok: true,
+					...(result.warning ? { warning: result.warning } : {}),
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					ok: false,
+					error: message,
+				};
 			}
 		},
 		setWorkspaceEpic: async (workspaceId, epic) => {
