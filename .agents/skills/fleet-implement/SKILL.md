@@ -22,18 +22,15 @@ don't spawn broad codebase-discovery sub-agents. Use your current worktree/branc
 
 If the intended surface or acceptance is ambiguous, ask (`AskUserQuestion`) before writing code.
 
-**Card premises are claims, not givens.** A card's `## Confirmed` section is the operator's verified
-facts and its `## Assumed` section is explicitly unverified — but either can be wrong, and so can a
-card that separates neither. If a card states something you can check and find false — an API behaving
-differently, a cited symbol that doesn't exist, a mechanism that cannot work as described — **stop and
-report it instead of implementing around it.** Contradicting the card is expected work, not deviation.
+**Card premises are claims, not givens.** A card's `## Confirmed` is the operator's verified facts and
+`## Assumed` is explicitly unverified — but either can be wrong. If a card states something you can
+check and find false — an API behaving differently, a cited symbol that doesn't exist, a mechanism that
+cannot work as described — **stop and report it instead of implementing around it.** Contradicting the
+card is expected work, not deviation. This is separate from the ambiguity rule above: that one fires
+when the card is unclear, this one when it is clear and simply wrong. "Don't re-investigate" scopes to
+the **symptom** already diagnosed; it never licenses building a mechanism you can see won't work.
 
-This sits *beside* the ambiguity rule above, not inside it: that one fires when the card is unclear;
-this one fires when the card is perfectly clear and simply wrong. Confident wrongness draws less
-questioning than vagueness precisely because there is nothing to be confused about — which is why it
-needs its own rule. "Don't re-investigate" in a card scopes to the **symptom** it already diagnosed; it
-never licenses building a mechanism you can see won't work. See
-[`docs/card-authoring.md`](../../../docs/card-authoring.md) for the body standard cards are written to.
+(The card body standard itself is author-facing — `docs/card-authoring.md`. You don't need to read it.)
 
 ## Tests first — BDD surface, then RED units, THEN implement
 

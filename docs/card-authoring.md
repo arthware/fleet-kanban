@@ -155,15 +155,15 @@ bottom. Sections you have nothing to say in are omitted, not left empty.
 
 **As a** <role>, **I want** <capability>, **so that** <outcome>.
 
-## Context — why now        Observable symptom or motivation. A human stops here and gets it.
-## Related concepts         Existing domain concepts/docs to orient in. Prevents re-invention.
-## Confirmed                Verified facts + HOW verified (file:line, SHA, command output).
-## Assumed                  Unverified premises. "If one is wrong, stop and say so."
-## Definition of Done       Given/When/Then. MUST include the normal resting state.
-## Out of scope             Explicit non-goals.
-## Suggested approach       OPTIONAL and non-binding (MAY). Omit when you haven't diagnosed it.
-## Verification             How light the tests should be.
-## Prior art                SHAs to read first.
+## Context — why now        ← a human can stop here
+## Related concepts
+## Confirmed
+## Assumed
+## Definition of Done
+## Out of scope
+## Suggested approach       ← optional; omit when undiagnosed
+## Verification
+## Prior art
 ```
 
 ## The rules
@@ -251,64 +251,17 @@ Three rules would each have caught this independently:
    instead for *"an established socket MUST detect its own death"*, the agent picks a
    heartbeat it can actually see — which is what [#156] finally did.
 
-## Worked example: the same standard applied
-
-Card `32bf7` ("One card should open exactly one PR, against its own base") is written
-to this shape. Its distinguishing move is what it **doesn't** do: the operator hadn't
-diagnosed the cause, so there is no "Suggested approach" section at all.
-
-It opens with the story, then separates what it knows from what it's guessing —
-including a Confirmed entry that **rules a fix out**:
-
-> ## Confirmed (verified — don't re-derive)
->
-> - `fleet-pr`'s directive **already forbids this**, explicitly: *"open one idempotent
->   PR against this card's base branch `${baseRef}` … Never open the PR against the
->   repository's default branch."* So this is a violated contract, not a missing rule —
->   **adding more instruction text is unlikely to be the fix.**
-
-> ## Assumed (unverified — check these first; if one is wrong, say so and stop)
->
-> - That both PRs came from the same agent session rather than a retry/resume opening a second one.
-> - That `${baseRef}` interpolated correctly at injection time …
->
-> Start by establishing **which** of these is true. The right fix depends entirely on
-> the answer, and I have not diagnosed it.
-
-Its acceptance names the edge state rather than only the happy path:
-
-> - Given the base ref is somehow unavailable at PR time, When the agent would otherwise
->   fall back to the default branch, Then it fails loudly instead of opening a PR against
->   the wrong base.
-
-And it closes by inviting the correction it expects to need:
-
-> ## Pushback invited
->
-> The Assumed list is my best guess, not a diagnosis. If the cause is somewhere I haven't
-> named, follow the evidence and tell me the list was wrong — that's the useful outcome,
-> not a deviation from the card.
+For a card written to this standard, see `32bf7` ("One card should open exactly one PR,
+against its own base"). Its distinguishing move is what it *omits*: the cause was
+undiagnosed, so it carries no "Suggested approach" at all — only Confirmed, Assumed, and
+an acceptance criterion for the failure case.
 
 ## Where else to look
 
-- Which agent to give a card, when to split design from build, and the `## Prior art`
-  convention: **`AGENTS.md`** in the fleet root.
-- How light to scope a card's test gate: the testing-scope rules in **`AGENTS.md`** —
-  cards should point at them, not restate them.
-- The domain concepts a card's *Related concepts* section links to:
-  **`docs/architecture/concepts/`**.
-
-## The agent half
-
-A writing standard helps a careful author. It cannot protect against a wrong one — and
-`5596f` shows the failure is not carelessness but **confident wrongness**, which draws
-*less* scrutiny than vagueness because there is nothing to be confused about.
-
-So the guarantee doesn't rest on the card. Every build card's injected directive tells
-its agent that card premises are **claims, not givens**: a premise it can check and finds
-false is to be **reported, not implemented around**, and contradicting the card is
-expected work rather than deviation. That reaches every build card regardless of who
-wrote it or how well. See `.agents/skills/fleet-implement/SKILL.md` → **Intake**.
+- Agent choice, design/build splits, test-gate scope, and the `## Prior art` convention:
+  **`AGENTS.md`** in the fleet root — cards point at these rules, they don't restate them.
+- Concepts a card's *Related concepts* section links to: **`docs/architecture/concepts/`**.
+- The matching agent-side rule: `.agents/skills/fleet-implement/SKILL.md` → **Intake**.
 
 [#103]: https://github.com/arthware/fleet-kanban/pull/103
 [#156]: https://github.com/arthware/fleet-kanban/pull/156
