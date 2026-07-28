@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { resolveStartActiveSkills, validateCardType } from "../core/card-type";
 import { loadCardTypeManifest } from "../prompts/card-type-discovery";
-import { composeCardDirective, resolveCanonicalSkillsDirSync } from "../prompts/compose-card-directive";
+import { composeCardDirective } from "../prompts/compose-card-directive";
 
 export interface CardTypeValidateOptions {
 	projectPath?: string;
@@ -28,17 +28,13 @@ export async function executeCardTypeValidate(name: string, options: CardTypeVal
 		throw new Error(errMsg);
 	}
 
-	// Resolve skills directory
-	const skillsDir = options.skillsDir ?? resolveCanonicalSkillsDirSync({ moduleDir: options.moduleDir });
-
-	if (!skillsDir) {
-		const errMsg = "Error: Skills directory could not be resolved.";
-		stderr(errMsg);
-		throw new Error(errMsg);
-	}
-
 	// Perform validation
-	const result = validateCardType(manifest, skillsDir);
+	const skillResolution = {
+		workspacePath: projectPath,
+		moduleDir: options.moduleDir,
+		bundledSkillsDir: options.skillsDir,
+	};
+	const result = validateCardType(manifest, skillResolution);
 
 	// Formatting outputs
 	stdout(`Card Type: ${manifest.name} (${manifest.description || "No description"})`);
@@ -61,8 +57,9 @@ export async function executeCardTypeValidate(name: string, options: CardTypeVal
 	});
 	const defaultDirective = composeCardDirective(defaultSkills, {
 		baseRef: "main",
-		canonicalSkillsDir: skillsDir,
 		moduleDir: options.moduleDir,
+		workspacePath: projectPath,
+		canonicalSkillsDir: options.skillsDir,
 	});
 
 	stdout("Composed Directive (default):");
@@ -78,8 +75,9 @@ export async function executeCardTypeValidate(name: string, options: CardTypeVal
 	});
 	const prDirective = composeCardDirective(prSkills, {
 		baseRef: "main",
-		canonicalSkillsDir: skillsDir,
 		moduleDir: options.moduleDir,
+		workspacePath: projectPath,
+		canonicalSkillsDir: options.skillsDir,
 	});
 
 	stdout("Composed Directive (with --auto-review pr):");

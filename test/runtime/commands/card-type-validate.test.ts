@@ -221,6 +221,56 @@ directive: "Direct instructions for skill 2 with \${baseRef}."
 		expect(combinedOut).toContain("Direct instructions for skill 1.");
 		expect(combinedOut).toContain("Direct instructions for skill 2 with main.");
 	});
+
+	it("given a project card type referencing a project skill, when validate is called, then it reports the skill as ok", async () => {
+		// Arrange
+		const tempWorkspaceDir = await createTempDir("workspace-");
+		const tempModuleDir = await createTempDir("module-");
+		const projectCardTypesDir = join(tempWorkspaceDir, "fleet/card-types");
+		const projectSkillsDir = join(tempWorkspaceDir, "fleet/skills/my-skill");
+		await mkdir(projectCardTypesDir, { recursive: true });
+		await mkdir(projectSkillsDir, { recursive: true });
+		await writeFile(
+			join(projectCardTypesDir, "custom-build.md"),
+			`---
+name: custom-build
+description: Custom build workflow manifest
+phases:
+  - name: build
+    lane: in_progress
+    skills:
+      - my-skill
+    activation: default
+---
+`,
+		);
+		await writeFile(
+			join(projectSkillsDir, "SKILL.md"),
+			`---
+name: my-skill
+directive: "Project skill directive."
+---
+`,
+		);
+		await mkdir(join(tempModuleDir, ".agents/skills"), { recursive: true });
+
+		const stdoutMsgs: string[] = [];
+		const stderrMsgs: string[] = [];
+
+		// Act
+		const success = await executeCardTypeValidate("custom-build", {
+			projectPath: tempWorkspaceDir,
+			moduleDir: tempModuleDir,
+			stdout: (m: string) => stdoutMsgs.push(m),
+			stderr: (m: string) => stderrMsgs.push(m),
+		});
+
+		// Assert
+		expect(success).toBe(true);
+		expect(stderrMsgs).toHaveLength(0);
+		expect(stdoutMsgs.join("\n")).toContain("my-skill [ok]");
+		expect(stdoutMsgs.join("\n")).toContain("Project skill directive.");
+	});
 });
 
 describe("validateCardType & validateSkill module core", () => {
@@ -258,7 +308,7 @@ describe("validateCardType & validateSkill module core", () => {
 		};
 
 		// Act
-		const result = validateCardType(manifest, skillsDir);
+		const result = validateCardType(manifest, { bundledSkillsDir: skillsDir });
 
 		// Assert
 		expect(result.isValid).toBe(false);
@@ -298,7 +348,7 @@ directive: ""
 		};
 
 		// Act
-		const result = validateCardType(manifest, skillsDir);
+		const result = validateCardType(manifest, { bundledSkillsDir: skillsDir });
 
 		// Assert
 		expect(result.isValid).toBe(false);

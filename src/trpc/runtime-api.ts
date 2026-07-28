@@ -61,7 +61,7 @@ import {
 import { resolveTaskTitle } from "../core/task-title.js";
 import { readFileIfExists } from "../fs/read-file-if-exists";
 import { loadCardTypeManifest } from "../prompts/card-type-discovery";
-import { composeCardDirective, resolveCanonicalSkillsDirSync } from "../prompts/compose-card-directive";
+import { composeCardDirective } from "../prompts/compose-card-directive";
 import { loadDoctrine, prependConstitution, type ReadFileIfExists } from "../prompts/doctrine";
 import { getAgentBudget } from "../server/agent-budget";
 import {
@@ -522,7 +522,10 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						? `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`
 						: body.prompt;
 				} else if (skillName) {
-					const directive = composeCardDirective([skillName], { baseRef: body.baseRef });
+					const directive = composeCardDirective([skillName], {
+						baseRef: body.baseRef,
+						workspacePath: workspaceScope.workspacePath,
+					});
 					const skillPrompt = `Use the "${skillName}" skill for this task.\n\n---\n\n${body.prompt}`;
 					withDirectives = directive ? `${directive}${skillPrompt}` : skillPrompt;
 				} else {
@@ -564,19 +567,19 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 							autoReviewMode,
 						});
 
-						const skillsDir = resolveCanonicalSkillsDirSync();
-						if (skillsDir) {
-							for (const skillName of orderedSkills) {
-								const status = validateSkill(skillName, skillsDir);
-								if (status !== "ok") {
-									process.stderr.write(
-										`[kanban] Warning: Skill "${skillName}" for card-type "${manifest.name}" is ${status}. It will be skipped.\n`,
-									);
-								}
+						for (const skillName of orderedSkills) {
+							const status = validateSkill(skillName, { workspacePath: workspaceScope.workspacePath });
+							if (status !== "ok") {
+								process.stderr.write(
+									`[kanban] Warning: Skill "${skillName}" for card-type "${manifest.name}" is ${status}. It will be skipped.\n`,
+								);
 							}
 						}
 
-						const directive = composeCardDirective(orderedSkills, { baseRef: body.baseRef });
+						const directive = composeCardDirective(orderedSkills, {
+							baseRef: body.baseRef,
+							workspacePath: workspaceScope.workspacePath,
+						});
 						withDirectives = directive ? `${directive}${body.prompt}` : body.prompt;
 					}
 				}

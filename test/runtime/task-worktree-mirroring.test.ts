@@ -89,12 +89,14 @@ describe("worktree skills directory placement", () => {
 		};
 	}
 
-	it("given a fresh worktree is created, when setup runs, then .agents/skills resolves to the canonical skills dir", async () => {
+	it("given a fresh worktree is created, when setup runs, then bundled skills are linked inside .agents/skills", async () => {
 		const { root, cleanup } = await createSandbox();
 		try {
 			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const canonicalSkillDir = join(canonicalSkillsDir, "fleet-smoke");
 			const worktreePath = join(root, "worktree");
-			mkdirSync(canonicalSkillsDir, { recursive: true });
+			mkdirSync(canonicalSkillDir, { recursive: true });
+			writeFileSync(join(canonicalSkillDir, "SKILL.md"), "---\nname: fleet-smoke\ndirective: smoke\n---\n", "utf8");
 			mkdirSync(worktreePath, { recursive: true });
 
 			const result = await ensureWorktreeSkillsDirectory({
@@ -103,7 +105,10 @@ describe("worktree skills directory placement", () => {
 			});
 
 			expect(result).toBe("linked");
-			expect(realpathSync(join(worktreePath, ".agents", "skills"))).toBe(realpathSync(canonicalSkillsDir));
+			expect(lstatSync(join(worktreePath, ".agents", "skills")).isDirectory()).toBe(true);
+			expect(realpathSync(join(worktreePath, ".agents", "skills", "fleet-smoke"))).toBe(
+				realpathSync(canonicalSkillDir),
+			);
 		} finally {
 			cleanup();
 		}
@@ -157,6 +162,54 @@ describe("worktree skills directory placement", () => {
 		}
 	});
 
+	it("given project and bundled skills with the same name, when setup runs, then the project body wins in the merged mount", async () => {
+		const { root, cleanup } = await createSandbox();
+		try {
+			const workspacePath = join(root, "repo");
+			const projectSkillDir = join(workspacePath, "fleet", "skills", "fleet-pr");
+			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const bundledSkillDir = join(canonicalSkillsDir, "fleet-pr");
+			const bundledOnlySkillDir = join(canonicalSkillsDir, "fleet-implement");
+			const worktreePath = join(root, "worktree");
+			mkdirSync(projectSkillDir, { recursive: true });
+			mkdirSync(bundledSkillDir, { recursive: true });
+			mkdirSync(bundledOnlySkillDir, { recursive: true });
+			mkdirSync(worktreePath, { recursive: true });
+			writeFileSync(
+				join(projectSkillDir, "SKILL.md"),
+				"---\nname: fleet-pr\ndirective: project\n---\nProject body\n",
+				"utf8",
+			);
+			writeFileSync(
+				join(bundledSkillDir, "SKILL.md"),
+				"---\nname: fleet-pr\ndirective: bundled\n---\nBundled body\n",
+				"utf8",
+			);
+			writeFileSync(
+				join(bundledOnlySkillDir, "SKILL.md"),
+				"---\nname: fleet-implement\ndirective: bundled implement\n---\n",
+				"utf8",
+			);
+
+			const result = await ensureWorktreeSkillsDirectory({
+				worktreePath,
+				workspacePath,
+				canonicalSkillsDir,
+			});
+
+			expect(result).toBe("linked");
+			expect(realpathSync(join(worktreePath, ".agents", "skills", "fleet-pr"))).toBe(realpathSync(projectSkillDir));
+			expect(realpathSync(join(worktreePath, ".agents", "skills", "fleet-implement"))).toBe(
+				realpathSync(bundledOnlySkillDir),
+			);
+			expect(readFileSync(join(worktreePath, ".agents", "skills", "fleet-pr", "SKILL.md"), "utf8")).toContain(
+				"Project body",
+			);
+		} finally {
+			cleanup();
+		}
+	});
+
 	it("given the canonical skills dir cannot be resolved, when setup runs, then no skills link is created and no throw occurs", async () => {
 		const { root, cleanup } = await createSandbox();
 		try {
@@ -180,12 +233,14 @@ describe("worktree skills directory placement", () => {
 		}
 	});
 
-	it("given a claude agent, when skills are placed at .claude/skills, then that location resolves to the canonical skills dir", async () => {
+	it("given a claude agent, when skills are placed at .claude/skills, then bundled skill links are created there", async () => {
 		const { root, cleanup } = await createSandbox();
 		try {
 			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
+			const canonicalSkillDir = join(canonicalSkillsDir, "fleet-smoke");
 			const worktreePath = join(root, "worktree");
-			mkdirSync(canonicalSkillsDir, { recursive: true });
+			mkdirSync(canonicalSkillDir, { recursive: true });
+			writeFileSync(join(canonicalSkillDir, "SKILL.md"), "---\nname: fleet-smoke\ndirective: smoke\n---\n", "utf8");
 			mkdirSync(worktreePath, { recursive: true });
 
 			const result = await ensureWorktreeSkillsDirectory({
@@ -195,7 +250,9 @@ describe("worktree skills directory placement", () => {
 			});
 
 			expect(result).toBe("linked");
-			expect(realpathSync(join(worktreePath, ".claude", "skills"))).toBe(realpathSync(canonicalSkillsDir));
+			expect(realpathSync(join(worktreePath, ".claude", "skills", "fleet-smoke"))).toBe(
+				realpathSync(canonicalSkillDir),
+			);
 			// The codex/default location is NOT created for a claude card.
 			expect(() => lstatSync(join(worktreePath, ".agents", "skills"))).toThrow();
 		} finally {
