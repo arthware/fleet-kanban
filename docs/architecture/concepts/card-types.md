@@ -1,8 +1,8 @@
 # Card Type & Skill Pipeline
 
-**Importance:** high  ·  **Lives in:** `src/core/card-type.ts`, `src/prompts/card-type-discovery.ts`, `src/prompts/compose-card-directive.ts`, `src/trpc/runtime-api.ts`, `fleet-cli/fleet`, `fleet/card-types/`
+**Importance:** high  ·  **Lives in:** `src/core/card-type.ts`, `src/prompts/card-type-discovery.ts`, `src/prompts/compose-card-directive.ts`, `src/trpc/runtime-api.ts`, `fleet-cli/fleet`, `fleet/card-types/`, `fleet/skills/`
 
-A data-defined workflow mapping operational phases to Kanban board lanes, and dynamically composing AI agent skills and system directives at session start.
+A data-defined workflow mapping operational phases to Kanban board lanes, and dynamically composing AI agent skills and system directives at session start. Custom card types live at `fleet/card-types/`, and custom skills live in a parallel project layer at `fleet/skills/`.
 
 ## Domain model
 A card type is represented as a markdown file with YAML frontmatter containing an ordered list of `phases`. Each phase maps to a specific board lane (`backlog`, `in_progress`, `review`, `done`), binds an ordered list of `skills`, specifies an `activation` condition (`default`, `plan-flag`, `auto-review-pr`, `dormant`), and optionally defines `planMode` (to force a real agent plan mode launch).

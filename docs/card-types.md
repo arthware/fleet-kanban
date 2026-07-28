@@ -30,8 +30,8 @@ A Kanban card represents a durable unit of work, while an AI agent session repre
 
 ### 1.2 Unified Central Injection (Single Source of Truth)
 System directives are compiled and injected centrally:
-1. **Skill-Derived Directives**: Directives are extracted from the `directive:` YAML frontmatter field of active skill files (e.g., `.agents/skills/fleet-implement/SKILL.md`).
-2. **Deterministic Composition**: At session start, the active phase's skills are resolved, and their frontmatter directives are loaded from the canonical skills directory. Placeholders (such as `${baseRef}` in the `fleet-pr` directive) are dynamically interpolated, and the resulting prompt strings are concatenated in declared order.
+1. **Skill-Derived Directives**: Directives are extracted from the `directive:` YAML frontmatter field of resolved active skill files (either from project-layer custom skills in `fleet/skills/` or the bundled `.agents/skills/` folder; see Section 6).
+2. **Deterministic Composition**: At session start, the active phase's skills are resolved dynamically, and their frontmatter directives are loaded via the shared resolution pipeline. Placeholders (such as `${baseRef}` in the `fleet-pr` directive) are dynamically interpolated, and the resulting prompt strings are concatenated in declared order.
 3. **Unified Plan Mode Execution**: If any active phase has `planMode: true`, the session launches in real agent plan mode centrally, and adapters simply receive this unified start configuration.
 
 ---
@@ -49,7 +49,7 @@ description: string         # Single-line description shown in `fleet card-type 
 phases:                     # Ordered list of phases; composition order within a lane
   - name: string            # Phase ID (e.g., design, build, ship, verify)
     lane: string            # Kanban lane mapping: backlog | in_progress | review | done
-    skills: [string, ...]   # Ordered skill names pointing to `.agents/skills/<name>`
+    skills: [string, ...]   # Ordered skill names (resolved from project-layer fleet/skills/ or bundled; see Section 6)
     activation: string      # Activation rule: default | plan-flag | auto-review-pr | dormant
     planMode?: boolean      # Optional; if true, the agent launches in real plan mode
 ```
@@ -234,3 +234,38 @@ fleet task create --type bugfix "Fix websocket ping timeout"
 - Once you move the card to **`in_progress`**: starting a session will activate the `build` phase, seamlessly switching to the `fleet-implement` skill and directive.
 
 By dropping a single markdown manifest, you have customized your entire AI-agent task pipeline without writing or modifying a single line of application source code.
+
+---
+
+## 6. Project-Layer Custom Skills (Layered Resolution & Shadowing)
+
+Just as you can author custom card types in `fleet/card-types/`, you can also author and ship custom AI agent skills inside your repository. Project-layer custom skills live in a parallel directory structure at `fleet/skills/<name>/`.
+
+### 6.1 Creating a Custom Skill
+To create a custom skill, create a directory under `fleet/skills/` named after your skill, and inside it, create a `SKILL.md` file.
+
+The format is identical to bundled skills, consisting of a `directive:` YAML frontmatter field and a Markdown body:
+
+```markdown
+---
+directive: |
+  You are an expert engineer running in YOLO mode.
+  Perform the regression checks using the project tools.
+---
+
+# regression-check
+
+This skill guides the agent on how to run specialized regression and integration tests for this project.
+...
+```
+
+### 6.2 Resolution & Shadowing Rules
+The fleet runtime resolves skills dynamically using a **two-layer resolution pipeline**:
+1. **Project Layer (`project`)**: Scans `fleet/skills/<name>/` first.
+2. **Bundled Layer (`bundled`)**: Falls back to `.agents/skills/<name>/` (the skills shipped with the fleet-kanban package).
+
+For authoritative, in-depth architectural details, see the [Skill injection & directives](architecture/concepts/skill-injection.md) concept document.
+
+#### Key Behaviors:
+* **Shadowing (Project Wins)**: If a project-layer skill has the exact same name as a bundled skill (e.g., `fleet-implement`), the project-layer custom skill **shadows (overrides) the bundled one** in both the directive channel and the worktree mount channel.
+* **Merged Mount**: On task worktree creation, the target skills directory is mounted as a **merged directory** with one symlink per skill. This guarantees that your project-layer custom skills are combined with the default bundled skills seamlessly, so shipping a custom skill does not cause you to lose access to any bundled ones.
