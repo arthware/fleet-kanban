@@ -118,7 +118,6 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 				architectWorkspaceId: null,
 				workspaceState: null,
 				workspaceMetadata: null,
-				clineSessionContextVersion: 1,
 			}),
 		});
 	};

@@ -6,7 +6,6 @@ import type {
 	RuntimeCardPrState,
 	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
-	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
 } from "@/runtime/types";
 
@@ -58,7 +57,6 @@ export interface BoardCard {
 	agentId?: RuntimeAgentId;
 	agentModel?: string;
 	skill?: string;
-	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 	createdAt: number;
 	updatedAt: number;

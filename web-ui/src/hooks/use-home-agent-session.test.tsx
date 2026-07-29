@@ -105,28 +105,12 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 				installed: true,
 				configured: false,
 			},
-		],
-		shortcuts: [],
-		worktree: {},
-		clineProviderSettings: {
-			providerId: "anthropic",
-			modelId: "claude-sonnet-4-6",
-			baseUrl: null,
-			apiKeyConfigured: false,
-			oauthProvider: null,
-			oauthAccessTokenConfigured: false,
-			oauthRefreshTokenConfigured: false,
-			oauthAccountId: null,
-			oauthExpiresAt: null,
-		},
-		...overrides,
-	};
-}
-
-function createLegacyRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): RuntimeConfigResponse {
-	const { clineProviderSettings: _clineProviderSettings, ...legacyConfig } = createRuntimeConfig(overrides);
-	return legacyConfig as RuntimeConfigResponse;
-}
+			],
+			shortcuts: [],
+			worktree: {},
+			...overrides,
+		};
+	}
 
 const DEFAULT_WORKSPACE_GIT: RuntimeGitRepositoryInfo = {
 	currentBranch: "main",
@@ -440,22 +424,11 @@ describe("useHomeAgentSession", () => {
 
 		await act(async () => {
 			root.render(
-				<HookHarness
-					config={createRuntimeConfig({
-						selectedAgentId: "claude",
-						effectiveCommand: "claude",
-						clineProviderSettings: {
-							providerId: "oca",
-							modelId: "gpt-5",
-							baseUrl: null,
-							apiKeyConfigured: false,
-							oauthProvider: null,
-							oauthAccessTokenConfigured: false,
-							oauthRefreshTokenConfigured: false,
-							oauthAccountId: null,
-							oauthExpiresAt: null,
-						},
-					})}
+					<HookHarness
+						config={createRuntimeConfig({
+							selectedAgentId: "claude",
+							effectiveCommand: "claude",
+						})}
 					currentProjectId="workspace-1"
 					seedSessionSummary
 					onSnapshot={(snapshot) => {
@@ -474,31 +447,6 @@ describe("useHomeAgentSession", () => {
 			taskId: anthropicTaskId,
 		});
 		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
-		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
-	});
-
-	it("falls back to empty cline settings when older config shapes omit them", async () => {
-		let latestSnapshot: HookSnapshot | null = null;
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					config={createLegacyRuntimeConfig({
-						selectedAgentId: "claude",
-						effectiveCommand: "claude",
-					})}
-					currentProjectId="workspace-1"
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-			await createFlushPromises();
-		});
-
-		const snapshot = requireSnapshot(latestSnapshot);
-		expect(snapshot.panelMode).toBe("chat");
-		expect(snapshot.taskId).toBe("__home_agent__:workspace-1");
 		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
 	});
 
