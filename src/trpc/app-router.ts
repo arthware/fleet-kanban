@@ -9,32 +9,6 @@ import type {
 	RuntimeAgentBudgetResponse,
 	RuntimeArchivedCardsResponse,
 	RuntimeArchivedTaskRestoreRequest,
-	RuntimeClineAccountBalanceResponse,
-	RuntimeClineAccountOrganizationsResponse,
-	RuntimeClineAccountProfileResponse,
-	RuntimeClineAccountSwitchRequest,
-	RuntimeClineAccountSwitchResponse,
-	RuntimeClineAddProviderRequest,
-	RuntimeClineAddProviderResponse,
-	RuntimeClineDeviceAuthCompleteRequest,
-	RuntimeClineDeviceAuthCompleteResponse,
-	RuntimeClineDeviceAuthStartResponse,
-	RuntimeClineKanbanAccessResponse,
-	RuntimeClineMcpAuthStatusResponse,
-	RuntimeClineMcpOAuthRequest,
-	RuntimeClineMcpOAuthResponse,
-	RuntimeClineMcpSettingsResponse,
-	RuntimeClineMcpSettingsSaveRequest,
-	RuntimeClineMcpSettingsSaveResponse,
-	RuntimeClineOauthLoginRequest,
-	RuntimeClineOauthLoginResponse,
-	RuntimeClineProviderCatalogResponse,
-	RuntimeClineProviderModelsRequest,
-	RuntimeClineProviderModelsResponse,
-	RuntimeClineProviderSettingsSaveRequest,
-	RuntimeClineProviderSettingsSaveResponse,
-	RuntimeClineUpdateProviderRequest,
-	RuntimeClineUpdateProviderResponse,
 	RuntimeCommandRunRequest,
 	RuntimeCommandRunResponse,
 	RuntimeConfigResponse,
@@ -122,32 +96,6 @@ import {
 	runtimeAgentBudgetResponseSchema,
 	runtimeArchivedCardsResponseSchema,
 	runtimeArchivedTaskRestoreRequestSchema,
-	runtimeClineAccountBalanceResponseSchema,
-	runtimeClineAccountOrganizationsResponseSchema,
-	runtimeClineAccountProfileResponseSchema,
-	runtimeClineAccountSwitchRequestSchema,
-	runtimeClineAccountSwitchResponseSchema,
-	runtimeClineAddProviderRequestSchema,
-	runtimeClineAddProviderResponseSchema,
-	runtimeClineDeviceAuthCompleteRequestSchema,
-	runtimeClineDeviceAuthCompleteResponseSchema,
-	runtimeClineDeviceAuthStartResponseSchema,
-	runtimeClineKanbanAccessResponseSchema,
-	runtimeClineMcpAuthStatusResponseSchema,
-	runtimeClineMcpOAuthRequestSchema,
-	runtimeClineMcpOAuthResponseSchema,
-	runtimeClineMcpSettingsResponseSchema,
-	runtimeClineMcpSettingsSaveRequestSchema,
-	runtimeClineMcpSettingsSaveResponseSchema,
-	runtimeClineOauthLoginRequestSchema,
-	runtimeClineOauthLoginResponseSchema,
-	runtimeClineProviderCatalogResponseSchema,
-	runtimeClineProviderModelsRequestSchema,
-	runtimeClineProviderModelsResponseSchema,
-	runtimeClineProviderSettingsSaveRequestSchema,
-	runtimeClineProviderSettingsSaveResponseSchema,
-	runtimeClineUpdateProviderRequestSchema,
-	runtimeClineUpdateProviderResponseSchema,
 	runtimeCommandRunRequestSchema,
 	runtimeCommandRunResponseSchema,
 	runtimeConfigResponseSchema,
@@ -246,18 +194,6 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeConfigSaveRequest,
 		) => Promise<RuntimeConfigResponse>;
-		saveClineProviderSettings: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineProviderSettingsSaveRequest,
-		) => Promise<RuntimeClineProviderSettingsSaveResponse>;
-		addClineProvider: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineAddProviderRequest,
-		) => Promise<RuntimeClineAddProviderResponse>;
-		updateClineProvider: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineUpdateProviderRequest,
-		) => Promise<RuntimeClineUpdateProviderResponse>;
 		startTaskSession: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionStartRequest,
@@ -290,7 +226,6 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskTokenUsageRequest,
 		) => Promise<RuntimeTaskTokenUsageResponse>;
-		getClineSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
 		sendTaskChatMessage: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatSendRequest,
@@ -307,46 +242,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatCancelRequest,
 		) => Promise<RuntimeTaskChatCancelResponse>;
-		getClineProviderCatalog: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeClineProviderCatalogResponse>;
-		getClineAccountProfile: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineAccountProfileResponse>;
-		getClineKanbanAccess: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineKanbanAccessResponse>;
 		getFeaturebaseToken: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFeaturebaseTokenResponse>;
-		getClineAccountBalance: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineAccountBalanceResponse>;
 		getAgentBudget: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeAgentBudgetResponse>;
 		getFleetUpdateStatus: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFleetUpdateStatusResponse>;
 		applyFleetUpdate: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeFleetUpdateApplyResult>;
-		getClineAccountOrganizations: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeClineAccountOrganizationsResponse>;
-		switchClineAccount: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineAccountSwitchRequest,
-		) => Promise<RuntimeClineAccountSwitchResponse>;
-		getClineProviderModels: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineProviderModelsRequest,
-		) => Promise<RuntimeClineProviderModelsResponse>;
-		runClineProviderOAuthLogin: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineOauthLoginRequest,
-		) => Promise<RuntimeClineOauthLoginResponse>;
-		startClineDeviceAuth: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineDeviceAuthStartResponse>;
-		completeClineDeviceAuth: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineDeviceAuthCompleteRequest,
-		) => Promise<RuntimeClineDeviceAuthCompleteResponse>;
-		getClineMcpAuthStatuses: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineMcpAuthStatusResponse>;
-		runClineMcpServerOAuth: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineMcpOAuthRequest,
-		) => Promise<RuntimeClineMcpOAuthResponse>;
-		getClineMcpSettings: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineMcpSettingsResponse>;
-		saveClineMcpSettings: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineMcpSettingsSaveRequest,
-		) => Promise<RuntimeClineMcpSettingsSaveResponse>;
 		startShellSession: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeShellSessionStartRequest,
@@ -519,24 +418,6 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.saveConfig(ctx.workspaceScope, input);
 			}),
-		saveClineProviderSettings: t.procedure
-			.input(runtimeClineProviderSettingsSaveRequestSchema)
-			.output(runtimeClineProviderSettingsSaveResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveClineProviderSettings(ctx.workspaceScope, input);
-			}),
-		addClineProvider: t.procedure
-			.input(runtimeClineAddProviderRequestSchema)
-			.output(runtimeClineAddProviderResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.addClineProvider(ctx.workspaceScope, input);
-			}),
-		updateClineProvider: t.procedure
-			.input(runtimeClineUpdateProviderRequestSchema)
-			.output(runtimeClineUpdateProviderResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.updateClineProvider(ctx.workspaceScope, input);
-			}),
 		startTaskSession: workspaceProcedure
 			.input(runtimeTaskSessionStartRequestSchema)
 			.output(runtimeTaskSessionStartResponseSchema)
@@ -585,9 +466,6 @@ export const runtimeAppRouter = t.router({
 			.query(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.getTaskTokenUsage(ctx.workspaceScope, input);
 			}),
-		getClineSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineSlashCommands(ctx.workspaceScope);
-		}),
 		reloadTaskChatSession: workspaceProcedure
 			.input(runtimeTaskChatReloadRequestSchema)
 			.output(runtimeTaskChatReloadResponseSchema)
@@ -612,20 +490,8 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.cancelTaskChatTurn(ctx.workspaceScope, input);
 			}),
-		getClineProviderCatalog: t.procedure.output(runtimeClineProviderCatalogResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineProviderCatalog(ctx.workspaceScope);
-		}),
-		getClineAccountProfile: t.procedure.output(runtimeClineAccountProfileResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineAccountProfile(ctx.workspaceScope);
-		}),
-		getClineKanbanAccess: t.procedure.output(runtimeClineKanbanAccessResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineKanbanAccess(ctx.workspaceScope);
-		}),
 		getFeaturebaseToken: t.procedure.output(runtimeFeaturebaseTokenResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getFeaturebaseToken(ctx.workspaceScope);
-		}),
-		getClineAccountBalance: t.procedure.output(runtimeClineAccountBalanceResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineAccountBalance(ctx.workspaceScope);
 		}),
 		getAgentBudget: t.procedure.output(runtimeAgentBudgetResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getAgentBudget(ctx.workspaceScope);
@@ -636,56 +502,6 @@ export const runtimeAppRouter = t.router({
 		applyFleetUpdate: t.procedure.output(runtimeFleetUpdateApplyResultSchema).mutation(async ({ ctx }) => {
 			return await ctx.runtimeApi.applyFleetUpdate(ctx.workspaceScope);
 		}),
-		getClineAccountOrganizations: t.procedure
-			.output(runtimeClineAccountOrganizationsResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineAccountOrganizations(ctx.workspaceScope);
-			}),
-		switchClineAccount: t.procedure
-			.input(runtimeClineAccountSwitchRequestSchema)
-			.output(runtimeClineAccountSwitchResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.switchClineAccount(ctx.workspaceScope, input);
-			}),
-		getClineProviderModels: t.procedure
-			.input(runtimeClineProviderModelsRequestSchema)
-			.output(runtimeClineProviderModelsResponseSchema)
-			.query(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.getClineProviderModels(ctx.workspaceScope, input);
-			}),
-		getClineMcpAuthStatuses: t.procedure.output(runtimeClineMcpAuthStatusResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineMcpAuthStatuses(ctx.workspaceScope);
-		}),
-		runClineMcpServerOAuth: t.procedure
-			.input(runtimeClineMcpOAuthRequestSchema)
-			.output(runtimeClineMcpOAuthResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runClineMcpServerOAuth(ctx.workspaceScope, input);
-			}),
-		getClineMcpSettings: t.procedure.output(runtimeClineMcpSettingsResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineMcpSettings(ctx.workspaceScope);
-		}),
-		saveClineMcpSettings: t.procedure
-			.input(runtimeClineMcpSettingsSaveRequestSchema)
-			.output(runtimeClineMcpSettingsSaveResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveClineMcpSettings(ctx.workspaceScope, input);
-			}),
-		runClineProviderOAuthLogin: t.procedure
-			.input(runtimeClineOauthLoginRequestSchema)
-			.output(runtimeClineOauthLoginResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runClineProviderOAuthLogin(ctx.workspaceScope, input);
-			}),
-		startClineDeviceAuth: t.procedure.output(runtimeClineDeviceAuthStartResponseSchema).mutation(async ({ ctx }) => {
-			return await ctx.runtimeApi.startClineDeviceAuth(ctx.workspaceScope);
-		}),
-		completeClineDeviceAuth: t.procedure
-			.input(runtimeClineDeviceAuthCompleteRequestSchema)
-			.output(runtimeClineDeviceAuthCompleteResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.completeClineDeviceAuth(ctx.workspaceScope, input);
-			}),
 		startShellSession: workspaceProcedure
 			.input(runtimeShellSessionStartRequestSchema)
 			.output(runtimeShellSessionStartResponseSchema)

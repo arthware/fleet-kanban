@@ -8,7 +8,6 @@ import type {
 	RuntimeCardPrState,
 	RuntimeExternalIssue,
 	RuntimeTaskAutoReviewMode,
-	RuntimeTaskClineSettings,
 	RuntimeTaskImage,
 } from "./api-contract";
 import { createUniqueTaskId } from "./task-id";
@@ -29,7 +28,6 @@ export interface RuntimeCreateTaskInput {
 	skill?: string;
 	cardType?: string;
 	externalIssue?: RuntimeExternalIssue;
-	clineSettings?: RuntimeTaskClineSettings;
 	baseRef: string;
 }
 
@@ -44,7 +42,6 @@ export interface RuntimeUpdateTaskInput {
 	skill?: string | null;
 	cardType?: string | null;
 	externalIssue?: RuntimeExternalIssue | null;
-	clineSettings?: RuntimeTaskClineSettings | null;
 	baseRef: string;
 }
 
@@ -72,19 +69,6 @@ function normalizeTaskAutoReview(input: { enabled?: boolean; mode?: RuntimeTaskA
 // Copy image metadata so board tasks do not retain caller-owned array or object references.
 function cloneTaskImages(images?: RuntimeTaskImage[]): RuntimeTaskImage[] | undefined {
 	return images && images.length > 0 ? images.map((image) => ({ ...image })) : undefined;
-}
-
-function cloneTaskClineSettings(settings?: RuntimeTaskClineSettings | null): RuntimeTaskClineSettings | undefined {
-	if (settings === undefined || settings === null) {
-		return undefined;
-	}
-	const providerId = settings.providerId?.trim();
-	const modelId = settings.modelId?.trim();
-	return {
-		...(providerId ? { providerId } : {}),
-		...(modelId ? { modelId } : {}),
-		...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
-	};
 }
 
 function cloneExternalIssue(issue?: RuntimeExternalIssue | null): RuntimeExternalIssue | undefined {
@@ -360,7 +344,6 @@ export function addTaskToColumn(
 		...(input.skill?.trim() ? { skill: input.skill.trim() } : {}),
 		...(input.cardType?.trim() ? { cardType: input.cardType.trim() } : {}),
 		...(externalIssue ? { externalIssue } : {}),
-		...(input.clineSettings !== undefined ? { clineSettings: cloneTaskClineSettings(input.clineSettings) } : {}),
 		baseRef,
 		createdAt: now,
 		updatedAt: now,
@@ -705,12 +688,6 @@ export function updateTask(
 						: input.externalIssue === null
 							? undefined
 							: cloneExternalIssue(input.externalIssue),
-				clineSettings:
-					input.clineSettings === undefined
-						? cloneTaskClineSettings(card.clineSettings)
-						: input.clineSettings === null
-							? undefined
-							: cloneTaskClineSettings(input.clineSettings),
 				baseRef,
 				updatedAt: now,
 			};

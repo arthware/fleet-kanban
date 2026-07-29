@@ -120,12 +120,7 @@ export function unsupported<T = never>(reason: string): Capability<T> {
 export const DRIVERS = {
 	claude: createUnboundAgentDriver(catalogEntryById("claude")),
 	codex: createUnboundAgentDriver(catalogEntryById("codex")),
-	cursor: createUnboundAgentDriver(catalogEntryById("cursor")),
 	gemini: createUnboundAgentDriver(catalogEntryById("gemini")),
-	opencode: createUnboundAgentDriver(catalogEntryById("opencode")),
-	droid: createUnboundAgentDriver(catalogEntryById("droid")),
-	kiro: createUnboundAgentDriver(catalogEntryById("kiro")),
-	cline: createUnboundAgentDriver(catalogEntryById("cline")),
 } satisfies Record<RuntimeAgentId, AgentDriver>;
 
 function catalogEntryById(agentId: RuntimeAgentId): RuntimeAgentCatalogEntry {
