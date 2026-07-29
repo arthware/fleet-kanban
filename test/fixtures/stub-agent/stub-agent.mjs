@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
@@ -46,6 +46,13 @@ async function notifyReview() {
 const cwd = process.cwd();
 const taskId = process.env.KANBAN_HOOK_TASK_ID ?? "unknown-task";
 const markerPath = join(cwd, "stub-agent-output.txt");
+
+const runtimeHome = process.env.KANBAN_RUNTIME_HOME ?? (process.env.HOME ? join(process.env.HOME, ".kanban") : null);
+if (runtimeHome) {
+	mkdirSync(runtimeHome, { recursive: true });
+	const argvPath = join(runtimeHome, `launched-argv-${taskId}.json`);
+	writeFileSync(argvPath, JSON.stringify(process.argv), "utf8");
+}
 
 appendFileSync(markerPath, `stub commit for ${taskId}\n`, "utf8");
 run("git", ["add", "stub-agent-output.txt"], { cwd });

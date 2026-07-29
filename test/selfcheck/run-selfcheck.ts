@@ -7,9 +7,10 @@ import {
 	attachContext,
 	createSelfcheckContext,
 	createTrpcScenarioDriver,
+	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
+	givenCardWithModelOverrideWhenStartedThenCliReceivesModel,
 	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
 	givenLifecycleCardWhenCompletedThenLinkedCardStarts,
-	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
 	givenReviewHookWhenIngestedThenOverseerIsNotified,
 	givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts,
 } from "./scenario-api";
@@ -75,6 +76,16 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
+	});
+	await runScenario(results, "a card's model override reaches the CLI", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "CLI contract: help and usage exits", async () => {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();

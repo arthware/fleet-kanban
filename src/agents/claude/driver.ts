@@ -3,12 +3,31 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import {
+	getRuntimeAgentBinaryCandidates,
+	RUNTIME_AGENT_CATALOG,
+	type RuntimeAgentCatalogEntry,
+} from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
+import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
+import { buildHookCommand, buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
+import {
+	isClaudeCloudProviderBackend,
+	resolveClaudePermissionStrategy,
+} from "../../terminal/claude-permission-strategy";
+import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { deriveHomeAgentClaudeSessionId } from "../../terminal/home-agent-session-id";
-import type { AgentDriver, AgentObservationMessage, DriverSessionRef, LaunchIdentityPlan, ObservationRequest } from "../driver";
-import { supported, unsupported } from "../driver";
+import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import type {
+	AgentDriver,
+	AgentObservationMessage,
+	DriverSessionRef,
+	LaunchIdentityPlan,
+	LaunchPlan,
+	ObservationRequest,
+} from "../driver";
+import { hasCliOption, supported, unsupported, withPrompt } from "../driver";
 import type { SessionSignal } from "../session-signal";
 
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
@@ -16,16 +35,219 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 		id: "claude",
 		catalog: catalogEntryById("claude"),
 		launch: {
-			preflight: async () => unsupported("claude launch is not bound yet"),
-			prepare: async () => unsupported("claude launch is not bound yet"),
-			applyModel: (args, model) => supported([...args, "--model", model]),
+			preflight: async () => {
+				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
+				if (testFail) {
+					return unsupported(testFail);
+				}
+				const isTest =
+					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
+				if (!isTest) {
+					const candidates = getRuntimeAgentBinaryCandidates("claude");
+					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
+					if (!binary) {
+						return unsupported("binary missing: 'claude' CLI binary not found on PATH");
+					}
+					const hasAuth =
+						process.env.ANTHROPIC_API_KEY ||
+						process.env.AWS_PROFILE ||
+						process.env.AWS_ACCESS_KEY_ID ||
+						process.env.GCP_PROJECT ||
+						process.env.GOOGLE_APPLICATION_CREDENTIALS;
+					if (!hasAuth) {
+						return unsupported(
+							"not authenticated: ANTHROPIC_API_KEY or cloud provider credentials are not set in environment",
+						);
+					}
+					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
+						return unsupported("not trusted: workspace is not trusted");
+					}
+				}
+				return supported({ ok: true as const });
+			},
+			prepare: async (input) => {
+				const args = [...input.args];
+				const env: Record<string, string | undefined> = {
+					FORCE_HYPERLINK: "1",
+				};
+				const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+					architectContextPreamble: input.architectContextPreamble ?? undefined,
+				});
+				if (input.autonomousModeEnabled) {
+					env.CLAUDE_CODE_ENABLE_AUTO_MODE = "1";
+				}
+				if (
+					input.autonomousModeEnabled &&
+					!hasCliOption(args, "--permission-mode") &&
+					!hasCliOption(args, "--dangerously-skip-permissions")
+				) {
+					const strategy = resolveClaudePermissionStrategy({
+						agentModel: input.agentModel ?? undefined,
+						cloudProviderBackend: isClaudeCloudProviderBackend(),
+					});
+					if (strategy === "bypass-guarded") {
+						args.push("--dangerously-skip-permissions");
+					} else {
+						args.push("--permission-mode", "auto");
+					}
+				}
+				const claudeSessionId = input.agentSessionId?.trim();
+				const claudeHasResumeFlag = hasCliOption(args, "--resume") || hasCliOption(args, "--continue");
+				if (input.resumeSession && claudeSessionId && !claudeHasResumeFlag) {
+					args.push("--resume", claudeSessionId);
+				} else if (
+					!input.resumeSession &&
+					claudeSessionId &&
+					!claudeHasResumeFlag &&
+					!hasCliOption(args, "--session-id")
+				) {
+					args.push("--session-id", claudeSessionId);
+				} else if (input.resumeFromTrash && !hasCliOption(args, "--continue")) {
+					args.push("--continue");
+				}
+
+				// Apply model using applyModel method
+				const finalArgs = [...args];
+				if (input.agentModel) {
+					if (hasCliOption(finalArgs, "--model") || hasCliOption(finalArgs, "-m")) {
+						// user-supplied model wins
+					} else {
+						finalArgs.push("--model", input.agentModel);
+					}
+				}
+
+				const bashGuardEnabled =
+					input.autonomousModeEnabled === true && hasCliOption(finalArgs, "--dangerously-skip-permissions");
+
+				const filesToWrite: { path: string; content: string }[] = [];
+				const hasWorkspaceId = input.workspaceId?.trim();
+				if (hasWorkspaceId) {
+					const settingsPath = join(getHookAgentDirectory("claude"), "settings.json");
+					const preToolUseHooks = [
+						{
+							matcher: "*",
+							hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
+						},
+						...(bashGuardEnabled
+							? [
+									{
+										matcher: "Bash",
+										hooks: [{ type: "command", command: buildHooksCommand(["guard", "--source", "claude"]) }],
+									},
+								]
+							: []),
+					];
+					const hooksSettings = {
+						hooks: {
+							Stop: [
+								{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] },
+							],
+							SubagentStop: [
+								{ hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }] },
+							],
+							PreToolUse: preToolUseHooks,
+							PermissionRequest: [
+								{
+									type: "command",
+									command: buildHookCommand("to_review", {
+										source: "claude",
+										notificationType: "permission_prompt",
+									}),
+								},
+							],
+							PostToolUse: [
+								{
+									matcher: "*",
+									hooks: [
+										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+									],
+								},
+							],
+							PostToolUseFailure: [
+								{
+									matcher: "*",
+									hooks: [
+										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+									],
+								},
+							],
+							Notification: [
+								{
+									matcher: "permission_prompt",
+									hooks: [
+										{
+											type: "command",
+											command: buildHookCommand("to_review", {
+												source: "claude",
+												notificationType: "permission_prompt",
+											}),
+										},
+									],
+								},
+								{
+									matcher: "*",
+									hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
+								},
+							],
+							UserPromptSubmit: [
+								{
+									hooks: [
+										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+									],
+								},
+							],
+						},
+					};
+					filesToWrite.push({
+						path: settingsPath,
+						content: JSON.stringify(hooksSettings, null, 2),
+					});
+					finalArgs.push("--settings", settingsPath);
+					Object.assign(
+						env,
+						createHookRuntimeEnv({
+							taskId: input.taskId,
+							workspaceId: hasWorkspaceId,
+						}),
+					);
+				}
+
+				if (
+					appendedSystemPrompt &&
+					!hasCliOption(finalArgs, "--append-system-prompt") &&
+					!hasCliOption(finalArgs, "--system-prompt")
+				) {
+					finalArgs.push("--append-system-prompt", appendedSystemPrompt);
+				}
+
+				const withPromptLaunch = withPrompt(finalArgs, input.prompt, "append");
+				return supported({
+					binary: input.binary,
+					args: withPromptLaunch.args,
+					env: {
+						...withPromptLaunch.env,
+						...env,
+					},
+					filesToWrite,
+				} satisfies LaunchPlan);
+			},
+			applyModel: (args, model) => {
+				if (hasCliOption(args, "--model") || hasCliOption(args, "-m")) {
+					return supported(args);
+				}
+				return supported([...args, "--model", model]);
+			},
 		},
 		identity: {
 			durability: "deterministic",
 			resolve: (input) => {
 				switch (input.ref.kind) {
 					case "overseer": {
-						const agentSessionId = deriveHomeAgentClaudeSessionId(input.ref.workspaceId, "claude", input.generation);
+						const agentSessionId = deriveHomeAgentClaudeSessionId(
+							input.ref.workspaceId,
+							"claude",
+							input.generation,
+						);
 						const resumeSession = input.lifecycle === "resumable" || input.lifecycle === "attached";
 						return supported({
 							agentSessionId,
@@ -36,7 +258,8 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 					}
 					case "card": {
 						const stored = input.stored?.trim() || null;
-						const resumeSession = (input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
+						const resumeSession =
+							(input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
 						const agentSessionId = resumeSession ? stored : randomUUID();
 						return supported({
 							agentSessionId,
