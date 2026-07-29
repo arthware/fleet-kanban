@@ -513,7 +513,22 @@ function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: st
 	runGit(repoPath, ["init", "-b", "main"]);
 	runGit(repoPath, ["config", "protocol.file.allow", "always"]);
 	writeFileSync(join(repoPath, "README.md"), "main-content\n", "utf8");
-	writeFileSync(join(repoPath, ".gitignore"), ".env\n.env.local\n/node_modules/\n/dist/\n/.turbo/\n", "utf8");
+	writeFileSync(
+		join(repoPath, ".gitignore"),
+		[
+			".env",
+			".env.local",
+			"/node_modules/",
+			"/dist/",
+			"/.turbo/",
+			"apps/lab/.env.local",
+			"apps/lab/.env.test-integration",
+			"packages/skill-runner/src/generated/",
+			"packages/viewer/src/tailwind.build.css",
+			"",
+		].join("\n"),
+		"utf8",
+	);
 	writeFileSync(join(repoPath, ".env"), "ENV_VAR=value\n", "utf8");
 	writeFileSync(join(repoPath, ".env.local"), "ENV_LOCAL=local-value\n", "utf8");
 	mkdirSync(join(repoPath, "node_modules"), { recursive: true });
@@ -522,6 +537,26 @@ function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: st
 	writeFileSync(join(repoPath, "dist", "built.js"), "compiled-js\n", "utf8");
 	mkdirSync(join(repoPath, ".turbo"), { recursive: true });
 	writeFileSync(join(repoPath, ".turbo", "cache.json"), '{"cached":true}\n', "utf8");
+	mkdirSync(join(repoPath, "apps", "lab", "src"), { recursive: true });
+	writeFileSync(join(repoPath, "apps", "lab", "package.json"), '{"name":"lab"}\n', "utf8");
+	writeFileSync(join(repoPath, "apps", "lab", "src", "index.ts"), "export const lab = true;\n", "utf8");
+	writeFileSync(join(repoPath, "apps", "lab", ".env.local"), "LAB_ENV_LOCAL=local\n", "utf8");
+	writeFileSync(join(repoPath, "apps", "lab", ".env.test-integration"), "LAB_ENV_TEST_INTEGRATION=test\n", "utf8");
+	mkdirSync(join(repoPath, "packages", "skill-runner", "src", "generated"), { recursive: true });
+	mkdirSync(join(repoPath, "packages", "viewer", "src"), { recursive: true });
+	writeFileSync(join(repoPath, "packages", "skill-runner", "package.json"), '{"name":"skill-runner"}\n', "utf8");
+	writeFileSync(
+		join(repoPath, "packages", "skill-runner", "src", "index.ts"),
+		"export const runner = true;\n",
+		"utf8",
+	);
+	writeFileSync(
+		join(repoPath, "packages", "skill-runner", "src", "generated", "runner-assets.json"),
+		'{"assets":[]}\n',
+		"utf8",
+	);
+	writeFileSync(join(repoPath, "packages", "viewer", "src", "app.tsx"), "export const App = null;\n", "utf8");
+	writeFileSync(join(repoPath, "packages", "viewer", "src", "tailwind.build.css"), ".a{color:red}\n", "utf8");
 	mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
 	writeFileSync(
 		join(repoPath, ".cline", "kanban", "config.json"),
@@ -537,7 +572,17 @@ function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: st
 		),
 		"utf8",
 	);
-	runGit(repoPath, ["add", "README.md", ".gitignore", ".cline/kanban/config.json"]);
+	runGit(repoPath, [
+		"add",
+		"README.md",
+		".gitignore",
+		".cline/kanban/config.json",
+		"apps/lab/package.json",
+		"apps/lab/src/index.ts",
+		"packages/skill-runner/package.json",
+		"packages/skill-runner/src/index.ts",
+		"packages/viewer/src/app.tsx",
+	]);
 	runGit(repoPath, ["commit", "-m", "init-main"]);
 	runGit(repoPath, ["-c", "protocol.file.allow=always", "submodule", "add", depPath, "vendor/submodule"]);
 	runGit(repoPath, ["commit", "-m", "add-submodule"]);
@@ -582,10 +627,28 @@ function assertShape(worktreePath: string): void {
 		existsSync(join(worktreePath, ".env.local")) && lstatSync(join(worktreePath, ".env.local")).isSymbolicLink(),
 		".env.local was not a symlink.",
 	);
+	assertOk(
+		existsSync(join(worktreePath, "apps", "lab", ".env.local")) &&
+			lstatSync(join(worktreePath, "apps", "lab", ".env.local")).isSymbolicLink(),
+		"apps/lab/.env.local was not a symlink.",
+	);
+	assertOk(
+		existsSync(join(worktreePath, "apps", "lab", ".env.test-integration")) &&
+			lstatSync(join(worktreePath, "apps", "lab", ".env.test-integration")).isSymbolicLink(),
+		"apps/lab/.env.test-integration was not a symlink.",
+	);
 	assertOk(existsSync(join(worktreePath, "vendor", "submodule", "dep-file.txt")), "Submodule was not checked out.");
 	for (const path of ["node_modules", "dist", ".turbo"]) {
 		assertOk(!existsSync(join(worktreePath, path)), `${path} should not be present in worktree.`);
 	}
+	assertOk(
+		!existsSync(join(worktreePath, "packages", "skill-runner", "src", "generated")),
+		"packages/skill-runner/src/generated should not be present in worktree.",
+	);
+	assertOk(
+		!existsSync(join(worktreePath, "packages", "viewer", "src", "tailwind.build.css")),
+		"packages/viewer/src/tailwind.build.css should not be present in worktree.",
+	);
 	assertOk(
 		readFileSync(join(worktreePath, "post-create-marker.txt"), "utf8").trim() === "hook-ran",
 		"postCreateCommand did not run.",
