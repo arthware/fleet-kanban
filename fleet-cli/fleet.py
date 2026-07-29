@@ -1140,7 +1140,7 @@ def epic_sync(name: str, repo: str, cfg: dict):
     return 0
 
 def cmd_epic(args_list):
-    ap = argparse.ArgumentParser(description="Manage epic workspaces")
+    ap = argparse.ArgumentParser(prog="fleet epic", description="Manage epic workspaces")
     sub = ap.add_subparsers(dest="op", required=True)
 
     p_create = sub.add_parser("create")
@@ -1186,7 +1186,7 @@ def resolve_roots(args, cfg) -> list[Path]:
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "epic":
         sys.exit(cmd_epic(sys.argv[2:]))
-    ap = argparse.ArgumentParser(description="Epic-grouped view of parallel agent work")
+    ap = argparse.ArgumentParser(prog="fleet", description="Epic-grouped view of parallel agent work")
     ap.add_argument("--root", action="append", help="repo root to scan (repeatable); default = the .fleet project you're in")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--no-agents", action="store_true", help="skip live-agent detection")

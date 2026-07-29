@@ -1110,39 +1110,57 @@ Options:
 EOF
 }
 
+_fleet_task_general_help() {
+  cat <<'EOF'
+usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--type <type>] [--agent claude|codex] [--model <id>] [--auto-review pr] [--start]
+                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md
+       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]
+       fleet task start  --task-id <id> [--repo <name>]
+       fleet task say <id> "<text>" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent
+       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)
+       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)
+       fleet task unlink --dependency-id <id> [--repo <name>]
+       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]
+       fleet task promote <card-id> [--repo <name>]
+       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent
+       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]
+       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)
+       fleet task cat <id>          one task: state + worktree + diff
+       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation
+EOF
+}
+
 fleet_task() {
   [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
   local sub="${1:-}"; [ $# -gt 0 ] && shift
-  if [ "$sub" != "land" ]; then
-    # Skip running check for help
-    local check_help=0
-    for arg in "$@"; do
-      if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-        check_help=1
-        break
-      fi
-    done
-    if [ "$check_help" = "0" ]; then
-      kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+
+  # Scan for help requested once across any argument position
+  local has_help=0
+  for arg in "$@"; do
+    if [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+      has_help=1
+      break
     fi
+  done
+  if [ "$sub" = "--help" ] || [ "$sub" = "-h" ] || [ "$sub" = "help" ]; then
+    has_help=1
+  fi
+
+  if [ "$has_help" = "1" ]; then
+    if [ "$sub" = "create" ] || [ "$sub" = "new" ] || [ "$sub" = "add" ]; then
+      _fleet_task_create_help
+      return 0
+    fi
+    _fleet_task_general_help
+    return 0
+  fi
+
+  if [ "$sub" != "land" ]; then
+    kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
   fi
   case "$sub" in
     create|new|add)
-      # Check if help is requested. This help block is immediately adjacent to the parsing loop
-      # of fleet task create below. Keep both in sync when adding new translation flags.
-      local has_help=0
-      for arg in "$@"; do
-        if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-          has_help=1
-          break
-        fi
-      done
-      if [ "$has_help" = "1" ]; then
-        _fleet_task_create_help
-        return 0
-      fi
-
       # Thin delegation to `kanban task create`: fleet owns only --repo→--project-path
       # resolution and --start. Prompt/title/agent and the Markdown-card path (--file/--markdown
       # with YAML frontmatter) belong to kanban, so we translate fleet's ergonomic aliases and
@@ -1743,21 +1761,7 @@ PY
 
       say "landed $card (#$pr_num)."
       ;;
-    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--type <type>] [--agent claude|codex] [--model <id>] [--auto-review pr] [--start]" >&2
-       echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
-       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]" >&2
-       echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
-       echo "       fleet task say <id> \"<text>\" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent" >&2
-       echo "       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)" >&2
-       echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2
-       echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
-       echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2
-       echo "       fleet task promote <card-id> [--repo <name>]" >&2
-       echo "       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent" >&2
-       echo "       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]" >&2
-       echo "       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)" >&2
-       echo "       fleet task cat <id>          one task: state + worktree + diff" >&2
-       echo "       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation" >&2
+    *) _fleet_task_general_help >&2
        return 1;;
   esac
 }

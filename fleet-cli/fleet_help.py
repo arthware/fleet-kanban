@@ -115,31 +115,10 @@ def parse_args(args_list):
             sys.exit(0)
 
     elif cmd in ("task",):
-        kanban = find_kanban_bin()
-        # Ensure we run the node binary cleanly
-        node_exec = "node"
-        if subcmd:
-            if subcmd in ("new", "add"):
-                subcmd = "create"
-            elif subcmd in ("list",):
-                subcmd = "list"
-            elif subcmd in ("rm",):
-                subcmd = "delete"
-            elif subcmd in ("land",):
-                print("usage: fleet task land <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase]")
-                print("                               [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]\n")
-                print("       merges a finished card's open PR, moves card to done, and fast-forwards local base ref.")
-                sys.exit(0)
-                
-            if subcmd == "create":
-                fleet_sh = Path(__file__).parent / "fleet"
-                env = os.environ.copy()
-                env["FLEET_HELP_INTERNAL"] = "1"
-                run_command(["bash", str(fleet_sh), "task", "create", "--help"], env=env)
-            else:
-                run_command([node_exec, kanban, "task", subcmd, "--help"])
-        else:
-            run_command([node_exec, kanban, "task", "--help"])
+        fleet_sh = Path(__file__).parent / "fleet"
+        env = os.environ.copy()
+        env["FLEET_HELP_INTERNAL"] = "1"
+        run_command(["bash", str(fleet_sh), "task", subcmd if subcmd else "--help", "--help"], env=env)
 
     elif cmd in ("card-type", "card-types", "ct"):
         kanban = find_kanban_bin()
