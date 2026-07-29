@@ -180,10 +180,7 @@ async function updateIndex(workspaceId: string, taskId: string, manifest: Sessio
 	await lockedFileSystem.writeJsonFileAtomic(indexPath, index);
 }
 
-export async function listSessions(
-	workspaceId: string,
-	taskId: string,
-): Promise<SessionLedgerIndex | null> {
+export async function listSessions(workspaceId: string, taskId: string): Promise<SessionLedgerIndex | null> {
 	const sessionsDir = getTaskSessionsDir(workspaceId, taskId);
 	const indexPath = join(sessionsDir, "index.json");
 
@@ -251,8 +248,19 @@ export async function listSessions(
 async function deriveArtifactDetails(
 	agentId: string,
 	sessionId: string,
-	usageOut: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; costUsd: number | null },
-	sourceOut: { artifactPath: string | null; artifactSeenAt: number | null; artifactMtimeMs: number | null; artifactBytes: number | null },
+	usageOut: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		cacheCreationTokens: number;
+		costUsd: number | null;
+	},
+	sourceOut: {
+		artifactPath: string | null;
+		artifactSeenAt: number | null;
+		artifactMtimeMs: number | null;
+		artifactBytes: number | null;
+	},
 ): Promise<boolean> {
 	try {
 		const transcriptLoc = await locateAgentTranscript({
@@ -293,9 +301,7 @@ async function deriveArtifactDetails(
 	return false;
 }
 
-export async function harvestSessions(options?: {
-	dryRun?: boolean;
-}): Promise<readonly HarvestResult[]> {
+export async function harvestSessions(options?: { dryRun?: boolean }): Promise<readonly HarvestResult[]> {
 	const workspacesDir = join(clineHomeDir(), "kanban", "workspaces");
 	const indexPath = join(workspacesDir, "index.json");
 
@@ -334,7 +340,8 @@ export async function harvestSessions(options?: {
 			}
 
 			const kind = isHomeAgentSessionId(taskId) ? "home-agent" : "card";
-			const generation = kind === "home-agent" ? (summary.sessionGeneration ?? summary.homeAgentSessionGeneration ?? 0) : 0;
+			const generation =
+				kind === "home-agent" ? (summary.sessionGeneration ?? summary.homeAgentSessionGeneration ?? 0) : 0;
 			const agentId = summary.agentId ?? "claude";
 
 			const sessionsDir = getTaskSessionsDir(workspaceId, taskId);

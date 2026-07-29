@@ -2,11 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	harvestSessions,
-	listSessions,
-	openSession,
-} from "../../../src/core/session-ledger";
+import { harvestSessions, listSessions, openSession } from "../../../src/core/session-ledger";
 
 let previousClineHome: string | undefined;
 let tempRoot: string;
@@ -28,9 +24,7 @@ async function writeWorkspaceIndex(workspaces: Record<string, { repoPath: string
 				{ workspaceId: id, repoPath: info.repoPath, createdAt: Date.now() },
 			]),
 		),
-		repoPathToId: Object.fromEntries(
-			Object.entries(workspaces).map(([id, info]) => [info.repoPath, id]),
-		),
+		repoPathToId: Object.fromEntries(Object.entries(workspaces).map(([id, info]) => [info.repoPath, id])),
 	};
 	await writeFile(join(workspacesDir, "index.json"), JSON.stringify(indexFile, null, 2), "utf8");
 }
@@ -73,16 +67,18 @@ describe("Session Ledger API & Core Features", () => {
 
 		const index = await listSessions("ws-1", "card-123");
 		expect(index).not.toBeNull();
-		expect(index!.generations).toHaveLength(1);
-		expect(index!.generations[0]).toMatchObject({
-			generation: 0,
-			agentId: "claude",
-		});
+		if (index) {
+			expect(index.generations).toHaveLength(1);
+			expect(index.generations[0]).toMatchObject({
+				generation: 0,
+				agentId: "claude",
+			});
+		}
 	});
 
 	it("givenExistingSession_whenOpenSessionCalledWithExisting_thenIdempotentAndDoesNotOverwrite", async () => {
 		// First open
-		const first = await openSession({
+		await openSession({
 			workspaceId: "ws-1",
 			taskId: "card-123",
 			kind: "card",
@@ -192,9 +188,11 @@ describe("Session Ledger API & Core Features", () => {
 		const index = await listSessions("ws-1", "card-123");
 
 		expect(index).not.toBeNull();
-		expect(index!.generations).toHaveLength(2);
-		expect(index!.generations[0]).toMatchObject({ generation: 0, openedAt: 1000, closedAt: 1500 });
-		expect(index!.generations[1]).toMatchObject({ generation: 1, openedAt: 2000, closedAt: null });
+		if (index) {
+			expect(index.generations).toHaveLength(2);
+			expect(index.generations[0]).toMatchObject({ generation: 0, openedAt: 1000, closedAt: 1500 });
+			expect(index.generations[1]).toMatchObject({ generation: 1, openedAt: 2000, closedAt: null });
+		}
 
 		// Verify index.json was actually saved to disk as a self-healing step
 		const indexContent = JSON.parse(await readFile(join(baseDir, "index.json"), "utf8"));
@@ -373,10 +371,14 @@ describe("Session Ledger Harvest Migration", () => {
 		const results2 = await harvestSessions();
 		// Should return results for both, but card-1 should have alreadyExisted: true
 		expect(results2).toHaveLength(2);
-		const c1 = results2.find((r) => r.taskId === "card-1")!;
-		const c2 = results2.find((r) => r.taskId === "card-2")!;
+		const c1 = results2.find((r) => r.taskId === "card-1");
+		const c2 = results2.find((r) => r.taskId === "card-2");
 
-		expect(c1.alreadyExisted).toBe(true);
-		expect(c2.alreadyExisted).toBe(false);
+		expect(c1).toBeDefined();
+		expect(c2).toBeDefined();
+		if (c1 && c2) {
+			expect(c1.alreadyExisted).toBe(true);
+			expect(c2.alreadyExisted).toBe(false);
+		}
 	});
 });

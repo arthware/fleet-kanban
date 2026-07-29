@@ -23,6 +23,7 @@ import {
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
+import { harvestSessions } from "../core/session-ledger";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
@@ -680,6 +681,9 @@ async function reconcileWorkspaceAgentSessionsLocked(
 }
 
 export async function migrateAllWorkspaceAgentSessions(): Promise<void> {
+	// One-shot idempotent harvest: ensure no legacy pointers are pruned
+	await harvestSessions();
+
 	const index = await readWorkspaceIndex();
 	await Promise.all(
 		Object.keys(index.entries).map(async (workspaceId) => {

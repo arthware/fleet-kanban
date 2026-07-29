@@ -14,6 +14,7 @@ import type {
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { openSession } from "../core/session-ledger";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import {
 	type AgentAdapterLaunchInput,
@@ -135,6 +136,7 @@ function createDefaultSummary(taskId: string): RuntimeTaskSessionSummary {
 		exitCode: null,
 		agentSessionId: null,
 		homeAgentSessionGeneration: 0,
+		sessionGeneration: 0,
 		lastHookAt: null,
 		latestHookActivity: null,
 		warningMessage: null,
@@ -355,13 +357,10 @@ export class TerminalSessionManager implements TerminalSessionService {
 		// board restart: start it with --session-id the first time, then resume it on
 		// every launch after (chosen by whether its transcript already exists).
 		const isHomeAgentTask = request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId);
+		const generation = entry.summary.sessionGeneration ?? entry.summary.homeAgentSessionGeneration ?? 0;
 		const homeAgentSessionId =
 			request.agentId === "claude" && request.workspaceId && isHomeAgentTask
-				? deriveHomeAgentClaudeSessionId(
-						request.workspaceId,
-						request.agentId,
-						entry.summary.homeAgentSessionGeneration ?? 0,
-					)
+				? deriveHomeAgentClaudeSessionId(request.workspaceId, request.agentId, generation)
 				: null;
 
 		if (!homeAgentSessionId && !isHomeAgentTask && !isFirstTaskLaunch && lifecycle === "gone") {
@@ -649,6 +648,26 @@ export class TerminalSessionManager implements TerminalSessionService {
 			latestTurnCheckpoint: null,
 			previousTurnCheckpoint: null,
 		});
+
+		if (request.workspaceId) {
+			const kind = isHomeAgentSessionId(request.taskId) ? "home-agent" : "card";
+			const gen =
+				kind === "home-agent"
+					? (entry.summary.sessionGeneration ?? entry.summary.homeAgentSessionGeneration ?? 0)
+					: 0;
+			openSession({
+				workspaceId: request.workspaceId,
+				taskId: request.taskId,
+				kind,
+				generation: gen,
+				agentId: request.agentId,
+				agentSessionId: launchSessionId,
+				openedAt: startedAt,
+			}).catch(() => {
+				// Best effort: ledger failure must never crash the hot start path
+			});
+		}
+
 		this.emitSummary(entry.summary);
 
 		// Codex assigns its own session id, written to a rollout file once it
@@ -1183,6 +1202,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry.terminalStateMirror?.dispose();
 		entry.terminalStateMirror = null;
 		entry.restartRequest = null;
+		const currentGen = entry.summary.sessionGeneration ?? entry.summary.homeAgentSessionGeneration ?? 0;
 		const summary = updateSummary(entry, {
 			state: "idle",
 			pid: null,
@@ -1190,7 +1210,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			exitCode: null,
 			agentSessionId: null,
 			agentSessionLifecycle: "gone",
-			homeAgentSessionGeneration: (entry.summary.homeAgentSessionGeneration ?? 0) + 1,
+			homeAgentSessionGeneration: currentGen + 1,
+			sessionGeneration: currentGen + 1,
 		});
 		this.emitSummary(summary);
 		return cloneSummary(summary);

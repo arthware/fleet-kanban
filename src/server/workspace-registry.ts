@@ -408,7 +408,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 							const agentSessionId = deriveHomeAgentClaudeSessionId(
 								parsed.workspaceId,
 								"claude",
-								summary.homeAgentSessionGeneration ?? 0,
+								summary.sessionGeneration ?? summary.homeAgentSessionGeneration ?? 0,
 							);
 							const transcript = await locateAgentTranscript({
 								agentId: "claude",
