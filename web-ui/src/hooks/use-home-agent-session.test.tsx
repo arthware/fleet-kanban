@@ -105,12 +105,12 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 				installed: true,
 				configured: false,
 			},
-			],
-			shortcuts: [],
-			worktree: {},
-			...overrides,
-		};
-	}
+		],
+		shortcuts: [],
+		worktree: {},
+		...overrides,
+	};
+}
 
 const DEFAULT_WORKSPACE_GIT: RuntimeGitRepositoryInfo = {
 	currentBranch: "main",
@@ -424,11 +424,11 @@ describe("useHomeAgentSession", () => {
 
 		await act(async () => {
 			root.render(
-					<HookHarness
-						config={createRuntimeConfig({
-							selectedAgentId: "claude",
-							effectiveCommand: "claude",
-						})}
+				<HookHarness
+					config={createRuntimeConfig({
+						selectedAgentId: "claude",
+						effectiveCommand: "claude",
+					})}
 					currentProjectId="workspace-1"
 					seedSessionSummary
 					onSnapshot={(snapshot) => {

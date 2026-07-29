@@ -53,10 +53,10 @@ function createRuntimeConfigResponse(
 				installed: selectedAgentId === "codex",
 				configured: selectedAgentId === "codex",
 			},
-			],
-			shortcuts,
-			worktree: {},
-		};
+		],
+		shortcuts,
+		worktree: {},
+	};
 }
 
 type HookSnapshot = UseRuntimeProjectConfigResult;

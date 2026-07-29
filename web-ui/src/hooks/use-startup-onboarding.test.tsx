@@ -34,10 +34,10 @@ function createRuntimeConfigResponse(selectedAgentId: RuntimeConfigResponse["sel
 				installed: true,
 				configured: selectedAgentId === "codex",
 			},
-			],
-			shortcuts: [],
-			worktree: {},
-		};
+		],
+		shortcuts: [],
+		worktree: {},
+	};
 }
 
 function HookHarness({

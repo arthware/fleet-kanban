@@ -74,7 +74,7 @@ const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 	"claude-haiku-4-5": "Haiku 4.5",
 };
 
-function resolveAgentModelDisplayName(agentId: RuntimeAgentId | null, modelId: string): string {
+function resolveAgentModelDisplayName(_agentId: RuntimeAgentId | null, modelId: string): string {
 	return KNOWN_MODEL_DISPLAY_NAMES[modelId] ?? modelId;
 }
 
