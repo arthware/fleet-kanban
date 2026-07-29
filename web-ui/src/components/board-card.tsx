@@ -663,6 +663,7 @@ export function BoardCard({
 							className="kb-board-card-shell"
 							data-task-id={card.id}
 							data-column-id={columnId}
+							data-testid={`board-card-${card.id}`}
 							data-selected={selected}
 							onMouseDownCapture={(event) => {
 								if (!isCardInteractive) {

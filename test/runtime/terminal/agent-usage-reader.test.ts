@@ -10,6 +10,7 @@ import { deriveClaudeUsage, deriveCodexUsage, readAgentUsage } from "../../../sr
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
 const codexFixturePath = join(fixtureDir, "codex-usage-rollout.jsonl");
+const geminiFixturePath = join(fixtureDir, "gemini-transcript-recorded.jsonl");
 
 // The three real records in claude-usage-transcript.jsonl are all
 // claude-opus-4-8, so the reader now prices them from the static table: input
@@ -294,6 +295,64 @@ describe("readAgentUsage — codex", () => {
 	it("reports absent with null usage when the rollout is gone", async () => {
 		const result = await readAgentUsage({ agentId: "codex", sessionId: "missing", homePath });
 
+		expect(result).toEqual({ present: false, usage: null });
+	});
+});
+
+describe("readAgentUsage — gemini", () => {
+	let homePath = "";
+
+	beforeEach(async () => {
+		homePath = await mkdtemp(join(tmpdir(), "usage-reader-gemini-"));
+	});
+
+	afterEach(async () => {
+		await rm(homePath, { recursive: true, force: true });
+	});
+
+	async function writeGeminiTranscript(): Promise<string> {
+		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
+		const absolutePath = join(
+			homePath,
+			".gemini",
+			"tmp",
+			"fleet-kanban-4",
+			"chats",
+			"session-2026-07-23T18-22-84456eab.jsonl",
+		);
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, await readFile(geminiFixturePath, "utf8"), "utf8");
+		return sessionId;
+	}
+
+	it.skip("known-red card 4: given a recorded Gemini transcript with tokens, when usage is read, then production should derive Gemini token totals", async () => {
+		// given
+		const sessionId = await writeGeminiTranscript();
+
+		// when
+		const result = await readAgentUsage({ agentId: "gemini", sessionId, homePath });
+
+		// then
+		expect(result).toEqual({
+			present: true,
+			usage: {
+				inputTokens: 49178,
+				outputTokens: 630,
+				cacheReadTokens: 40786,
+				cacheCreationTokens: 0,
+				costUsd: null,
+			},
+		});
+	});
+
+	it("given today's Gemini usage reader has no deriver, when a recorded Gemini transcript exists, then usage reports absent", async () => {
+		// given
+		const sessionId = await writeGeminiTranscript();
+
+		// when
+		const result = await readAgentUsage({ agentId: "gemini", sessionId, homePath });
+
+		// then
 		expect(result).toEqual({ present: false, usage: null });
 	});
 });
