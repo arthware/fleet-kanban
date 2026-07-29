@@ -8,6 +8,8 @@ import {
 	createSelfcheckContext,
 	createTrpcScenarioDriver,
 	givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer,
+	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
+	givenCardWithModelOverrideWhenStartedThenCliReceivesModel,
 	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
 	givenLifecycleCardWhenCompletedThenLinkedCardStarts,
 	givenReviewHookWhenIngestedThenOverseerIsNotified,
@@ -45,6 +47,16 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
+	await runScenario(results, "restart a card whose agent is gone", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithGoneAgentWhenStartedThenNewAgentRuns(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
 	await runScenario(
 		results,
 		"steer a Review card -> moves to In Progress",
@@ -68,6 +80,16 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
+	});
+	await runScenario(results, "a card's model override reaches the CLI", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "CLI contract: help and usage exits", async () => {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();

@@ -2,10 +2,24 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import {
+	getRuntimeAgentBinaryCandidates,
+	RUNTIME_AGENT_CATALOG,
+	type RuntimeAgentCatalogEntry,
+} from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import type { AgentDriver, AgentObservationMessage, LaunchIdentityPlan, ObservationRequest } from "../driver";
+import { buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
+import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
+import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import type {
+	AgentDriver,
+	AgentObservationMessage,
+	LaunchIdentityPlan,
+	LaunchPlan,
+	ObservationRequest,
+} from "../driver";
 import { supported, unsupported } from "../driver";
+import { hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 
 export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
@@ -13,19 +27,146 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 		id: "gemini",
 		catalog: catalogEntryById("gemini"),
 		launch: {
-			preflight: async () => unsupported("gemini launch is not bound yet"),
-			prepare: async () => unsupported("gemini launch is not bound yet"),
-			applyModel: (args, model) => supported([...args, "--model", model]),
+			preflight: async () => {
+				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
+				if (testFail) {
+					return unsupported(testFail);
+				}
+				const isTest =
+					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
+				if (!isTest) {
+					const candidates = getRuntimeAgentBinaryCandidates("gemini");
+					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
+					if (!binary) {
+						return unsupported("binary missing: 'gemini' CLI binary not found on PATH");
+					}
+					if (!process.env.GEMINI_API_KEY) {
+						return unsupported("not authenticated: GEMINI_API_KEY is not set in environment");
+					}
+					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
+						return unsupported("not trusted: workspace is not trusted");
+					}
+				}
+				return supported({ ok: true as const });
+			},
+			prepare: async (input) => {
+				const args = [...input.args];
+				const env: Record<string, string | undefined> = {};
+
+				if (input.autonomousModeEnabled && !hasCliOption(args, "--yolo")) {
+					args.push("--yolo");
+				}
+
+				const geminiSessionId = input.agentSessionId?.trim();
+				const hasResumeFlag = hasCliOption(args, "--resume") || hasCliOption(args, "-r");
+				if (input.resumeSession && geminiSessionId && !hasResumeFlag) {
+					args.push("--resume", geminiSessionId);
+				} else if (input.resumeFromTrash && !hasResumeFlag) {
+					args.push("--resume", "latest");
+				}
+
+				const filesToWrite: { path: string; content: string }[] = [];
+				const configPath = join(getHookAgentDirectory("gemini"), "settings.json");
+				const hasWorkspaceId = input.workspaceId?.trim();
+				const config: { security: { folderTrust: { enabled: boolean } }; hooks?: Record<string, unknown> } = {
+					// Board worktrees are already trusted by the harness; disabling this here
+					// prevents the "Do you trust the files in this folder?" gate from hanging
+					// every fresh Gemini session (--yolo only covers tool-call approval, not this).
+					security: {
+						folderTrust: {
+							enabled: false,
+						},
+					},
+				};
+
+				if (hasWorkspaceId) {
+					const geminiHookCommand = buildHooksCommand(["gemini-hook"]);
+					config.hooks = {
+						BeforeTool: [
+							{
+								hooks: [{ type: "command", command: geminiHookCommand }],
+							},
+						],
+						AfterTool: [
+							{
+								hooks: [{ type: "command", command: geminiHookCommand }],
+							},
+						],
+						AfterAgent: [
+							{
+								hooks: [{ type: "command", command: geminiHookCommand }],
+							},
+						],
+						BeforeAgent: [
+							{
+								hooks: [{ type: "command", command: geminiHookCommand }],
+							},
+						],
+						Notification: [
+							{
+								hooks: [{ type: "command", command: geminiHookCommand }],
+							},
+						],
+					};
+					Object.assign(
+						env,
+						createHookRuntimeEnv({
+							taskId: input.taskId,
+							workspaceId: hasWorkspaceId,
+						}),
+					);
+				}
+
+				filesToWrite.push({
+					path: configPath,
+					content: JSON.stringify(config, null, 2),
+				});
+				env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = configPath;
+
+				// Apply model using applyModel method
+				const finalArgs = [...args];
+				if (input.agentModel) {
+					if (hasCliOption(finalArgs, "--model") || hasCliOption(finalArgs, "-m")) {
+						// user-supplied model wins
+					} else {
+						finalArgs.push("--model", input.agentModel);
+					}
+				}
+
+				const finalArgsWithPrompt = withPrompt(finalArgs, input.prompt, "flag", "-i");
+				return supported({
+					binary: input.binary,
+					args: finalArgsWithPrompt,
+					env,
+					filesToWrite,
+				} satisfies LaunchPlan);
+			},
+			applyModel: (args, model) => {
+				if (hasCliOption(args, "--model") || hasCliOption(args, "-m")) {
+					return supported(args);
+				}
+				return supported([...args, "--model", model]);
+			},
 		},
 		identity: {
 			durability: "persisted",
-			resolve: (input) =>
-				supported({
-					agentSessionId: input.stored ?? `gemini-persisted-${input.ref.taskId}-${input.generation}`,
-					resumeSession: input.lifecycle === "resumable" && input.stored !== null,
-					discoverAfterSpawn: true,
-					durability: "persisted",
-				} satisfies LaunchIdentityPlan),
+			resolve: (input) => {
+				switch (input.ref.kind) {
+					case "overseer":
+					case "card": {
+						const stored = input.stored?.trim() || null;
+						const resumeSession =
+							(input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
+						const agentSessionId = resumeSession ? stored : null;
+						return supported({
+							agentSessionId,
+							resumeSession,
+							discoverAfterSpawn: true,
+							durability: "persisted",
+						} satisfies LaunchIdentityPlan);
+					}
+				}
+			},
 		},
 		observe: {
 			artifactPresent: async (input) => {

@@ -51,6 +51,10 @@ export interface ScenarioDriver {
 	steerCard(taskId: string, text: string): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
+	killAgentProcess(taskId: string): Promise<void>;
+	expectSessionGone(taskId: string): Promise<void>;
+	expectAgentRunning(taskId: string): Promise<number>;
+	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -74,6 +78,7 @@ export function createSelfcheckCard(input: {
 	prompt?: string;
 	baseRef?: string;
 	agentId?: RuntimeBoardCard["agentId"];
+	agentModel?: string;
 }): RuntimeBoardCard {
 	const now = Date.now();
 	return {
@@ -87,6 +92,7 @@ export function createSelfcheckCard(input: {
 		createdAt: now,
 		updatedAt: now,
 		transitions: [{ column: "backlog", at: now }],
+		...(input.agentModel ? { agentModel: input.agentModel } : {}),
 	};
 }
 
@@ -187,6 +193,54 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			await stream.close();
 			stream = null;
 		},
+		killAgentProcess: async (taskId) => {
+			const state = await loadState(context);
+			const summary = state.sessions[taskId];
+			if (!summary || !summary.pid) {
+				throw new ScenarioAssertionError(`No running agent process found for task ${taskId} to kill.`);
+			}
+			try {
+				process.kill(summary.pid, "SIGKILL");
+			} catch (_err: any) {
+				// Ignore errors (e.g. process already dead)
+			}
+		},
+		expectSessionGone: async (taskId) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				const isGone = !summary || summary.pid === null;
+				return isGone ? true : null;
+			}, `session for ${taskId} to be gone (pid null)`);
+		},
+		expectAgentRunning: async (taskId) => {
+			const pid = await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				if (summary && summary.pid !== null) {
+					return summary.pid;
+				}
+				return null;
+			}, `agent process for ${taskId} to be running (non-null pid)`);
+			return pid;
+		},
+		readLaunchedArgv: async (taskId) => {
+			const runtimeHome = context.instance.homeDir;
+			const argvPath = join(runtimeHome, ".kanban", `launched-argv-${taskId}.json`);
+			let content = "";
+			await waitFor(async () => {
+				if (existsSync(argvPath)) {
+					try {
+						content = readFileSync(argvPath, "utf8");
+						return true;
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			}, `launched argv file to exist at ${argvPath}`);
+			return JSON.parse(content) as readonly string[];
+		},
 	};
 }
 
@@ -240,6 +294,59 @@ export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver
 	await mutateBoard(context, () => completed.board);
 	await driver.startCard(LINKED_CHILD_TASK_ID);
 	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
+}
+
+export async function givenCardWithGoneAgentWhenStartedThenNewAgentRuns(driver: ScenarioDriver): Promise<void> {
+	const context = driverContext(driver);
+	const taskId = "selfcheck-restart-after-gone";
+	const card = createSelfcheckCard({
+		id: taskId,
+		title: "Selfcheck restart after gone",
+		agentId: "claude",
+		baseRef: "main",
+	});
+	await driver.createCard({
+		column: "backlog",
+		card,
+	});
+
+	await driver.expectColumn(taskId, "backlog");
+	await driver.startCard(taskId);
+	await driver.expectColumn(taskId, "in_progress");
+
+	// Capture initial PID
+	const pid1 = await driver.expectAgentRunning(taskId);
+	assertOk(pid1 > 0, "Agent PID must be greater than 0");
+
+	// Write a sentinel file with known content into the card's worktree, and leave it UNCOMMITTED.
+	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
+		baseUrl: context.baseUrl,
+		procedure: "workspace.ensureWorktree",
+		type: "mutation",
+		workspaceId: context.workspaceId,
+		payload: { taskId, baseRef: "main" },
+	});
+	assertOk(ensured.status === 200 && ensured.payload.ok, "Could not ensure worktree to write sentinel.");
+	const worktreePath = ensured.payload.path;
+	const sentinelPath = join(worktreePath, "restart-sentinel.txt");
+	writeFileSync(sentinelPath, "survivor\n", "utf8");
+
+	// Kill the agent process, then expect session gone.
+	await driver.killAgentProcess(taskId);
+	await driver.expectSessionGone(taskId);
+
+	// Start card a second time
+	await driver.startCard(taskId);
+
+	// Assert pid2 = expectAgentRunning(taskId) is a live pid and pid2 !== pid1
+	const pid2 = await driver.expectAgentRunning(taskId);
+	assertOk(pid2 > 0, "Second agent PID must be greater than 0");
+	assertOk(pid2 !== pid1, "New agent process must have a different PID than the killed one");
+
+	// Assert the sentinel file still exists with identical content
+	assertOk(existsSync(sentinelPath), "Sentinel file must survive restart");
+	const sentinelContent = readFileSync(sentinelPath, "utf8");
+	assertOk(sentinelContent === "survivor\n", "Sentinel file content must be untouched");
 }
 
 export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: ScenarioDriver): Promise<void> {
@@ -463,6 +570,7 @@ async function startTaskSession(context: SelfcheckContext, card: RuntimeBoardCar
 			startInPlanMode: card.startInPlanMode,
 			baseRef: card.baseRef,
 			agentId: card.agentId,
+			agentModel: card.agentModel,
 			cols: 100,
 			rows: 30,
 		},
@@ -769,5 +877,97 @@ export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer
 		}
 	} finally {
 		await context.stop();
+	}
+}
+
+export async function givenCardWithModelOverrideWhenStartedThenCliReceivesModel(driver: ScenarioDriver): Promise<void> {
+	const _context = driverContext(driver);
+
+	// Card A: created with a per-card model override, started.
+	// Assert the recorded argv contains `--model` followed by exactly that override value.
+	const taskIdA = "card-a-override";
+	await driver.createCard({
+		column: "backlog",
+		card: createSelfcheckCard({
+			id: taskIdA,
+			title: "Card A override model",
+			agentModel: "sonnet-3-5",
+		}),
+	});
+	await driver.startCard(taskIdA);
+	const argvA = await driver.readLaunchedArgv(taskIdA);
+	assertOk(argvA.includes("--model"), `Card A argv should contain --model, got ${JSON.stringify(argvA)}`);
+	const modelIndexA = argvA.indexOf("--model");
+	assertOk(
+		argvA[modelIndexA + 1] === "sonnet-3-5",
+		`Card A model override should be sonnet-3-5, got ${argvA[modelIndexA + 1]}`,
+	);
+
+	// Card C: created with no override, started.
+	// Assert the recorded argv contains no `--model` at all.
+	const taskIdC = "card-c-no-override";
+	await driver.createCard({
+		column: "backlog",
+		card: createSelfcheckCard({
+			id: taskIdC,
+			title: "Card C no override",
+		}),
+	});
+	await driver.startCard(taskIdC);
+	const argvC = await driver.readLaunchedArgv(taskIdC);
+	assertOk(!argvC.includes("--model"), "Card C argv should not contain --model");
+
+	// Card B: created with a per-card model override AND a user-supplied `--model` already present in the configured agent args, started.
+	// Assert the recorded argv contains the user's value and does NOT contain the card override.
+	const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
+	const bFixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-b-");
+	let bInstance: IsolatedKanbanInstance | null = null;
+	try {
+		bInstance = await startIsolatedKanbanInstance({
+			cwd: bFixture.path,
+			env: {
+				KANBAN_TEST_AGENT_BINARY: stubAgentPath,
+				KANBAN_TEST_AGENT_ARGS_JSON: JSON.stringify(["--model", "user-wins-model"]),
+			},
+		});
+		const bBaseUrl = new URL(bInstance.baseUrl).origin;
+		const bWorkspaceId = await resolveCurrentWorkspaceId(bBaseUrl);
+		const bContext = {
+			instance: bInstance,
+			baseUrl: bBaseUrl,
+			workspaceId: bWorkspaceId,
+			fixture: bFixture,
+			stop: async () => {},
+		};
+		const bDriver = attachContext(createTrpcScenarioDriver(bContext), bContext);
+
+		const taskIdB = "card-b-user-supplied";
+		await bDriver.createCard({
+			column: "backlog",
+			card: createSelfcheckCard({
+				id: taskIdB,
+				title: "Card B user supplied model",
+				agentModel: "should-be-overridden",
+			}),
+		});
+		await bDriver.startCard(taskIdB);
+		const argvB = await bDriver.readLaunchedArgv(taskIdB);
+		assertOk(argvB.includes("--model"), "Card B argv should contain --model");
+		const modelIndexB = argvB.indexOf("--model");
+		assertOk(
+			argvB[modelIndexB + 1] === "user-wins-model",
+			`Card B model should be user-wins-model, got ${argvB[modelIndexB + 1]}`,
+		);
+		const occurrences = argvB.filter((arg) => arg === "--model").length;
+		assertOk(occurrences === 1, `Card B argv should contain --model exactly once, got ${occurrences}`);
+		assertOk(
+			!argvB.includes("should-be-overridden"),
+			"Card B argv should not contain the card override value when user supplied it",
+		);
+	} finally {
+		if (bInstance) {
+			await bInstance.stop();
+		}
+		bFixture.cleanup();
 	}
 }

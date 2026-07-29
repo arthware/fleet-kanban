@@ -46,16 +46,27 @@ export interface LaunchPreflight {
 }
 
 export interface LaunchRequest {
+	readonly taskId: string;
 	readonly prompt: string;
 	readonly cwd: string;
-	readonly env: Readonly<Record<string, string>>;
-	readonly model: string | null;
+	readonly env: Readonly<Record<string, string | undefined>>;
+	readonly args: readonly string[];
+	readonly autonomousModeEnabled: boolean;
+	readonly agentSessionId: string | null;
+	readonly resumeSession: boolean;
+	readonly resumeFromTrash: boolean;
+	readonly agentModel: string | null; // This is the card's model override
+	readonly workspaceId: string | null;
+	readonly architectContextPreamble: string | null;
+	readonly binary?: string;
 }
 
 export interface LaunchPlan {
-	readonly command: string;
+	readonly binary?: string;
 	readonly args: readonly string[];
-	readonly env: Readonly<Record<string, string>>;
+	readonly env: Readonly<Record<string, string | undefined>>;
+	readonly filesToWrite?: readonly { readonly path: string; readonly content: string }[];
+	readonly deferredStartupInput?: string;
 }
 
 export interface LaunchPort {
