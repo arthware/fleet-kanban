@@ -13,6 +13,7 @@ import { lockedFileSystem } from "../fs/locked-file-system";
 import { getRuntimeHomePath } from "../state/workspace-state";
 import { runGit } from "../workspace/git-utils";
 import { parseGithubRemoteNameWithOwner } from "../workspace/repo-name";
+import { stripAnsi } from "./output-utils";
 import type { SessionTransitionEvent } from "./session-state-machine";
 import { prepareTaskPromptWithImages } from "./task-image-prompt";
 
@@ -219,13 +220,41 @@ export async function prepareAgentLaunch(input: AgentAdapterLaunchInput): Promis
 		}
 	};
 
+	let detectOutputTransition: AgentOutputTransitionDetector | undefined;
+	let shouldInspectOutputForTransition: AgentOutputTransitionInspectionPredicate | undefined;
+
+	if (input.agentId === "codex") {
+		detectOutputTransition = (data: string, summary: RuntimeTaskSessionSummary): SessionTransitionEvent | null => {
+			if (summary.state !== "awaiting_review") {
+				return null;
+			}
+			if (summary.reviewReason !== "attention" && summary.reviewReason !== "hook") {
+				return null;
+			}
+			const stripped = stripAnsi(data);
+			if (/(?:^|\n)\s*›/.test(stripped)) {
+				return { type: "agent.prompt-ready" };
+			}
+			return null;
+		};
+
+		shouldInspectOutputForTransition = (summary: RuntimeTaskSessionSummary): boolean => {
+			return (
+				summary.state === "awaiting_review" &&
+				(summary.reviewReason === "attention" ||
+					summary.reviewReason === "hook" ||
+					summary.reviewReason === "error")
+			);
+		};
+	}
+
 	return {
 		binary: plan.binary,
 		args: [...plan.args],
 		env,
 		cleanup,
 		deferredStartupInput: plan.deferredStartupInput,
-		detectOutputTransition: plan.detectOutputTransition,
-		shouldInspectOutputForTransition: plan.shouldInspectOutputForTransition,
+		detectOutputTransition,
+		shouldInspectOutputForTransition,
 	};
 }

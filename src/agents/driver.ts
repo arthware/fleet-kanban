@@ -3,7 +3,6 @@ import type {
 	RuntimeAgentId,
 	RuntimeAgentSessionLifecycle,
 	RuntimeTaskChatMessage,
-	RuntimeTaskSessionSummary,
 	RuntimeTaskTokenUsage,
 } from "../core/api-contract";
 import { createClaudeDriver } from "./claude/driver";
@@ -68,48 +67,12 @@ export interface LaunchPlan {
 	readonly env: Readonly<Record<string, string | undefined>>;
 	readonly filesToWrite?: readonly { readonly path: string; readonly content: string }[];
 	readonly deferredStartupInput?: string;
-	readonly detectOutputTransition?: (data: string, summary: RuntimeTaskSessionSummary) => any;
-	readonly shouldInspectOutputForTransition?: (summary: RuntimeTaskSessionSummary) => boolean;
 }
 
 export interface LaunchPort {
 	preflight(): Promise<Capability<LaunchPreflight>>;
 	prepare(input: LaunchRequest): Promise<Capability<LaunchPlan>>;
 	applyModel(args: readonly string[], model: string): Capability<readonly string[]>;
-}
-
-export function hasCliOption(args: readonly string[], optionName: string): boolean {
-	for (let i = 0; i < args.length; i += 1) {
-		const arg = args[i];
-		if (arg === optionName || arg.startsWith(`${optionName}=`)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-export function withPrompt(
-	args: string[],
-	prompt: string,
-	mode: "append" | "flag",
-	flag?: string,
-): { args: string[]; env: Record<string, string> } {
-	const trimmed = prompt.trim();
-	if (!trimmed) {
-		return {
-			args,
-			env: {},
-		};
-	}
-	if (mode === "flag" && flag) {
-		args.push(flag, trimmed);
-	} else {
-		args.push(trimmed);
-	}
-	return {
-		args,
-		env: {},
-	};
 }
 
 export interface IdentityPort {

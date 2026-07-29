@@ -199,7 +199,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}
 			try {
 				process.kill(summary.pid, "SIGKILL");
-			} catch (err: any) {
+			} catch (_err: any) {
 				// Ignore errors (e.g. process already dead)
 			}
 		},

@@ -7,21 +7,20 @@ import {
 	RUNTIME_AGENT_CATALOG,
 	type RuntimeAgentCatalogEntry,
 } from "../../core/agent-catalog";
-import type { RuntimeTaskChatMessage, RuntimeTaskSessionSummary, RuntimeTaskTokenUsage } from "../../core/api-contract";
+import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
-import { stripAnsi } from "../../terminal/output-utils";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
-	DriverSessionRef,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
 } from "../driver";
-import { hasCliOption, supported, unsupported, withPrompt } from "../driver";
+import { supported, unsupported } from "../driver";
+import { hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
@@ -114,35 +113,10 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 					finalArgs.push(trimmed);
 				}
 
-				const codexPromptDetector = (data: string, summary: RuntimeTaskSessionSummary) => {
-					if (summary.state !== "awaiting_review") {
-						return null;
-					}
-					if (summary.reviewReason !== "attention" && summary.reviewReason !== "hook") {
-						return null;
-					}
-					const stripped = stripAnsi(data);
-					if (/(?:^|\n)\s*›/.test(stripped)) {
-						return { type: "agent.prompt-ready" as const };
-					}
-					return null;
-				};
-
-				const shouldInspectOutputForTransition = (summary: RuntimeTaskSessionSummary) => {
-					return (
-						summary.state === "awaiting_review" &&
-						(summary.reviewReason === "attention" ||
-							summary.reviewReason === "hook" ||
-							summary.reviewReason === "error")
-					);
-				};
-
 				return supported({
 					binary,
 					args: finalArgs,
 					env,
-					detectOutputTransition: codexPromptDetector,
-					shouldInspectOutputForTransition,
 				} satisfies LaunchPlan);
 			},
 			applyModel: (args, model) => {

@@ -14,12 +14,12 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
-	DriverSessionRef,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
 } from "../driver";
-import { hasCliOption, supported, unsupported, withPrompt } from "../driver";
+import { supported, unsupported } from "../driver";
+import { hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 
 export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
@@ -133,14 +133,11 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 					}
 				}
 
-				const withPromptLaunch = withPrompt(finalArgs, input.prompt, "flag", "-i");
+				const finalArgsWithPrompt = withPrompt(finalArgs, input.prompt, "flag", "-i");
 				return supported({
 					binary: input.binary,
-					args: withPromptLaunch.args,
-					env: {
-						...withPromptLaunch.env,
-						...env,
-					},
+					args: finalArgsWithPrompt,
+					env,
 					filesToWrite,
 				} satisfies LaunchPlan);
 			},

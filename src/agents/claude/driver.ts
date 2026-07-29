@@ -22,12 +22,12 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
-	DriverSessionRef,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
 } from "../driver";
-import { hasCliOption, supported, unsupported, withPrompt } from "../driver";
+import { supported, unsupported } from "../driver";
+import { hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
@@ -220,14 +220,11 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 					finalArgs.push("--append-system-prompt", appendedSystemPrompt);
 				}
 
-				const withPromptLaunch = withPrompt(finalArgs, input.prompt, "append");
+				const finalArgsWithPrompt = withPrompt(finalArgs, input.prompt, "append");
 				return supported({
 					binary: input.binary,
-					args: withPromptLaunch.args,
-					env: {
-						...withPromptLaunch.env,
-						...env,
-					},
+					args: finalArgsWithPrompt,
+					env,
 					filesToWrite,
 				} satisfies LaunchPlan);
 			},
