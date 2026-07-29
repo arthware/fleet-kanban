@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createClaudeDriver } from "../../src/agents/claude/driver";
 import { createCodexDriver } from "../../src/agents/codex/driver";
+import type { DriverSessionRef, LaunchIdentityPlan } from "../../src/agents/driver";
 import { createGeminiDriver } from "../../src/agents/gemini/driver";
 import { deriveHomeAgentClaudeSessionId } from "../../src/terminal/home-agent-session-id";
-import type { DriverSessionRef, LaunchIdentityPlan } from "../../src/agents/driver";
 
 describe("Agent Drivers Identity Resolution", () => {
 	const claude = createClaudeDriver();
