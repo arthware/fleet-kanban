@@ -36,6 +36,8 @@ FLEET_REPO="$(cd "$DIR/.." 2>/dev/null && pwd)"
 _has_help=0
 if [ "${1:-}" = "help" ] && [ "${2:-}" = "--agent" ]; then
   _has_help=0
+elif [ -n "${FLEET_HELP_INTERNAL:-}" ]; then
+  _has_help=0
 else
   for arg in "$@"; do
     if [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
@@ -1084,15 +1086,63 @@ else:
 PY
 }
 
+_fleet_task_create_help() {
+  cat <<'EOF'
+Usage: fleet task create [options]
+
+Create a task in backlog.
+
+Options:
+  --title, -t <text>                Task title.
+  --prompt, -p <text>               Task prompt text. Optional when --file/--markdown supplies the body.
+  --prompt-file <path>              Read prompt text from a file.
+  --file <path>                     Read the card from a Markdown file with optional YAML frontmatter (- reads stdin). See docs/card-authoring.md.
+  --markdown <text>                 Card Markdown (frontmatter + body) supplied inline instead of via --file.
+  --repo <name>                     Target repository name (default: first in project).
+  --base-ref <branch>               Task base branch/ref.
+  --auto-review pr                  Enable auto-review mode and push to remote PR.
+  --agent <id>                      Agent override: cline | claude | codex | droid | gemini | opencode | default (default: claude).
+  --model <id>                      Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5.
+  --type <name>                     Card Type / manifest pointer.
+  --external-issue, --issue <ref>   External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL.
+  --start                           Start the task immediately in a new worktree.
+  -h, --help                        display help for command
+EOF
+}
+
 fleet_task() {
   [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
   local sub="${1:-}"; [ $# -gt 0 ] && shift
   if [ "$sub" != "land" ]; then
-    kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+    # Skip running check for help
+    local check_help=0
+    for arg in "$@"; do
+      if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+        check_help=1
+        break
+      fi
+    done
+    if [ "$check_help" = "0" ]; then
+      kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+    fi
   fi
   case "$sub" in
     create|new|add)
+      # Check if help is requested. This help block is immediately adjacent to the parsing loop
+      # of fleet task create below. Keep both in sync when adding new translation flags.
+      local has_help=0
+      for arg in "$@"; do
+        if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+          has_help=1
+          break
+        fi
+      done
+      if [ "$has_help" = "1" ]; then
+        _fleet_task_create_help
+        return 0
+      fi
+
       # Thin delegation to `kanban task create`: fleet owns only --repo→--project-path
       # resolution and --start. Prompt/title/agent and the Markdown-card path (--file/--markdown
       # with YAML frontmatter) belong to kanban, so we translate fleet's ergonomic aliases and

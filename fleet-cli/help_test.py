@@ -66,6 +66,8 @@ class TestHelpAndValidation(unittest.TestCase):
         self.assertIn("--prompt", out)
         self.assertIn("--file", out)
         self.assertIn("--markdown", out)
+        self.assertIn("--repo", out)
+        self.assertIn("--start", out)
 
     def test_given_epic_create_help_when_called_then_prints_epic_create_arguments_and_exits_0(self):
         """Behavior: Given 'epic create --help', it prints epic create arguments and exits 0."""
@@ -74,12 +76,13 @@ class TestHelpAndValidation(unittest.TestCase):
         self.assertIn("name", out)
         self.assertIn("--base", out)
 
-    def test_given_task_create_help_when_called_then_contains_real_accepted_flags_from_kanban_binary(self):
-        """Behavior: Given 'task create --help', it derives help from the real kanban binary and contains its exact options."""
+    def test_given_task_create_help_when_called_then_contains_fleet_accepted_flags_with_comment_binding(self):
+        """Behavior: Given 'task create --help', it derives help from the actual fleet wrapper and contains its exact options."""
         code, out, err = self.run_parser(["task", "create", "--help"])
         self.assertEqual(code, 0)
-        self.assertIn("--agent-id", out)
-        self.assertIn("--external-issue", out)
+        self.assertIn("--agent", out)
+        self.assertIn("--issue", out)
+        self.assertIn("--start", out)
         self.assertIn("--prompt", out)
 
     def test_given_missing_required_argument_on_real_cli_parser_then_exits_non_zero_with_usage(self):

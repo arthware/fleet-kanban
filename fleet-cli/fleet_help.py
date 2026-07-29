@@ -34,9 +34,9 @@ def find_kanban_bin():
     return "kanban"
 
 
-def run_command(cmd_args):
+def run_command(cmd_args, env=None):
     """Executes a subprocess command to display help and exits with its return code."""
-    r = subprocess.run(cmd_args, capture_output=True, text=True)
+    r = subprocess.run(cmd_args, capture_output=True, text=True, env=env)
     if r.returncode == 0:
         print(r.stdout.strip())
         sys.exit(0)
@@ -130,7 +130,14 @@ def parse_args(args_list):
                 print("                               [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]\n")
                 print("       merges a finished card's open PR, moves card to done, and fast-forwards local base ref.")
                 sys.exit(0)
-            run_command([node_exec, kanban, "task", subcmd, "--help"])
+                
+            if subcmd == "create":
+                fleet_sh = Path(__file__).parent / "fleet"
+                env = os.environ.copy()
+                env["FLEET_HELP_INTERNAL"] = "1"
+                run_command(["bash", str(fleet_sh), "task", "create", "--help"], env=env)
+            else:
+                run_command([node_exec, kanban, "task", subcmd, "--help"])
         else:
             run_command([node_exec, kanban, "task", "--help"])
 
