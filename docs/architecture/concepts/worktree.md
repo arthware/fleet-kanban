@@ -12,8 +12,9 @@ worktree (see [Skill injection & directives](skill-injection.md) for the precise
 Per-turn checkpoints are separate. The home/architect agent deliberately has NO worktree.
 
 Git-ignored paths are mirrored in as absolute symlinks, decided by **structure, not artifact name**
-(`task-worktree-unshared-paths.ts`): shared only at the repo root or in a subtree git tracks nothing
-in, so nothing escaping ever lands inside a tracked source tree. See
+(`task-worktree-unshared-paths.ts`): shared only at the repo root, in a subtree git tracks nothing in,
+or when the ignored path's basename is `.env` / `.env.<suffix>`, so env files remain available while
+walked generated/source artifacts stay local. See
 `docs/design/171-worktree-mirroring-structural-rule.md`.
 
 ## Reuse / do-not-duplicate
