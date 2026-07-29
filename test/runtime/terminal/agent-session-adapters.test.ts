@@ -461,7 +461,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(claudeLaunch.args).toContain("--continue");
-
 	});
 
 	it("places Codex hook config before the resume subcommand", async () => {
@@ -541,7 +540,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
-
 	});
 
 	it("does not add a Claude permission mode when args already set one", async () => {
@@ -779,7 +777,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(geminiLaunch.args).toContain("--yolo");
-
 	});
 });
 

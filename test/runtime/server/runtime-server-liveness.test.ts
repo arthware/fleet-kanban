@@ -68,12 +68,8 @@ describe("runtime server liveness endpoint", () => {
 				isWorkspaceUnavailable: () => false,
 			},
 			runtimeStateHub: {
-				trackClineTaskSessionService: () => undefined,
 				trackTerminalManager: () => undefined,
-				broadcastClineMcpAuthStatusesUpdated: async () => undefined,
 				broadcastTaskChatCleared: async () => undefined,
-				broadcastTaskChatMessage: () => undefined,
-				bumpClineSessionContextVersion: async () => undefined,
 				broadcastRuntimeWorkspaceStateUpdated: async () => undefined,
 				broadcastRuntimeProjectsUpdated: async () => undefined,
 				broadcastTaskReadyForReview: () => undefined,
