@@ -240,6 +240,33 @@ export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver
 	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
 }
 
+export async function givenAgentSessionDiesWhenRestartRequestedThenFreshAgentSessionLaunches(driver: ScenarioDriver): Promise<void> {
+	const context = driverContext(driver);
+	const taskId = "selfcheck-restart-after-death";
+	await driver.createCard({
+		column: "backlog",
+		card: createSelfcheckCard({
+			id: taskId,
+			title: "Selfcheck restart after death",
+		}),
+	});
+
+	await driver.expectColumn(taskId, "backlog");
+	await driver.startCard(taskId);
+	await waitFor(async () => {
+		const state = await loadState(context);
+		const summary = state.sessions[taskId];
+		return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
+	}, "card to reach review and complete stub turn");
+
+	await driver.startCard(taskId);
+	await waitFor(async () => {
+		const state = await loadState(context);
+		const summary = state.sessions[taskId];
+		return summary?.state === "running" ? true : null;
+	}, "card to restart and run again");
+}
+
 export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: ScenarioDriver): Promise<void> {
 	const taskId = "selfcheck-review-ping";
 	await driver.createCard({

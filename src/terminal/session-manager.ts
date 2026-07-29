@@ -13,15 +13,17 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
-import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
+import { DRIVERS, type DriverSessionRef } from "../agents/driver";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
 	type AgentOutputTransitionInspectionPredicate,
 	prepareAgentLaunch,
 } from "./agent-session-adapters";
-import { classifyAgentSessionLifecycle, resolveLaunchSessionId } from "./agent-session-launch";
+import { classifyAgentSessionLifecycle } from "./agent-session-launch";
+import { deriveHomeAgentClaudeSessionId } from "./home-agent-session-id";
 import { locateAgentTranscript } from "./agent-transcript-locator";
 import {
 	hasClaudeWorkspaceTrustPrompt,
@@ -32,7 +34,6 @@ import {
 import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
 import { captureGeminiSessionId } from "./gemini-session-capture";
-import { deriveHomeAgentClaudeSessionId, resolveHomeAgentLaunch } from "./home-agent-session-id";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
 import { reduceSessionTransition, type SessionTransitionEvent } from "./session-state-machine";
@@ -350,23 +351,36 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
 		updateSummary(entry, { agentSessionLifecycle: lifecycle });
 
-		// The home/architect chat is a single, persistent conversation. Give it a
-		// deterministic session id so it is always resumable and never lost on a
-		// board restart: start it with --session-id the first time, then resume it on
-		// every launch after (chosen by whether its transcript already exists).
-		const isHomeAgentTask = request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId);
-		const homeAgentSessionId =
-			request.agentId === "claude" && request.workspaceId && isHomeAgentTask
-				? deriveHomeAgentClaudeSessionId(
-						request.workspaceId,
-						request.agentId,
-						entry.summary.homeAgentSessionGeneration ?? 0,
-					)
-				: null;
-
-		if (!homeAgentSessionId && !isHomeAgentTask && !isFirstTaskLaunch && lifecycle === "gone") {
+		if (request.resumeMode === "resume" && lifecycle === "gone") {
 			return cloneSummary(entry.summary);
 		}
+
+		const driver = DRIVERS[request.agentId];
+		if (!driver) {
+			throw new Error(`Unsupported agent driver: ${request.agentId}`);
+		}
+
+		const ref: DriverSessionRef =
+			request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId)
+				? { kind: "overseer", taskId: request.taskId, workspaceId: request.workspaceId }
+				: { kind: "card", taskId: request.taskId };
+
+		const identityResult = driver.identity.resolve({
+			ref,
+			stored: entry.summary.agentSessionId,
+			lifecycle,
+			generation: entry.summary.homeAgentSessionGeneration ?? 0,
+		});
+
+		if (!identityResult.supported) {
+			throw new Error(`Failed to resolve launch identity: ${identityResult.reason}`);
+		}
+
+		const { agentSessionId: launchSessionId, resumeSession } = identityResult.value;
+
+		// Persist the resolved session id so the board/UI and lifecycle see a
+		// resumable session instead of an uncaptured (null) one.
+		updateSummary(entry, { agentSessionId: launchSessionId });
 
 		entry.restartRequest = {
 			kind: "task",
@@ -392,34 +406,6 @@ export class TerminalSessionManager implements TerminalSessionService {
 			},
 		});
 
-		let launchSessionId: string | null;
-		let resumeSession: boolean;
-		if (homeAgentSessionId) {
-			const homeTranscript = await locateAgentTranscript({
-				agentId: request.agentId,
-				sessionId: homeAgentSessionId,
-				homePath: homedir(),
-			});
-			({ agentSessionId: launchSessionId, resumeSession } = resolveHomeAgentLaunch({
-				agentSessionId: homeAgentSessionId,
-				transcriptPresent: homeTranscript.present,
-			}));
-			// Persist the deterministic id so the board/UI and lifecycle see a
-			// resumable session instead of an uncaptured (null) one.
-			updateSummary(entry, { agentSessionId: launchSessionId });
-		} else {
-			// Resume by the task's stored session id only when lifecycle routing says
-			// it is resumable. A prior launch with no resumable transcript is allowed
-			// to reattach/no-op, but must not mint a fresh prompt-replaying session.
-			({ agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
-				agentId: request.agentId,
-				storedSessionId: entry.summary.agentSessionId,
-				resumeMode:
-					lifecycle === "resumable" ? "resume" : isFirstTaskLaunch || isHomeAgentTask ? "fresh" : "unavailable",
-				mintSessionId: () => randomUUID(),
-			}));
-		}
-
 		const launch = await prepareAgentLaunch({
 			taskId: request.taskId,
 			agentId: request.agentId,
@@ -427,7 +413,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			args: request.args,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
-			prompt: homeAgentSessionId ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
+			prompt: ref.kind === "overseer" ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
 			agentModel: request.agentModel,
 			images: request.images,
 			resumeFromTrash: request.resumeFromTrash,
@@ -931,8 +917,16 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry: SessionEntry,
 		agentIdOverride?: StartTaskSessionRequest["agentId"],
 	): Promise<RuntimeAgentSessionLifecycle> {
-		const agentSessionId = entry.summary.agentSessionId;
+		let agentSessionId = entry.summary.agentSessionId;
 		const agentId = agentIdOverride ?? entry.summary.agentId;
+		const parsedHome = parseHomeAgentSessionId(entry.summary.taskId);
+		if (!agentSessionId && agentId === "claude" && parsedHome) {
+			agentSessionId = deriveHomeAgentClaudeSessionId(
+				parsedHome.workspaceId,
+				agentId,
+				entry.summary.homeAgentSessionGeneration ?? 0,
+			);
+		}
 		const transcript = agentSessionId
 			? await locateAgentTranscript({
 					agentId: agentId ?? "",
@@ -1251,6 +1245,10 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return false;
 		}
 		if (entry.listeners.size === 0 || entry.restartRequest?.kind !== "task") {
+			return false;
+		}
+		const isHomeAgentTask = isHomeAgentSessionId(entry.summary.taskId);
+		if (entry.summary.agentSessionLifecycle !== "resumable" && !isHomeAgentTask) {
 			return false;
 		}
 		const currentTime = now();
