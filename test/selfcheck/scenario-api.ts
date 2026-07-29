@@ -49,6 +49,9 @@ export interface ScenarioDriver {
 	steerCard(taskId: string, text: string): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
+	killAgentProcess(taskId: string): Promise<void>;
+	expectSessionGone(taskId: string): Promise<void>;
+	expectAgentRunning(taskId: string): Promise<number>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -185,6 +188,37 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			await stream.close();
 			stream = null;
 		},
+		killAgentProcess: async (taskId) => {
+			const state = await loadState(context);
+			const summary = state.sessions[taskId];
+			if (!summary || !summary.pid) {
+				throw new ScenarioAssertionError(`No running agent process found for task ${taskId} to kill.`);
+			}
+			try {
+				process.kill(summary.pid, "SIGKILL");
+			} catch (err: any) {
+				// Ignore errors (e.g. process already dead)
+			}
+		},
+		expectSessionGone: async (taskId) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				const isGone = !summary || summary.pid === null;
+				return isGone ? true : null;
+			}, `session for ${taskId} to be gone (pid null)`);
+		},
+		expectAgentRunning: async (taskId) => {
+			const pid = await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				if (summary && summary.pid !== null) {
+					return summary.pid;
+				}
+				return null;
+			}, `agent process for ${taskId} to be running (non-null pid)`);
+			return pid;
+		},
 	};
 }
 
@@ -240,31 +274,57 @@ export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver
 	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
 }
 
-export async function givenAgentSessionDiesWhenRestartRequestedThenFreshAgentSessionLaunches(driver: ScenarioDriver): Promise<void> {
+export async function givenCardWithGoneAgentWhenStartedThenNewAgentRuns(driver: ScenarioDriver): Promise<void> {
 	const context = driverContext(driver);
-	const taskId = "selfcheck-restart-after-death";
+	const taskId = "selfcheck-restart-after-gone";
+	const card = createSelfcheckCard({
+		id: taskId,
+		title: "Selfcheck restart after gone",
+		agentId: "claude",
+		baseRef: "main",
+	});
 	await driver.createCard({
 		column: "backlog",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck restart after death",
-		}),
+		card,
 	});
 
 	await driver.expectColumn(taskId, "backlog");
 	await driver.startCard(taskId);
-	await waitFor(async () => {
-		const state = await loadState(context);
-		const summary = state.sessions[taskId];
-		return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
-	}, "card to reach review and complete stub turn");
+	await driver.expectColumn(taskId, "in_progress");
 
+	// Capture initial PID
+	const pid1 = await driver.expectAgentRunning(taskId);
+	assertOk(pid1 > 0, "Agent PID must be greater than 0");
+
+	// Write a sentinel file with known content into the card's worktree, and leave it UNCOMMITTED.
+	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
+		baseUrl: context.baseUrl,
+		procedure: "workspace.ensureWorktree",
+		type: "mutation",
+		workspaceId: context.workspaceId,
+		payload: { taskId, baseRef: "main" },
+	});
+	assertOk(ensured.status === 200 && ensured.payload.ok, "Could not ensure worktree to write sentinel.");
+	const worktreePath = ensured.payload.path;
+	const sentinelPath = join(worktreePath, "restart-sentinel.txt");
+	writeFileSync(sentinelPath, "survivor\n", "utf8");
+
+	// Kill the agent process, then expect session gone.
+	await driver.killAgentProcess(taskId);
+	await driver.expectSessionGone(taskId);
+
+	// Start card a second time
 	await driver.startCard(taskId);
-	await waitFor(async () => {
-		const state = await loadState(context);
-		const summary = state.sessions[taskId];
-		return summary?.state === "running" ? true : null;
-	}, "card to restart and run again");
+
+	// Assert pid2 = expectAgentRunning(taskId) is a live pid and pid2 !== pid1
+	const pid2 = await driver.expectAgentRunning(taskId);
+	assertOk(pid2 > 0, "Second agent PID must be greater than 0");
+	assertOk(pid2 !== pid1, "New agent process must have a different PID than the killed one");
+
+	// Assert the sentinel file still exists with identical content
+	assertOk(existsSync(sentinelPath), "Sentinel file must survive restart");
+	const sentinelContent = readFileSync(sentinelPath, "utf8");
+	assertOk(sentinelContent === "survivor\n", "Sentinel file content must be untouched");
 }
 
 export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: ScenarioDriver): Promise<void> {
