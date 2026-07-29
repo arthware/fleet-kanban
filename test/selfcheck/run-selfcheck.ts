@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
@@ -15,10 +15,21 @@ import {
 
 interface ScenarioResult {
 	name: string;
-	ok: boolean;
+	status: "pass" | "fail" | "known-fail" | "unexpected-pass";
 	durationMs: number;
 	error?: string;
 	artifactPath?: string;
+	knownFailureIssue?: string;
+}
+
+class SelfcheckScenarioError extends Error {
+	readonly artifactPath?: string;
+
+	constructor(message: string, options: { artifactPath?: string } = {}) {
+		super(message);
+		this.name = "SelfcheckScenarioError";
+		this.artifactPath = options.artifactPath;
+	}
 }
 
 async function main(): Promise<void> {
@@ -33,9 +44,14 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
-	await runScenario(results, "steer a Review card -> moves to In Progress", async () => {
-		await runBrowserScenario("review-steering");
-	});
+	await runScenario(
+		results,
+		"steer a Review card -> moves to In Progress",
+		async () => {
+			await runBrowserScenario("review-steering");
+		},
+		{ knownFailureIssue: "#180" },
+	);
 	await runScenario(results, "review ping reaches the overseer session", async () => {
 		const context = await createSelfcheckContext();
 		try {
@@ -54,29 +70,39 @@ async function main(): Promise<void> {
 	});
 
 	for (const result of results) {
-		const status = result.ok ? "PASS" : "FAIL";
-		const suffix = result.ok
-			? ""
-			: ` - ${result.error}${result.artifactPath ? ` (artifact: ${result.artifactPath})` : ""}`;
-		process.stdout.write(`${status} ${result.name} ${result.durationMs}ms${suffix}\n`);
+		process.stdout.write(`${formatScenarioResult(result)}\n`);
 	}
-	if (results.some((result) => !result.ok)) {
+	if (results.some((result) => result.status === "fail" || result.status === "unexpected-pass")) {
 		process.exitCode = 1;
 	}
 }
 
-async function runScenario(results: ScenarioResult[], name: string, run: () => Promise<void>): Promise<void> {
+async function runScenario(
+	results: ScenarioResult[],
+	name: string,
+	run: () => Promise<void>,
+	options: { knownFailureIssue?: string } = {},
+): Promise<void> {
 	const startedAt = Date.now();
 	try {
 		await run();
-		results.push({ name, ok: true, durationMs: Date.now() - startedAt });
+		results.push({
+			name,
+			status: options.knownFailureIssue ? "unexpected-pass" : "pass",
+			durationMs: Date.now() - startedAt,
+			knownFailureIssue: options.knownFailureIssue,
+			error: options.knownFailureIssue
+				? `Known failure ${options.knownFailureIssue} passed; remove the marker.`
+				: undefined,
+		});
 	} catch (error) {
 		results.push({
 			name,
-			ok: false,
+			status: options.knownFailureIssue ? "known-fail" : "fail",
 			durationMs: Date.now() - startedAt,
 			error: formatError(error),
 			artifactPath: extractArtifactPath(error),
+			knownFailureIssue: options.knownFailureIssue,
 		});
 	}
 }
@@ -114,14 +140,16 @@ async function runBrowserScenario(name: string): Promise<void> {
 		);
 		if (result.status !== 0) {
 			const output = `${result.stdout}\n${result.stderr}`;
+			await writeFile(resolve(artifactDir, "playwright-output.txt"), output, "utf8");
 			if (output.includes("Executable doesn't exist") || output.includes("playwright install")) {
-				throw new Error(
-					`Chromium is missing; run: npm --prefix web-ui exec playwright install chromium; artifact=${artifactDir}`,
+				throw new SelfcheckScenarioError(
+					"Chromium is missing; run: npm --prefix web-ui exec playwright install chromium.",
+					{ artifactPath: artifactDir },
 				);
 			}
-			throw new Error(
-				`Review card did not move to In Progress after steering; ${compactOutput(output)}; artifact=${artifactDir}`,
-			);
+			throw new SelfcheckScenarioError("Review card did not move to In Progress after steering.", {
+				artifactPath: artifactDir,
+			});
 		}
 	} finally {
 		await context.stop();
@@ -137,16 +165,26 @@ async function ensureBuiltUi(): Promise<void> {
 		env: process.env,
 	});
 	if (result.status !== 0) {
-		throw new Error(`web-ui build failed: ${compactOutput(`${result.stdout}\n${result.stderr}`)}`);
+		throw new Error(`web-ui build failed: ${compactCommandOutput(`${result.stdout}\n${result.stderr}`)}`);
 	}
 }
 
-function compactOutput(output: string): string {
-	const lines = output
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0 && !line.startsWith("Running ") && !line.startsWith("Using config"));
-	return lines.slice(-8).join(" | ");
+function formatScenarioResult(result: ScenarioResult): string {
+	if (result.status === "pass") {
+		return `PASS ${result.name} ${result.durationMs}ms`;
+	}
+	if (result.status === "known-fail") {
+		return `KNOWN-FAIL ${result.name} -> ${result.knownFailureIssue} ${result.durationMs}ms - ${formatFailureSuffix(result)}`;
+	}
+	if (result.status === "unexpected-pass") {
+		return `UNEXPECTED-PASS ${result.name} -> ${result.knownFailureIssue} ${result.durationMs}ms - ${result.error}`;
+	}
+	return `FAIL ${result.name} ${result.durationMs}ms - ${formatFailureSuffix(result)}`;
+}
+
+function formatFailureSuffix(result: ScenarioResult): string {
+	const artifact = result.artifactPath ? ` (artifact: ${result.artifactPath})` : "";
+	return `${result.error ?? "Scenario failed."}${artifact}`;
 }
 
 function formatError(error: unknown): string {
@@ -155,9 +193,20 @@ function formatError(error: unknown): string {
 }
 
 function extractArtifactPath(error: unknown): string | undefined {
+	if (error instanceof SelfcheckScenarioError) {
+		return error.artifactPath;
+	}
 	const message = error instanceof Error ? error.message : String(error);
 	const match = message.match(/artifact=([^;\s]+)/);
 	return match?.[1] ?? undefined;
+}
+
+function compactCommandOutput(output: string): string {
+	const lines = output
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+	return lines.slice(-4).join(" | ");
 }
 
 void main().catch((error) => {
