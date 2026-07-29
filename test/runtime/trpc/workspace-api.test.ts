@@ -402,26 +402,29 @@ describe("createWorkspaceApi ensureWorktree", () => {
 		});
 		const boardPath = join(repoPath, ".cline", "kanban", "board.json");
 		await mkdir(join(repoPath, ".cline", "kanban"), { recursive: true });
-		await writeFile(
-			boardPath,
-			JSON.stringify({
-				revision: 1,
-				columns: [
-					{
-						id: "backlog",
-						cards: [
-							{
-								id: "task-123",
-								prompt: "do something",
-								baseRef: "main",
-								createdAt: Date.now(),
-								updatedAt: Date.now(),
-							},
-						],
-					},
-				],
-			}),
-		);
+		const boardData = {
+			revision: 1,
+			columns: [
+				{
+					id: "backlog",
+					title: "Backlog",
+					cards: [
+						{
+							id: "task-123",
+							prompt: "do something",
+							baseRef: "main",
+							createdAt: Date.now(),
+							updatedAt: Date.now(),
+						},
+					],
+				},
+			],
+		};
+		await writeFile(boardPath, JSON.stringify(boardData));
+
+		const context = await loadWorkspaceContext(repoPath);
+		await mkdir(context.statePath, { recursive: true });
+		await writeFile(join(context.statePath, "board.json"), JSON.stringify(boardData), "utf8");
 
 		workspaceTaskWorktreeMocks.ensureTaskWorktreeIfDoesntExist.mockResolvedValue({
 			ok: true,
@@ -485,7 +488,6 @@ describe("createWorkspaceApi ensureWorktree", () => {
 		expect(broadcastWorkspace).toHaveBeenCalledWith("workspace-123", repoPath);
 
 		// Read sessions.json and check that warningMessage is written!
-		const context = await loadWorkspaceContext(repoPath);
 		const sessionsPath = join(context.statePath, "sessions.json");
 		const sessionsContent = await import("node:fs/promises").then((fs) => fs.readFile(sessionsPath, "utf8"));
 		const sessions = JSON.parse(sessionsContent);

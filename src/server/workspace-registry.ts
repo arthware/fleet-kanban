@@ -2,15 +2,18 @@ import { homedir } from "node:os";
 
 import { type RuntimeConfigState, toGlobalRuntimeConfigState } from "../config/runtime-config";
 import type {
+	RuntimeAgentSessionLifecycle,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
+	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 	WorkspaceEpicDescriptor,
 } from "../core/api-contract";
 import type { GitRepositoryProbe } from "../core/git-repository-probe";
-import { parseHomeAgentSessionId } from "../core/home-agent-session";
+import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
+import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import {
 	getWorkspaceEpic,
 	listWorkspaceIndexEntries,
@@ -375,34 +378,86 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			response.sessions[summary.taskId] =
 				(await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
 		}
-		// Cold load: a home/architect Claude chat has a durable, *derivable* session id,
-		// but the persisted record may be stale (its id was never captured, so it reads
-		// as "gone"). When there is no live in-memory session, re-derive the id and
-		// classify its lifecycle from the transcript on disk — so the board shows the
-		// architect as resumable, matching how it will actually be resumed.
+		// Cold load: re-derive liveness for card and overseer (home-agent) alike.
+		// A home/architect Claude chat has a durable, derivable session id, but the persisted
+		// record may be stale. When there is no live in-memory session, re-derive the id and
+		// classify its lifecycle from the transcript on disk. For cards whose processes are
+		// gone, ensure they load as interrupted/idle with pid: null.
+		type SessionKind = "home-agent" | "card";
+		const getSessionKind = (id: string): SessionKind => {
+			return isHomeAgentSessionId(id) ? "home-agent" : "card";
+		};
+
+		const coldLoadTasks: Array<{
+			taskId: string;
+			resolvePromise: Promise<RuntimeTaskSessionSummary>;
+		}> = [];
+
 		for (const [taskId, summary] of Object.entries(response.sessions)) {
 			if (terminalManager.getSummary(taskId)) {
 				continue;
 			}
-			const parsed = parseHomeAgentSessionId(taskId);
-			if (!parsed || parsed.agentId !== "claude") {
-				continue;
+			const kind = getSessionKind(taskId);
+			let resolvePromise: Promise<RuntimeTaskSessionSummary>;
+
+			switch (kind) {
+				case "home-agent": {
+					resolvePromise = (async () => {
+						const parsed = parseHomeAgentSessionId(taskId);
+						if (parsed && parsed.agentId === "claude") {
+							const agentSessionId = deriveHomeAgentClaudeSessionId(
+								parsed.workspaceId,
+								"claude",
+								summary.homeAgentSessionGeneration ?? 0,
+							);
+							const transcript = await locateAgentTranscript({
+								agentId: "claude",
+								sessionId: agentSessionId,
+								homePath: homedir(),
+							});
+							const lifecycle: RuntimeAgentSessionLifecycle = transcript.present ? "resumable" : "gone";
+							return reconcileTaskSessionSummaryLiveness({
+								summary: { ...summary, agentSessionId },
+								lifecycle,
+							});
+						}
+						return summary;
+					})();
+					break;
+				}
+				case "card": {
+					resolvePromise = (async () => {
+						let lifecycle: RuntimeAgentSessionLifecycle = "gone";
+						if (summary.agentSessionId && summary.agentId) {
+							const transcript = await locateAgentTranscript({
+								agentId: summary.agentId,
+								sessionId: summary.agentSessionId,
+								homePath: homedir(),
+							});
+							if (transcript.present) {
+								lifecycle = "resumable";
+							}
+						}
+						return reconcileTaskSessionSummaryLiveness({
+							summary,
+							lifecycle,
+						});
+					})();
+					break;
+				}
+				default: {
+					const _exhaustive: never = kind;
+					throw new Error(`Unhandled session kind: ${_exhaustive}`);
+				}
 			}
-			const agentSessionId = deriveHomeAgentClaudeSessionId(
-				parsed.workspaceId,
-				"claude",
-				summary.homeAgentSessionGeneration ?? 0,
-			);
-			const transcript = await locateAgentTranscript({
-				agentId: "claude",
-				sessionId: agentSessionId,
-				homePath: homedir(),
-			});
-			response.sessions[taskId] = {
-				...summary,
-				agentSessionId,
-				agentSessionLifecycle: transcript.present ? "resumable" : "gone",
-			};
+
+			coldLoadTasks.push({ taskId, resolvePromise });
+		}
+
+		// Resolve all cold-load transcript lookups concurrently
+		const resolvedSummaries = await Promise.all(coldLoadTasks.map((task) => task.resolvePromise));
+		for (let i = 0; i < coldLoadTasks.length; i++) {
+			response.sessions[coldLoadTasks[i].taskId] = resolvedSummaries[i];
 		}
 		return response;
 	};
