@@ -32,6 +32,34 @@ DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 # Used to auto-resolve the board binary (co-located tier) and as fleet update's fork origin.
 FLEET_REPO="$(cd "$DIR/.." 2>/dev/null && pwd)"
 
+# Intercept and process --help, -h, and help commands through fleet_help.py before any validation
+_has_help=0
+if [ "${1:-}" = "help" ] && [ "${2:-}" = "--agent" ]; then
+  _has_help=0
+elif [ -n "${FLEET_HELP_INTERNAL:-}" ]; then
+  _has_help=0
+else
+  for arg in "$@"; do
+    if [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+      _has_help=1
+      break
+    fi
+  done
+fi
+
+if [ "$_has_help" = "1" ]; then
+  declare -a help_args=()
+  for arg in "$@"; do
+    if [ "$arg" = "help" ]; then
+      help_args+=("--help")
+    else
+      help_args+=("$arg")
+    fi
+  done
+  python3 "$DIR/fleet_help.py" "${help_args[@]}"
+  exit $?
+fi
+
 GLOBAL_DIR="$HOME/.config/fleet"         # shared: vendored kanban binary, key fallback
 # the project's .fleet dir, found by walking up from CWD (like .git); global if none
 _fleet_dir() {
@@ -1058,10 +1086,76 @@ else:
 PY
 }
 
+_fleet_task_create_help() {
+  cat <<'EOF'
+Usage: fleet task create [options]
+
+Create a task in backlog.
+
+Options:
+  --title, -t <text>                Task title.
+  --prompt, -p <text>               Task prompt text. Optional when --file/--markdown supplies the body.
+  --prompt-file <path>              Read prompt text from a file.
+  --file <path>                     Read the card from a Markdown file with optional YAML frontmatter (- reads stdin). See docs/card-authoring.md.
+  --markdown <text>                 Card Markdown (frontmatter + body) supplied inline instead of via --file.
+  --repo <name>                     Target repository name (default: first in project).
+  --base-ref <branch>               Task base branch/ref.
+  --auto-review pr                  Enable auto-review mode and push to remote PR.
+  --agent <id>                      Agent override: cline | claude | codex | droid | gemini | opencode | default (default: claude).
+  --model <id>                      Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5.
+  --type <name>                     Card Type / manifest pointer.
+  --external-issue, --issue <ref>   External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL.
+  --start                           Start the task immediately in a new worktree.
+  -h, --help                        display help for command
+EOF
+}
+
+_fleet_task_general_help() {
+  cat <<'EOF'
+usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--type <type>] [--agent claude|codex] [--model <id>] [--auto-review pr] [--start]
+                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md
+       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]
+       fleet task start  --task-id <id> [--repo <name>]
+       fleet task say <id> "<text>" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent
+       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)
+       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)
+       fleet task unlink --dependency-id <id> [--repo <name>]
+       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]
+       fleet task promote <card-id> [--repo <name>]
+       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent
+       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]
+       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)
+       fleet task cat <id>          one task: state + worktree + diff
+       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation
+EOF
+}
+
 fleet_task() {
   [ -f "$CFG_DIR/config.json" ] || { dim "no project .fleet — run 'fleet init' first"; return 1; }
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
   local sub="${1:-}"; [ $# -gt 0 ] && shift
+
+  # Scan for help requested once across any argument position
+  local has_help=0
+  for arg in "$@"; do
+    if [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+      has_help=1
+      break
+    fi
+  done
+  if [ "$sub" = "--help" ] || [ "$sub" = "-h" ] || [ "$sub" = "help" ]; then
+    has_help=1
+  fi
+
+  if [ "$has_help" = "1" ]; then
+    if [ "$sub" = "create" ] || [ "$sub" = "new" ] || [ "$sub" = "add" ]; then
+      _fleet_task_create_help
+      return 0
+    fi
+    _fleet_task_general_help
+    return 0
+  fi
+
   if [ "$sub" != "land" ]; then
     kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
   fi
@@ -1667,21 +1761,7 @@ PY
 
       say "landed $card (#$pr_num)."
       ;;
-    *) echo "usage: fleet task create (--prompt <text> | --file <card.md> | --markdown <text>) [--title <t>] [--repo <name>] [--issue <ref>] [--base-ref <ref>] [--type <type>] [--agent claude|codex] [--model <id>] [--auto-review pr] [--start]" >&2
-       echo "                        --file/--markdown read a Markdown card (YAML frontmatter + prompt body); see fleet-kanban/docs/card-authoring.md" >&2
-       echo "       fleet task update --task-id <id> [--title..][--prompt..|--prompt-file f][--base-ref..][--type <type>][--auto-review pr|off][--agent..][--cline-model..]" >&2
-       echo "       fleet task start  --task-id <id> [--repo <name>]" >&2
-       echo "       fleet task say <id> \"<text>\" [--submit|--no-submit|--submit-only] [--repo <name>]   steer a running agent" >&2
-       echo "       fleet task submit <id> [--repo <name>]                                                 submit current staged content (lone Enter)" >&2
-       echo "       fleet task link   --task-id <id> --linked-task-id <id> [--repo <name>]   (first waits on second)" >&2
-       echo "       fleet task unlink --dependency-id <id> [--repo <name>]" >&2
-       echo "       fleet task done   (--task-id <id> | --column <col>) [--repo <name>]" >&2
-       echo "       fleet task promote <card-id> [--repo <name>]" >&2
-       echo "       fleet task delete (--task-id <id> | --column <col>) [--repo <name>]   permanent" >&2
-       echo "       fleet task land   <card-id> [--repo <name>] [--base <ref>] [--merge squash|merge|rebase] [--no-delete-branch] [--no-done] [-n|--dry-run] [--force]" >&2
-       echo "       fleet task ls | list        [--repo <name>] [--column backlog|in_progress|review|done]   (grouped repo -> state)" >&2
-       echo "       fleet task cat <id>          one task: state + worktree + diff" >&2
-       echo "       fleet task tail <id> [--lines N] [--since <mins>] [--repo <name>]   read a running agent's conversation" >&2
+    *) _fleet_task_general_help >&2
        return 1;;
   esac
 }
@@ -2010,7 +2090,7 @@ case "$cmd" in
   new|up|run|ls|rm) exec "$DIR/wt" "$cmd" "$@";;
   linear|mine|tasks)
     case "${1:-}" in
-      api-key|--api-key|set-key|key) shift; fleet_set_linear_key "$@";;
+      api-key|--api-key|set-key|key) shift; fleet_set_linear_key "$@"; exit $?;;
       *) exec python3 "$DIR/fleet.py" --mine "$@";;
     esac;;
   agent)
@@ -2022,13 +2102,13 @@ case "$cmd" in
   initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
   epic) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
   port) exec "$DIR/port-for" "$@";;
-  kanban) fleet_kanban "$@";;
-  service|svc) fleet_service "$@";;
-  task) fleet_task "$@";;
-  card-type|card-types|ct) fleet_card_type "$@";;
-  xtools|xtool|x) fleet_xtools "$@";;
-  init) fleet_init "$@";;
-  update) fleet_update "$@";;
+  kanban) fleet_kanban "$@"; exit $?;;
+  service|svc) fleet_service "$@"; exit $?;;
+  task) fleet_task "$@"; exit $?;;
+  card-type|card-types|ct) fleet_card_type "$@"; exit $?;;
+  xtools|xtool|x) fleet_xtools "$@"; exit $?;;
+  init) fleet_init "$@"; exit $?;;
+  update) fleet_update "$@"; exit $?;;
   budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
   *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools)" >&2; exit 1;;
 esac
