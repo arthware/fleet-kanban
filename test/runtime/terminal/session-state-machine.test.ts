@@ -99,10 +99,20 @@ describe("reduceSessionTransition", () => {
 	});
 
 	describe("human review dormancy", () => {
-		it("keeps a completed review card dormant when an automatic to_in_progress hook arrives", () => {
+		it("wakes a completed review card when an explicit to_in_progress hook arrives", () => {
 			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "hook" });
 
 			const result = reduceSessionTransition(summary, { type: "hook.to_in_progress" });
+
+			expect(result.changed).toBe(true);
+			expect(result.patch.state).toBe("running");
+			expect(result.patch.reviewReason).toBeNull();
+		});
+
+		it("keeps a completed review card dormant when idle terminal output only looks prompt-ready", () => {
+			const summary = createRunningSummary({ state: "awaiting_review", reviewReason: "hook" });
+
+			const result = reduceSessionTransition(summary, { type: "agent.prompt-ready" });
 
 			expect(result.changed).toBe(false);
 			expect(result.patch).toEqual({});

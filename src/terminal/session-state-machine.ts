@@ -92,7 +92,20 @@ export function reduceSessionTransition(
 				clearAttentionBuffer: true,
 			};
 		}
-		case "hook.to_in_progress":
+		case "hook.to_in_progress": {
+			if (summary.state !== "awaiting_review") {
+				return { changed: false, patch: {}, clearAttentionBuffer: false };
+			}
+			return {
+				changed: true,
+				patch: {
+					state: "running",
+					reviewReason: null,
+					lastReviewNotificationKey: null,
+				},
+				clearAttentionBuffer: true,
+			};
+		}
 		case "agent.prompt-ready": {
 			if (summary.state !== "awaiting_review" || !canReturnToRunning(summary.reviewReason)) {
 				return { changed: false, patch: {}, clearAttentionBuffer: false };
