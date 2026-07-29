@@ -40,7 +40,6 @@ export function BoardColumn({
 	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
-	defaultClineModelId,
 	defaultAgentId,
 }: {
 	column: BoardColumnModel;
@@ -72,7 +71,6 @@ export function BoardColumn({
 	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
-	defaultClineModelId?: string | null;
 	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const canCreate = column.id === "backlog" && onCreateTask;
@@ -96,6 +94,7 @@ export function BoardColumn({
 		<section
 			id={column.id === "trash" ? "kb-archived-column" : undefined}
 			data-column-id={column.id}
+			data-testid={`board-column-${column.id}`}
 			className="flex flex-col min-w-0 min-h-0 bg-surface-1 rounded-lg overflow-hidden border border-border"
 			style={{
 				flex: "1 1 0",
@@ -164,6 +163,7 @@ export function BoardColumn({
 												key={card.id}
 												data-task-id={card.id}
 												data-column-id={column.id}
+												data-testid={`board-card-${card.id}`}
 												style={{ marginBottom: 6 }}
 											>
 												{inlineTaskEditor}
@@ -194,7 +194,6 @@ export function BoardColumn({
 											workspaceId={workspaceId}
 											workspacePath={workspacePath}
 											taskWorktreesRoot={taskWorktreesRoot}
-											defaultClineModelId={defaultClineModelId}
 											defaultAgentId={defaultAgentId}
 											onSaveTitle={onSaveTitle}
 											onClick={() => {

@@ -7,7 +7,6 @@ import {
 import type {
 	RuntimeAgentDefinition,
 	RuntimeAgentId,
-	RuntimeClineProviderSettings,
 	RuntimeConfigResponse,
 } from "../core/api-contract";
 import { isBinaryAvailableOnPath } from "./command-discovery";
@@ -138,7 +137,6 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 
 export function buildRuntimeConfigResponse(
 	runtimeConfig: RuntimeConfigState,
-	clineProviderSettings: RuntimeClineProviderSettings,
 ): RuntimeConfigResponse {
 	const detectedCommands = detectInstalledCommands();
 	const agents = getCuratedDefinitions(runtimeConfig, detectedCommands);
@@ -158,6 +156,5 @@ export function buildRuntimeConfigResponse(
 		agents,
 		shortcuts: runtimeConfig.shortcuts,
 		worktree: runtimeConfig.worktree,
-		clineProviderSettings,
 	};
 }

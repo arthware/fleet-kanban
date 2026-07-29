@@ -357,6 +357,11 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			}
 			// ── End passcode gate ──────────────────────────────────────────────
 
+			if (pathname === "/api/healthz") {
+				res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+				res.end(JSON.stringify({ ok: true }));
+				return;
+			}
 			if (pathname.startsWith("/api/trpc")) {
 				await trpcHttpHandler(req, res);
 				return;

@@ -490,7 +490,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					architectWorkspaceId: projectsPayload.architectWorkspaceId,
 					workspaceState,
 					workspaceMetadata,
-					clineSessionContextVersion: 0,
 				} satisfies RuntimeStateStreamSnapshotMessage);
 				if (client.readyState !== WebSocket.OPEN) {
 					if (monitorWorkspaceId) {

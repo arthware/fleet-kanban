@@ -76,6 +76,10 @@ function getRuntimeHomePath(): string {
 	return join(clineHomeDir(), RUNTIME_HOME_DIR);
 }
 
+export function getRuntimeDebugResetPaths(): readonly string[] {
+	return [join(clineHomeDir(), "data"), getRuntimeHomePath(), join(clineHomeDir(), "worktrees")];
+}
+
 function normalizeAgentId(agentId: RuntimeAgentId | string | null | undefined): RuntimeAgentId {
 	if (
 		(agentId === "claude" || agentId === "codex" || agentId === "gemini") &&

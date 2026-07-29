@@ -1,17 +1,17 @@
 import { History, Play } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
-import { ClineChatMessageItem } from "@/components/detail-panels/cline-chat-message-item";
+import { MarkdownContent } from "@/components/detail-panels/markdown-content";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
-import type { ClineChatMessage } from "@/hooks/use-cline-chat-session";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeTaskChatMessage, RuntimeTaskSessionSummary } from "@/runtime/types";
 
 /** What a transcript load resolved to: the CLI's persisted conversation, if any. */
 export interface AgentTranscriptLoadResult {
 	/** True when a transcript file was located on disk for this session. */
 	present: boolean;
-	messages: ClineChatMessage[];
+	messages: RuntimeTaskChatMessage[];
 }
 
 export interface AgentTranscriptPanelProps {
@@ -30,7 +30,7 @@ export interface AgentTranscriptPanelProps {
 
 type LoadState =
 	| { status: "loading" }
-	| { status: "loaded"; present: boolean; messages: ClineChatMessage[] }
+	| { status: "loaded"; present: boolean; messages: RuntimeTaskChatMessage[] }
 	| { status: "error" };
 
 /**
@@ -128,8 +128,25 @@ function AgentTranscriptBody({ loadState, canResume }: { loadState: LoadState; c
 			className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto px-2 py-3"
 		>
 			{loadState.messages.map((message) => (
-				<ClineChatMessageItem key={message.id} message={message} />
+				<TranscriptMessageItem key={message.id} message={message} />
 			))}
+		</div>
+	);
+}
+
+function TranscriptMessageItem({ message }: { message: RuntimeTaskChatMessage }): ReactElement {
+	const roleLabel = message.meta?.displayRole ?? message.role;
+	return (
+		<div
+			className={cn(
+				"rounded-md border px-3 py-2 text-sm",
+				message.role === "user"
+					? "border-border-bright bg-surface-2 text-text-primary"
+					: "border-border bg-surface-1 text-text-secondary",
+			)}
+		>
+			<div className="mb-1 text-[11px] font-medium uppercase text-text-tertiary">{roleLabel}</div>
+			<MarkdownContent content={message.content} />
 		</div>
 	);
 }

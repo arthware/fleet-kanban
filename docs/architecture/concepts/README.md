@@ -56,6 +56,7 @@ numbers. The architect reconciles the map on merge.
 | [Runtime state fanout](runtime-state-fanout.md) | the hub that streams board/session deltas to the browser | `src/server/runtime-state-hub.ts` |
 | [Cline SDK boundary](cline-sdk-boundary.md) | maps task semantics onto the SDK; keeps SDK internals contained | `src/cline-sdk/` |
 | [Agent catalog](agent-catalog.md) | registry of supported agents (Cline-native vs CLI/PTY) | `src/core/agent-catalog.ts`, `src/terminal/agent-session-adapters.ts` |
+| [Agent driver](agent-driver.md) | capability port for launch, identity, observation, signals, and control per harness | `src/agents/driver.ts`, `src/agents/session-signal.ts` |
 | [Card type / skill pipeline](card-types.md) | data-defined pipeline phases mapping to lanes, skills, and prompts | `src/core/card-type.ts`, `fleet/card-types/` |
 
 ### Secondary

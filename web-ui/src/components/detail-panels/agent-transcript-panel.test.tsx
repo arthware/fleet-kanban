@@ -4,8 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentTranscriptPanel } from "@/components/detail-panels/agent-transcript-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { ClineChatMessage } from "@/hooks/use-cline-chat-session";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeTaskChatMessage, RuntimeTaskSessionSummary } from "@/runtime/types";
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -49,7 +48,7 @@ function renderPanel(panel: ReactElement): void {
 
 describe("AgentTranscriptPanel", () => {
 	it("renders the ended session's prior conversation instead of a blank pane", async () => {
-		const messages: ClineChatMessage[] = [
+		const messages: RuntimeTaskChatMessage[] = [
 			{ id: "claude-0", role: "user", content: "wire up the resume path", createdAt: 1 },
 			{ id: "claude-1", role: "assistant", content: "done, tests are green", createdAt: 2 },
 		];

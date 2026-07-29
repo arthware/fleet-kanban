@@ -8,12 +8,10 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
-	RuntimeClineReasoningEffort,
 	RuntimeExternalIssue,
-	RuntimeTaskClineSettings,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
-import { runtimeAgentIdSchema, runtimeClineReasoningEffortSchema } from "../core/api-contract";
+import { runtimeAgentIdSchema } from "../core/api-contract";
 import { parseExternalIssueRef } from "../core/external-issue";
 import { buildKanbanRuntimeUrl, getKanbanRuntimeOrigin, getRuntimeFetch } from "../core/runtime-endpoint";
 import {
@@ -142,47 +140,6 @@ function parseOptionalStringOrDefault(value: string | undefined): string | null 
 	return value;
 }
 
-type ParsedTaskClineReasoningEffort = RuntimeClineReasoningEffort | "default" | null | undefined;
-
-function parseTaskClineReasoningEffort(value: string | undefined): ParsedTaskClineReasoningEffort {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (value === "inherit") {
-		return null;
-	}
-	if (value === "default") {
-		return "default";
-	}
-	const result = runtimeClineReasoningEffortSchema.safeParse(value);
-	if (result.success) {
-		return result.data;
-	}
-	throw new Error("Invalid Cline reasoning effort. Expected one of: default, low, medium, high, xhigh, inherit.");
-}
-
-function cloneTaskClineSettings(settings?: RuntimeTaskClineSettings): RuntimeTaskClineSettings | undefined {
-	if (settings === undefined) {
-		return undefined;
-	}
-	const providerId = settings.providerId?.trim();
-	const modelId = settings.modelId?.trim();
-	return {
-		...(providerId ? { providerId } : {}),
-		...(modelId ? { modelId } : {}),
-		...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
-	};
-}
-
-function formatTaskClineSettings(settings?: RuntimeTaskClineSettings): JsonRecord {
-	if (settings === undefined) {
-		return {};
-	}
-	return {
-		clineSettings: cloneTaskClineSettings(settings) ?? {},
-	};
-}
-
 export async function resolveExternalIssueForTaskCommand(input: {
 	ref: string;
 	cwd: string;
@@ -213,80 +170,6 @@ export async function resolveExternalIssueForTaskCommand(input: {
 		};
 	}
 	return parsed;
-}
-
-function buildTaskClineSettingsForCreate(input: {
-	providerId?: string;
-	modelId?: string;
-	reasoningEffort?: ParsedTaskClineReasoningEffort;
-}): RuntimeTaskClineSettings | undefined {
-	const providerId = input.providerId?.trim();
-	const modelId = input.modelId?.trim();
-	const reasoningEffort = input.reasoningEffort === null ? undefined : input.reasoningEffort;
-	if (!providerId && !modelId && reasoningEffort === undefined) {
-		return undefined;
-	}
-	return {
-		...(providerId ? { providerId } : {}),
-		...(modelId ? { modelId } : {}),
-		...(reasoningEffort && reasoningEffort !== "default" ? { reasoningEffort } : {}),
-	};
-}
-
-function buildTaskClineSettingsForUpdate(
-	currentSettings: RuntimeTaskClineSettings | undefined,
-	input: {
-		providerId?: string | null;
-		modelId?: string | null;
-		reasoningEffort?: ParsedTaskClineReasoningEffort;
-	},
-): RuntimeTaskClineSettings | null | undefined {
-	if (input.providerId === undefined && input.modelId === undefined && input.reasoningEffort === undefined) {
-		return undefined;
-	}
-	const nextSettings = cloneTaskClineSettings(currentSettings) ?? {};
-	let preserveEmptyOverride = currentSettings !== undefined && Object.keys(currentSettings).length === 0;
-
-	if (input.providerId !== undefined) {
-		const providerId = input.providerId?.trim();
-		if (providerId) {
-			nextSettings.providerId = providerId;
-		} else {
-			delete nextSettings.providerId;
-		}
-	}
-
-	if (input.modelId !== undefined) {
-		const modelId = input.modelId?.trim();
-		if (modelId) {
-			nextSettings.modelId = modelId;
-		} else {
-			delete nextSettings.modelId;
-		}
-	}
-
-	if (input.reasoningEffort !== undefined) {
-		if (input.reasoningEffort === "default") {
-			delete nextSettings.reasoningEffort;
-			preserveEmptyOverride = true;
-		} else if (input.reasoningEffort === null) {
-			delete nextSettings.reasoningEffort;
-			preserveEmptyOverride = false;
-		} else {
-			nextSettings.reasoningEffort = input.reasoningEffort;
-		}
-	}
-
-	if (
-		nextSettings.providerId === undefined &&
-		nextSettings.modelId === undefined &&
-		nextSettings.reasoningEffort === undefined &&
-		!preserveEmptyOverride
-	) {
-		return null;
-	}
-
-	return nextSettings;
 }
 
 async function resolveTaskCommandTarget(
@@ -525,7 +408,6 @@ export function formatTaskRecord(
 		...(task.prState ? { prState: task.prState } : {}),
 		...(task.prNumber !== undefined ? { prNumber: task.prNumber } : {}),
 		...(task.prGateStatus ? { prGateStatus: task.prGateStatus } : {}),
-		...formatTaskClineSettings(task.clineSettings),
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
 		session: session
@@ -558,7 +440,6 @@ export function formatCreatedTaskRecord(created: RuntimeBoardCard, workspaceRepo
 		...(created.skill ? { skill: created.skill } : {}),
 		...(created.cardType ? { cardType: created.cardType } : {}),
 		...(created.externalIssue ? { externalIssue: created.externalIssue } : {}),
-		...formatTaskClineSettings(created.clineSettings),
 	};
 }
 
@@ -747,7 +628,6 @@ async function createTask(input: {
 	skill?: string;
 	cardType?: string;
 	externalIssueRef?: string;
-	clineSettings?: RuntimeTaskClineSettings;
 }): Promise<JsonRecord> {
 	const workspaceRepoPath = await resolveWorkspaceRepoPath(input.projectPath, input.cwd);
 	const externalIssue =
@@ -778,7 +658,6 @@ async function createTask(input: {
 				skill: input.skill,
 				cardType: input.cardType,
 				externalIssue,
-				clineSettings: input.clineSettings,
 				baseRef: resolvedBaseRef,
 			},
 			() => globalThis.crypto.randomUUID(),
@@ -809,9 +688,6 @@ async function updateTaskCommand(input: {
 	skill?: string | null;
 	cardType?: string | null;
 	externalIssueRef?: string | null;
-	clineProviderId?: string | null;
-	clineModelId?: string | null;
-	clineReasoningEffort?: ParsedTaskClineReasoningEffort;
 }): Promise<JsonRecord> {
 	if (
 		input.title === undefined &&
@@ -823,10 +699,7 @@ async function updateTaskCommand(input: {
 		input.agentModel === undefined &&
 		input.skill === undefined &&
 		input.cardType === undefined &&
-		input.externalIssueRef === undefined &&
-		input.clineProviderId === undefined &&
-		input.clineModelId === undefined &&
-		input.clineReasoningEffort === undefined
+		input.externalIssueRef === undefined
 	) {
 		throw new Error("task update requires at least one field to change.");
 	}
@@ -872,12 +745,6 @@ async function updateTaskCommand(input: {
 				`cannot edit the ${field} of card ${taskId}: it is in ${taskRecord.columnId} (started); prompt/title are editable only in backlog`,
 			);
 		}
-		const nextTaskClineSettings = buildTaskClineSettingsForUpdate(taskRecord.task.clineSettings, {
-			providerId: input.clineProviderId,
-			modelId: input.clineModelId,
-			reasoningEffort: input.clineReasoningEffort,
-		});
-
 		const updatedTask = updateTask(runtimeState.board, taskId, {
 			title: input.title ?? taskRecord.task.title,
 			prompt: input.prompt ?? taskRecord.task.prompt,
@@ -892,7 +759,6 @@ async function updateTaskCommand(input: {
 			skill: input.skill,
 			cardType: input.cardType,
 			externalIssue,
-			clineSettings: nextTaskClineSettings,
 		});
 		if (!updatedTask.updated || !updatedTask.task) {
 			throw new Error(`Task "${taskId}" could not be updated.`);
@@ -1046,7 +912,6 @@ async function startTaskFromState(input: StartTaskFromStateInput): Promise<JsonR
 			agentModel: task.agentModel,
 			skill: task.skill,
 			cardType: task.cardType,
-			clineSettings: task.clineSettings,
 		});
 		if (!started.ok || !started.summary) {
 			throw new Error(started.error ?? "Could not start task session.");
@@ -1166,9 +1031,8 @@ async function sendTaskInput(input: {
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 
-	// Bracketed paste so a mid-turn PTY agent buffers the steering text cleanly; the
-	// Cline path ignores the framing and takes it as a message. `submit` decides
-	// whether the text is sent or just staged in the prompt.
+		// Bracketed paste so a mid-turn PTY agent buffers the steering text cleanly.
+		// `submit` decides whether the text is sent or just staged in the prompt.
 	const result = await runtimeClient.runtime.sendTaskSessionInput.mutate({
 		taskId: input.taskId,
 		text: input.text,
@@ -1954,10 +1818,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--base-ref <branch>", "Task base branch/ref.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
 		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
-		.option(
-			"--agent-id <id>",
-			'Agent override: claude | codex | gemini. Use "default" to clear.',
-		)
+		.option("--agent-id <id>", 'Agent override: claude | codex | gemini. Use "default" to clear.')
 		.option(
 			"--agent-model <id>",
 			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',

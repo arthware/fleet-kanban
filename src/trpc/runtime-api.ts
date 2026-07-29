@@ -1,18 +1,15 @@
 // Coordinates the runtime-side TRPC handlers used by the browser.
 // This is the main backend entrypoint for sessions, settings, git, and
-// workspace actions, but detailed Cline, terminal, and config behavior
-// should stay in focused services instead of accumulating here.
+// workspace actions, while terminal-specific behavior stays in focused
+// services instead of accumulating here.
 
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { TRPCError } from "@trpc/server";
-import { clineHomeDir } from "../config/cline-home";
 import type { RuntimeConfigState } from "../config/runtime-config";
-import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtime-config";
+import { getRuntimeDebugResetPaths, updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtime-config";
 import type {
 	RuntimeCommandRunResponse,
-	RuntimeClineProviderSettings,
 	RuntimeRunUpdateResponse,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskReviewNotificationResponse,
@@ -98,25 +95,6 @@ export interface CreateRuntimeApiDependencies {
 	delay?: (ms: number) => Promise<void>;
 }
 
-const EMPTY_CLINE_PROVIDER_SETTINGS: RuntimeClineProviderSettings = {
-	providerId: null,
-	modelId: null,
-	baseUrl: null,
-	apiKeyConfigured: false,
-	oauthProvider: null,
-	oauthAccessTokenConfigured: false,
-	oauthRefreshTokenConfigured: false,
-	oauthAccountId: null,
-	oauthExpiresAt: null,
-};
-
-function emptyClineMcpSettingsResponse(): { path: string; servers: [] } {
-	return {
-		path: join(clineHomeDir(), "mcp_settings.json"),
-		servers: [],
-	};
-}
-
 async function resolveExistingTaskCwdOrEnsure(options: {
 	cwd: string;
 	taskId: string;
@@ -179,14 +157,9 @@ async function persistReviewNotificationKey(
 }
 
 export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrpcContext["runtimeApi"] {
-	const debugResetTargetPaths = [
-		join(clineHomeDir(), "data"),
-		join(clineHomeDir(), "kanban"),
-		join(clineHomeDir(), "worktrees"),
-	] as const;
+	const debugResetTargetPaths = getRuntimeDebugResetPaths();
 
-	const buildConfigResponse = (runtimeConfig: RuntimeConfigState) =>
-		buildRuntimeConfigResponse(runtimeConfig, EMPTY_CLINE_PROVIDER_SETTINGS);
+	const buildConfigResponse = (runtimeConfig: RuntimeConfigState) => buildRuntimeConfigResponse(runtimeConfig);
 
 	const delay = deps.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
@@ -414,15 +387,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			}
 			return buildConfigResponse(nextRuntimeConfig);
 		},
-		saveClineProviderSettings: async (_workspaceScope, input) => {
-			return EMPTY_CLINE_PROVIDER_SETTINGS;
-		},
-		addClineProvider: async (_workspaceScope, input) => {
-			return EMPTY_CLINE_PROVIDER_SETTINGS;
-		},
-		updateClineProvider: async (_workspaceScope, input) => {
-			return EMPTY_CLINE_PROVIDER_SETTINGS;
-		},
 		startTaskSession: async (workspaceScope, input) => {
 			try {
 				const body = parseTaskSessionStartRequest(input);
@@ -566,11 +530,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				//   2. body.agentId — the card's current per-task agent override.
 				//   3. scopedRuntimeConfig.selectedAgentId — the workspace-level default.
 				//
-				// clineSettings (which LLM model and reasoning profile the Cline agent uses):
-				//   Always taken from the card's current override object. There is no
-				//   session-level persistence for these;
-				//   if the user changes the model on the card, the next session launch
-				//   (including trash-restore) uses the updated values.
+				// agentModel resolution:
+				//   Always taken from the card's current override, so changing the card
+				//   updates the next launch, including trash-restore.
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
 				const previousTerminalAgentId = body.resumeFromTrash
 					? (terminalManager.getSummary(body.taskId)?.agentId ?? null)
@@ -762,11 +724,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				return { ok: false, usage: {}, error: message };
 			}
 		},
-		getClineSlashCommands: async (workspaceScope) => {
-			return {
-				commands: [],
-			};
-		},
 		reloadTaskChatSession: async (workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
@@ -818,25 +775,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 		},
-		getClineProviderCatalog: async (_workspaceScope) => {
-			return { providers: [] };
-		},
-		getClineAccountProfile: async (_workspaceScope) => {
-			return { profile: null };
-		},
-		getClineKanbanAccess: async (_workspaceScope) => {
-			return { enabled: false, error: "Cline access is not available." };
-		},
 		getFeaturebaseToken: async (_workspaceScope) => {
 			return { featurebaseJwt: "" };
-		},
-		getClineAccountBalance: async (_workspaceScope) => {
-			return {
-				balance: null,
-				activeAccountLabel: null,
-				activeOrganizationId: null,
-				error: "Cline account balance is not available.",
-			};
 		},
 		getAgentBudget: async (_workspaceScope) => {
 			return await getAgentBudget();
@@ -851,48 +791,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		applyFleetUpdate: async (_workspaceScope) => {
 			const inProgressCount = await deps.getFleetUpdateInProgressCount();
 			return await applyFleetUpdate({ inProgressCount });
-		},
-		getClineAccountOrganizations: async (_workspaceScope) => {
-			return { organizations: [] };
-		},
-		switchClineAccount: async (_workspaceScope, input) => {
-			return { ok: false, error: "Cline account switching is not available." };
-		},
-		getClineProviderModels: async (_workspaceScope, input) => {
-			return { providerId: typeof input.providerId === "string" ? input.providerId : "", models: [] };
-		},
-		getClineMcpAuthStatuses: async (_workspaceScope) => {
-			return {
-				statuses: [],
-			};
-		},
-		runClineMcpServerOAuth: async (_workspaceScope, input) => {
-			return {
-				serverName: typeof input.serverName === "string" ? input.serverName : "",
-				authorized: true,
-				message: "Cline MCP OAuth is not available.",
-			};
-		},
-		getClineMcpSettings: async (_workspaceScope) => {
-			return emptyClineMcpSettingsResponse();
-		},
-		saveClineMcpSettings: async (_workspaceScope, input) => {
-			return emptyClineMcpSettingsResponse();
-		},
-		runClineProviderOAuthLogin: async (_workspaceScope, input) => {
-			return { ok: false, provider: "cline", error: "Cline OAuth is not available." };
-		},
-		startClineDeviceAuth: async () => {
-			return {
-				deviceCode: "",
-				userCode: "",
-				verificationUrl: "",
-				expiresInSeconds: 0,
-				pollIntervalSeconds: 0,
-			};
-		},
-		completeClineDeviceAuth: async (_workspaceScope, input) => {
-			return { ok: false, provider: "cline", error: "Cline device auth is not available." };
 		},
 		sendTaskChatMessage: async (workspaceScope, input) => {
 			try {

@@ -529,7 +529,7 @@ describe("useBoardInteractions", () => {
 		});
 	});
 
-	it("preserves model fields when restoring a trashed task", async () => {
+	it("preserves agent fields when restoring a trashed task", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		useProgrammaticCardMovesMock.mockReturnValue({
@@ -558,10 +558,7 @@ describe("useBoardInteractions", () => {
 			startInPlanMode: false,
 			autoReviewEnabled: false,
 			agentId: "codex",
-			clineSettings: {
-				providerId: "my-provider",
-				modelId: "my-model",
-			},
+			agentModel: "codex-mini",
 			baseRef: "main",
 			createdAt: 2,
 			updatedAt: 2,
@@ -620,15 +617,12 @@ describe("useBoardInteractions", () => {
 		});
 
 		// After restore, disableTaskAutoReview is called via setBoard updater.
-		// Verify model fields survived the restore flow.
+		// Verify agent fields survived the restore flow.
 		const reviewCards = currentBoard.columns.find((col) => col.id === "review")?.cards ?? [];
 		const restoredTask = reviewCards.find((card) => card.id === "task-trash-model");
 		expect(restoredTask).toBeDefined();
-		expect(restoredTask?.clineSettings).toEqual({
-			providerId: "my-provider",
-			modelId: "my-model",
-		});
 		expect(restoredTask?.agentId).toBe("codex");
+		expect(restoredTask?.agentModel).toBe("codex-mini");
 	});
 
 	it("ignores card selection requests for trashed tasks", async () => {
