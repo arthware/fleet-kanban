@@ -4,11 +4,7 @@ import {
 	getRuntimeLaunchSupportedAgentCatalog,
 	RUNTIME_AGENT_CATALOG,
 } from "../core/agent-catalog";
-import type {
-	RuntimeAgentDefinition,
-	RuntimeAgentId,
-	RuntimeConfigResponse,
-} from "../core/api-contract";
+import type { RuntimeAgentDefinition, RuntimeAgentId, RuntimeConfigResponse } from "../core/api-contract";
 import { isBinaryAvailableOnPath } from "./command-discovery";
 
 const TEST_AGENT_BINARY_ENV = "KANBAN_TEST_AGENT_BINARY";
@@ -135,9 +131,7 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 	return null;
 }
 
-export function buildRuntimeConfigResponse(
-	runtimeConfig: RuntimeConfigState,
-): RuntimeConfigResponse {
+export function buildRuntimeConfigResponse(runtimeConfig: RuntimeConfigState): RuntimeConfigResponse {
 	const detectedCommands = detectInstalledCommands();
 	const agents = getCuratedDefinitions(runtimeConfig, detectedCommands);
 	const resolved = resolveAgentCommand(runtimeConfig);

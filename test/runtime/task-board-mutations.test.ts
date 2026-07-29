@@ -413,11 +413,11 @@ describe("per-task agent/model/provider overrides", () => {
 		const created = addTaskToColumn(
 			createBoard(),
 			"backlog",
-				{
-					prompt: "Task",
-					baseRef: "main",
-					agentId: "claude",
-				},
+			{
+				prompt: "Task",
+				baseRef: "main",
+				agentId: "claude",
+			},
 			() => "aaaaa111",
 		);
 
@@ -434,11 +434,11 @@ describe("per-task agent/model/provider overrides", () => {
 		const created = addTaskToColumn(
 			createBoard(),
 			"backlog",
-				{
-					prompt: "Task",
-					baseRef: "main",
-					agentId: "codex",
-				},
+			{
+				prompt: "Task",
+				baseRef: "main",
+				agentId: "codex",
+			},
 			() => "aaaaa111",
 		);
 
@@ -541,11 +541,11 @@ describe("per-task agent/model/provider overrides", () => {
 		const created = addTaskToColumn(
 			createBoard(),
 			"backlog",
-				{
-					prompt: "Movable task",
-					baseRef: "main",
-					agentId: "claude",
-				},
+			{
+				prompt: "Movable task",
+				baseRef: "main",
+				agentId: "claude",
+			},
 			() => "aaaaa111",
 		);
 

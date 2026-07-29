@@ -6,7 +6,13 @@ import type {
 } from "../../../src/agents/driver";
 import { supported, unsupported } from "../../../src/agents/driver";
 import type { SessionSignal } from "../../../src/agents/session-signal";
+import type { RuntimeTaskChatMessage } from "../../../src/core/api-contract";
 import type { DriverFixtures } from "../tck/driver-tck";
+
+const fakeRichMessages: readonly RuntimeTaskChatMessage[] = [
+	{ id: "fake-0", role: "user", content: "Please inspect the workspace.", createdAt: 1000 },
+	{ id: "fake-1", role: "assistant", content: "Inspection complete.", createdAt: 1000 },
+];
 
 const fakeMessages: readonly AgentObservationMessage[] = [
 	{ role: "user", text: "Please inspect the workspace." },
@@ -66,7 +72,17 @@ export function createFakeAgentDriver(): AgentDriver {
 		observe: {
 			artifactPresent: async () => supported(true),
 			messages: async () => supported(fakeMessages),
+			transcript: async () => supported(fakeRichMessages),
 			usage: async () => supported({ inputTokens: 12, outputTokens: 8 }),
+			richUsage: async () =>
+				supported({
+					inputTokens: 12,
+					outputTokens: 8,
+					cacheReadTokens: 0,
+					cacheCreationTokens: 0,
+					costUsd: null,
+				}),
+			artifactPath: async () => null,
 		},
 		signals: {
 			mapNativeSignal: mapFakeNativeSignal,

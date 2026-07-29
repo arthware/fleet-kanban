@@ -654,7 +654,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		},
 		sendTaskSessionInput,
 		notifyTaskReadyForReview,
-		getTaskChatMessages: async (workspaceScope, input) => {
+		getTaskChatMessages: async (_workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
 				return {
@@ -724,7 +724,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				return { ok: false, usage: {}, error: message };
 			}
 		},
-		reloadTaskChatSession: async (workspaceScope, input) => {
+		reloadTaskChatSession: async (_workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
 				return {
@@ -741,7 +741,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 		},
-		abortTaskChatTurn: async (workspaceScope, input) => {
+		abortTaskChatTurn: async (_workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
 				return {
@@ -758,7 +758,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				};
 			}
 		},
-		cancelTaskChatTurn: async (workspaceScope, input) => {
+		cancelTaskChatTurn: async (_workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
 				return {
@@ -792,7 +792,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			const inProgressCount = await deps.getFleetUpdateInProgressCount();
 			return await applyFleetUpdate({ inProgressCount });
 		},
-		sendTaskChatMessage: async (workspaceScope, input) => {
+		sendTaskChatMessage: async (_workspaceScope, input) => {
 			try {
 				parseTaskTranscriptRequest(input);
 				return {

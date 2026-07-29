@@ -1031,8 +1031,8 @@ async function sendTaskInput(input: {
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 
-		// Bracketed paste so a mid-turn PTY agent buffers the steering text cleanly.
-		// `submit` decides whether the text is sent or just staged in the prompt.
+	// Bracketed paste so a mid-turn PTY agent buffers the steering text cleanly.
+	// `submit` decides whether the text is sent or just staged in the prompt.
 	const result = await runtimeClient.runtime.sendTaskSessionInput.mutate({
 		taskId: input.taskId,
 		text: input.text,

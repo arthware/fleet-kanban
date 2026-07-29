@@ -188,11 +188,11 @@ describe("useTaskSessions", () => {
 			baseRef: "main",
 			cols: 120,
 			rows: 40,
-				agentId: undefined,
-				agentModel: undefined,
-				skill: undefined,
-			});
+			agentId: undefined,
+			agentModel: undefined,
+			skill: undefined,
 		});
+	});
 
 	it("forwards PR auto-review mode from the task card when starting a task", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
@@ -373,5 +373,4 @@ describe("useTaskSessions", () => {
 			}),
 		);
 	});
-
-	});
+});

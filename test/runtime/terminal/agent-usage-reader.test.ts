@@ -325,7 +325,7 @@ describe("readAgentUsage — gemini", () => {
 		return sessionId;
 	}
 
-	it.skip("known-red card 4: given a recorded Gemini transcript with tokens, when usage is read, then production should derive Gemini token totals", async () => {
+	it("known-red card 4: given a recorded Gemini transcript with tokens, when usage is read, then production should derive Gemini token totals", async () => {
 		// given
 		const sessionId = await writeGeminiTranscript();
 
@@ -343,16 +343,5 @@ describe("readAgentUsage — gemini", () => {
 				costUsd: null,
 			},
 		});
-	});
-
-	it("given today's Gemini usage reader has no deriver, when a recorded Gemini transcript exists, then usage reports absent", async () => {
-		// given
-		const sessionId = await writeGeminiTranscript();
-
-		// when
-		const result = await readAgentUsage({ agentId: "gemini", sessionId, homePath });
-
-		// then
-		expect(result).toEqual({ present: false, usage: null });
 	});
 });

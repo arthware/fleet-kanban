@@ -1,5 +1,13 @@
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../core/agent-catalog";
-import type { RuntimeAgentId, RuntimeAgentSessionLifecycle } from "../core/api-contract";
+import type { RuntimeAgentCatalogEntry } from "../core/agent-catalog";
+import type {
+	RuntimeAgentId,
+	RuntimeAgentSessionLifecycle,
+	RuntimeTaskChatMessage,
+	RuntimeTaskTokenUsage,
+} from "../core/api-contract";
+import { createClaudeDriver } from "./claude/driver";
+import { createCodexDriver } from "./codex/driver";
+import { createGeminiDriver } from "./gemini/driver";
 import type { SessionSignal } from "./session-signal";
 
 export type Capability<T> =
@@ -71,10 +79,18 @@ export interface AgentUsage {
 	readonly outputTokens: number;
 }
 
+export interface ObservationRequest {
+	readonly sessionId: string;
+	readonly homePath: string;
+}
+
 export interface ObservationPort {
-	artifactPresent(): Promise<Capability<boolean>>;
-	messages(): Promise<Capability<readonly AgentObservationMessage[]>>;
-	usage(): Promise<Capability<AgentUsage>>;
+	artifactPresent(input?: ObservationRequest): Promise<Capability<boolean>>;
+	messages(input?: ObservationRequest): Promise<Capability<readonly AgentObservationMessage[]>>;
+	transcript(input?: ObservationRequest): Promise<Capability<readonly RuntimeTaskChatMessage[]>>;
+	usage(input?: ObservationRequest): Promise<Capability<AgentUsage>>;
+	richUsage(input?: ObservationRequest): Promise<Capability<RuntimeTaskTokenUsage | null>>;
+	artifactPath?(input: ObservationRequest): Promise<string | null>;
 }
 
 export interface NativeSignalInput {
@@ -118,46 +134,7 @@ export function unsupported<T = never>(reason: string): Capability<T> {
 }
 
 export const DRIVERS = {
-	claude: createUnboundAgentDriver(catalogEntryById("claude")),
-	codex: createUnboundAgentDriver(catalogEntryById("codex")),
-	gemini: createUnboundAgentDriver(catalogEntryById("gemini")),
+	claude: createClaudeDriver(),
+	codex: createCodexDriver(),
+	gemini: createGeminiDriver(),
 } satisfies Record<RuntimeAgentId, AgentDriver>;
-
-function catalogEntryById(agentId: RuntimeAgentId): RuntimeAgentCatalogEntry {
-	const entry = RUNTIME_AGENT_CATALOG.find((candidate) => candidate.id === agentId);
-	if (!entry) {
-		throw new Error(`Missing catalog entry for ${agentId}`);
-	}
-	return entry;
-}
-
-function createUnboundAgentDriver(catalog: RuntimeAgentCatalogEntry): AgentDriver {
-	const reason = `${catalog.id} driver is not bound yet`;
-
-	return {
-		id: catalog.id,
-		catalog,
-		launch: {
-			preflight: async () => unsupported(reason),
-			prepare: async () => unsupported(reason),
-			applyModel: () => unsupported(reason),
-		},
-		identity: {
-			durability: "none",
-			resolve: () => unsupported(reason),
-		},
-		observe: {
-			artifactPresent: async () => unsupported(reason),
-			messages: async () => unsupported(reason),
-			usage: async () => unsupported(reason),
-		},
-		signals: {
-			mapNativeSignal: () => unsupported(reason),
-			attentionSupport: () => unsupported(reason),
-		},
-		control: {
-			steer: async () => unsupported(reason),
-			interrupt: async () => unsupported(reason),
-		},
-	};
-}

@@ -1,0 +1,422 @@
+import type { Dirent } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
+import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
+import type { AgentDriver, AgentObservationMessage, LaunchIdentityPlan, ObservationRequest } from "../driver";
+import { supported, unsupported } from "../driver";
+import type { SessionSignal } from "../session-signal";
+
+export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
+	return {
+		id: "claude",
+		catalog: catalogEntryById("claude"),
+		launch: {
+			preflight: async () => unsupported("claude launch is not bound yet"),
+			prepare: async () => unsupported("claude launch is not bound yet"),
+			applyModel: (args, model) => supported([...args, "--model", model]),
+		},
+		identity: {
+			durability: "deterministic",
+			resolve: (input) =>
+				supported({
+					agentSessionId: input.stored ?? `claude-det-${input.ref.taskId}-${input.generation}`,
+					resumeSession: input.lifecycle === "resumable" && input.stored !== null,
+					discoverAfterSpawn: false,
+					durability: "deterministic",
+				} satisfies LaunchIdentityPlan),
+		},
+		observe: {
+			artifactPresent: async (input) => {
+				const ctx = input ?? context;
+				if (!ctx) return supported(false);
+				const loc = await locate(ctx.sessionId, ctx.homePath);
+				return supported(loc.present);
+			},
+			messages: async (input) => {
+				const ctx = input ?? context;
+				if (!ctx) return supported([]);
+				const loc = await locate(ctx.sessionId, ctx.homePath);
+				if (!loc.present) return supported([]);
+				try {
+					const raw = await readFile(loc.path, "utf8");
+					const records = parseJsonlRecords(raw);
+					const richMsgs = parseClaudeTranscript(records);
+					return supported(mapToObservationMessages(richMsgs));
+				} catch {
+					return supported([]);
+				}
+			},
+			transcript: async (input) => {
+				const ctx = input ?? context;
+				if (!ctx) return supported([]);
+				const loc = await locate(ctx.sessionId, ctx.homePath);
+				if (!loc.present) return supported([]);
+				try {
+					const raw = await readFile(loc.path, "utf8");
+					const records = parseJsonlRecords(raw);
+					const richMsgs = parseClaudeTranscript(records);
+					return supported(richMsgs);
+				} catch {
+					return supported([]);
+				}
+			},
+			usage: async (input) => {
+				const ctx = input ?? context;
+				if (!ctx) return supported({ inputTokens: 0, outputTokens: 0 });
+				const loc = await locate(ctx.sessionId, ctx.homePath);
+				if (!loc.present) return supported({ inputTokens: 0, outputTokens: 0 });
+				try {
+					const raw = await readFile(loc.path, "utf8");
+					const records = parseJsonlRecords(raw);
+					const usage = deriveClaudeUsage(records);
+					if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
+					return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
+				} catch {
+					return supported({ inputTokens: 0, outputTokens: 0 });
+				}
+			},
+			richUsage: async (input) => {
+				const ctx = input ?? context;
+				if (!ctx) return supported(null);
+				const loc = await locate(ctx.sessionId, ctx.homePath);
+				if (!loc.present) return supported(null);
+				try {
+					const raw = await readFile(loc.path, "utf8");
+					const records = parseJsonlRecords(raw);
+					const usage = deriveClaudeUsage(records);
+					return supported(usage);
+				} catch {
+					return supported(null);
+				}
+			},
+			artifactPath: async (input) => {
+				const loc = await locate(input.sessionId, input.homePath);
+				return loc.present ? loc.path : null;
+			},
+		},
+		signals: {
+			mapNativeSignal: (input) => {
+				if (input.name === "claude.progress") {
+					return supported({
+						seq: 1,
+						at: input.observedAt,
+						activity: null,
+						fact: { type: "progress" },
+					} satisfies SessionSignal);
+				}
+				if (input.name === "claude.stop") {
+					return supported({
+						seq: 2,
+						at: input.observedAt,
+						activity: null,
+						fact: { type: "turn.ended", finalMessage: "complete" },
+					} satisfies SessionSignal);
+				}
+				return unsupported(`Claude driver does not map ${input.name}`);
+			},
+			attentionSupport: () => unsupported("attention is not bound yet"),
+		},
+		control: {
+			steer: async () => unsupported("claude control is not bound yet"),
+			interrupt: async () => unsupported("claude control is not bound yet"),
+		},
+	};
+}
+
+function catalogEntryById(agentId: "claude"): RuntimeAgentCatalogEntry {
+	const entry = RUNTIME_AGENT_CATALOG.find((candidate) => candidate.id === agentId);
+	if (!entry) {
+		throw new Error(`Missing catalog entry for ${agentId}`);
+	}
+	return entry;
+}
+
+// --- Locating --------------------------------------------------------------
+
+type AgentTranscriptLocation = { readonly present: true; readonly path: string } | { readonly present: false };
+
+async function locate(sessionId: string, homePath: string): Promise<AgentTranscriptLocation> {
+	const projectsRoot = join(homePath, ".claude", "projects");
+	const projectDirs = await readDirEntries(projectsRoot);
+	const transcriptName = `${sessionId}.jsonl`;
+
+	for (const entry of projectDirs) {
+		if (!entry.isDirectory()) {
+			continue;
+		}
+		const candidate = join(projectsRoot, entry.name, transcriptName);
+		if (await isFile(candidate)) {
+			return { present: true, path: candidate };
+		}
+	}
+
+	return { present: false };
+}
+
+async function readDirEntries(dirPath: string): Promise<Dirent[]> {
+	try {
+		return await readdir(dirPath, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+}
+
+async function isFile(filePath: string): Promise<boolean> {
+	try {
+		return (await stat(filePath)).isFile();
+	} catch {
+		return false;
+	}
+}
+
+// --- Parsing ---------------------------------------------------------------
+
+function parseJsonlRecords(raw: string): Record<string, unknown>[] {
+	const records: Record<string, unknown>[] = [];
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) {
+			continue;
+		}
+		try {
+			const parsed: unknown = JSON.parse(trimmed);
+			if (isRecord(parsed)) {
+				records.push(parsed);
+			}
+		} catch {
+			// Tolerate a partially-flushed / corrupt trailing line.
+		}
+	}
+	return records;
+}
+
+function parseClaudeTranscript(records: Record<string, unknown>[]): RuntimeTaskChatMessage[] {
+	const messages: RuntimeTaskChatMessage[] = [];
+	const toolNamesById = new Map<string, string>();
+	let index = 0;
+	const nextId = () => `claude-${index++}`;
+
+	for (const record of records) {
+		const type = readString(record, "type");
+		if ((type !== "user" && type !== "assistant") || record.isSidechain === true || record.isMeta === true) {
+			continue;
+		}
+		const createdAt = toMillis(record.timestamp);
+		const message = asRecord(record.message);
+		const content = message?.content;
+
+		if (type === "user") {
+			if (typeof content === "string") {
+				const text = content.trim();
+				if (text) {
+					messages.push(makeMessage(nextId(), "user", text, createdAt));
+				}
+				continue;
+			}
+			for (const block of asArray(content)) {
+				const blockRecord = asRecord(block);
+				if (!blockRecord) {
+					continue;
+				}
+				const blockType = readString(blockRecord, "type");
+				if (blockType === "tool_result") {
+					const toolUseId = readString(blockRecord, "tool_use_id");
+					const toolName = (toolUseId && toolNamesById.get(toolUseId)) || "tool";
+					const output = extractClaudeText(blockRecord.content);
+					messages.push(
+						makeMessage(nextId(), "tool", formatToolBlock(toolName, null, output), createdAt, toolName),
+					);
+				} else if (blockType === "text") {
+					const text = readString(blockRecord, "text")?.trim();
+					if (text) {
+						messages.push(makeMessage(nextId(), "user", text, createdAt));
+					}
+				}
+			}
+			continue;
+		}
+
+		// assistant
+		for (const block of asArray(content)) {
+			const blockRecord = asRecord(block);
+			if (!blockRecord) {
+				continue;
+			}
+			const blockType = readString(blockRecord, "type");
+			if (blockType === "text") {
+				const text = readString(blockRecord, "text")?.trim();
+				if (text) {
+					messages.push(makeMessage(nextId(), "assistant", text, createdAt));
+				}
+			} else if (blockType === "thinking") {
+				const text = readString(blockRecord, "thinking")?.trim();
+				if (text) {
+					messages.push(makeMessage(nextId(), "reasoning", text, createdAt));
+				}
+			} else if (blockType === "tool_use") {
+				const toolName = readString(blockRecord, "name") ?? "tool";
+				const toolUseId = readString(blockRecord, "id");
+				if (toolUseId) {
+					toolNamesById.set(toolUseId, toolName);
+				}
+				const inputText = stringifyToolInput(blockRecord.input);
+				messages.push(
+					makeMessage(nextId(), "tool", formatToolBlock(toolName, inputText, null), createdAt, toolName),
+				);
+			}
+		}
+	}
+
+	return messages;
+}
+
+function extractClaudeText(content: unknown): string {
+	if (typeof content === "string") {
+		return content.trim();
+	}
+	const parts: string[] = [];
+	for (const block of asArray(content)) {
+		const blockRecord = asRecord(block);
+		const text = blockRecord ? readString(blockRecord, "text") : null;
+		if (text) {
+			parts.push(text);
+		}
+	}
+	return parts.join("\n").trim();
+}
+
+export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
+	const seen = new Set<string>();
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let cacheReadTokens = 0;
+	let cacheCreationTokens = 0;
+	let counted = 0;
+	let modelId: string | null = null;
+
+	for (const record of records) {
+		if (readString(record, "type") !== "assistant" || record.isSidechain === true || record.isMeta === true) {
+			continue;
+		}
+		const message = asRecord(record.message);
+		const usage = message ? asRecord(message.usage) : null;
+		if (!message || !usage) {
+			continue;
+		}
+
+		const dedupeKey = `${readString(message, "id") ?? ""} ${readString(record, "requestId") ?? ""}`;
+		if (seen.has(dedupeKey)) {
+			continue;
+		}
+		seen.add(dedupeKey);
+
+		inputTokens += readNumber(usage, "input_tokens");
+		outputTokens += readNumber(usage, "output_tokens");
+		cacheReadTokens += readNumber(usage, "cache_read_input_tokens");
+		cacheCreationTokens += readNumber(usage, "cache_creation_input_tokens");
+		modelId = readString(message, "model") ?? modelId;
+		counted += 1;
+	}
+
+	if (counted === 0) {
+		return null;
+	}
+	const totals = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
+	return { ...totals, costUsd: estimateClaudeCostUsd(totals, modelId) };
+}
+
+// --- Mapping ---------------------------------------------------------------
+
+function mapToObservationMessages(messages: readonly RuntimeTaskChatMessage[]): readonly AgentObservationMessage[] {
+	return messages.map((m) => {
+		let role: "user" | "assistant" | "system" = "assistant";
+		if (m.role === "user") {
+			role = "user";
+		} else if (m.role === "system") {
+			role = "system";
+		}
+		return {
+			role,
+			text: m.content,
+		};
+	});
+}
+
+function formatToolBlock(toolName: string, input: string | null, output: string | null): string {
+	const lines = [`Tool: ${toolName}`];
+	if (input) {
+		lines.push("Input:", input);
+	}
+	if (output) {
+		lines.push("Output:", output);
+	}
+	return lines.join("\n");
+}
+
+function stringifyToolInput(input: unknown): string | null {
+	if (input == null) {
+		return null;
+	}
+	if (typeof input === "string") {
+		return input.trim() || null;
+	}
+	try {
+		return JSON.stringify(input);
+	} catch {
+		return null;
+	}
+}
+
+function makeMessage(
+	id: string,
+	role: RuntimeTaskChatMessage["role"],
+	content: string,
+	createdAt: number,
+	toolName?: string,
+): RuntimeTaskChatMessage {
+	return {
+		id,
+		role,
+		content,
+		createdAt,
+		...(toolName ? { meta: { toolName } } : {}),
+	};
+}
+
+function toMillis(value: unknown): number {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === "string") {
+		const millis = Date.parse(value);
+		if (!Number.isNaN(millis)) {
+			return millis;
+		}
+	}
+	return 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return isRecord(value) ? value : null;
+}
+
+function asArray(value: unknown): unknown[] {
+	return Array.isArray(value) ? value : [];
+}
+
+function readString(record: Record<string, unknown>, key: string): string | null {
+	const value = record[key];
+	return typeof value === "string" ? value : null;
+}
+
+function readNumber(record: Record<string, unknown>, key: string): number {
+	const value = record[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}

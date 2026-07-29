@@ -140,11 +140,11 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		prState?: unknown;
 		prNumber?: unknown;
 		prGateStatus?: unknown;
-			externalIssue?: unknown;
-			transitions?: unknown;
-			createdAt?: unknown;
-			updatedAt?: unknown;
-		};
+		externalIssue?: unknown;
+		transitions?: unknown;
+		createdAt?: unknown;
+		updatedAt?: unknown;
+	};
 	const prompt = typeof card.prompt === "string" ? card.prompt.trim() : "";
 	if (!prompt) {
 		return null;
@@ -557,15 +557,15 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 				autoReviewMode: draft.autoReviewEnabled
 					? (resolveTaskAutoReviewMode(draft.autoReviewMode) ?? "pr")
 					: undefined,
-					images:
-						draft.images === undefined
-							? card.images
-							: draft.images.length > 0
-								? draft.images.map((image) => ({ ...image }))
-								: undefined,
-					agentId: draft.agentId,
-					agentModel: draft.agentModel,
-					baseRef,
+				images:
+					draft.images === undefined
+						? card.images
+						: draft.images.length > 0
+							? draft.images.map((image) => ({ ...image }))
+							: undefined,
+				agentId: draft.agentId,
+				agentModel: draft.agentModel,
+				baseRef,
 				updatedAt: Date.now(),
 			};
 		});

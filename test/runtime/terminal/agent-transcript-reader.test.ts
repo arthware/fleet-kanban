@@ -220,7 +220,7 @@ describe("readAgentTranscript — unknown agent", () => {
 });
 
 describe("readAgentTranscript — gemini", () => {
-	it.skip("known-red card 4: given a recorded Gemini transcript, when it is read, then production should render non-empty user and assistant turns", async () => {
+	it("known-red card 4: given a recorded Gemini transcript, when it is read, then production should render non-empty user and assistant turns", async () => {
 		// given
 		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
 		await writeFixture(
@@ -236,20 +236,5 @@ describe("readAgentTranscript — gemini", () => {
 		expect(result.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 		expect(result.messages[0]?.content).toBe("Update the fleet implement skill.");
 		expect(result.messages[1]?.content).toBe("I will now update the skill file.");
-	});
-
-	it("given the current Gemini parser bug, when a recorded Gemini transcript is read today, then production sees a present but empty conversation", async () => {
-		// given
-		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
-		await writeFixture(
-			join(".gemini", "tmp", "fleet-kanban-4", "chats", "session-2026-07-23T18-22-84456eab.jsonl"),
-			"gemini-transcript-recorded.jsonl",
-		);
-
-		// when
-		const result = await readAgentTranscript({ agentId: "gemini", sessionId, homePath });
-
-		// then
-		expect(result).toEqual({ present: true, messages: [] });
 	});
 });
