@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import type { AgentDriver, AgentObservationMessage, LaunchIdentityPlan, ObservationRequest } from "../driver";
+import type { AgentDriver, AgentObservationMessage, DriverSessionRef, LaunchIdentityPlan, ObservationRequest } from "../driver";
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 
@@ -19,13 +19,22 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 		},
 		identity: {
 			durability: "persisted",
-			resolve: (input) =>
-				supported({
-					agentSessionId: input.stored ?? `gemini-persisted-${input.ref.taskId}-${input.generation}`,
-					resumeSession: input.lifecycle === "resumable" && input.stored !== null,
-					discoverAfterSpawn: true,
-					durability: "persisted",
-				} satisfies LaunchIdentityPlan),
+			resolve: (input) => {
+				switch (input.ref.kind) {
+					case "overseer":
+					case "card": {
+						const stored = input.stored?.trim() || null;
+						const resumeSession = (input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
+						const agentSessionId = resumeSession ? stored : null;
+						return supported({
+							agentSessionId,
+							resumeSession,
+							discoverAfterSpawn: true,
+							durability: "persisted",
+						} satisfies LaunchIdentityPlan);
+					}
+				}
+			},
 		},
 		observe: {
 			artifactPresent: async (input) => {

@@ -9,6 +9,7 @@ import {
 	createTrpcScenarioDriver,
 	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
 	givenLifecycleCardWhenCompletedThenLinkedCardStarts,
+	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
 	givenReviewHookWhenIngestedThenOverseerIsNotified,
 	givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts,
 } from "./scenario-api";
@@ -38,6 +39,16 @@ async function main(): Promise<void> {
 		const context = await createSelfcheckContext();
 		try {
 			await givenLifecycleCardWhenCompletedThenLinkedCardStarts(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "restart a card whose agent is gone", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithGoneAgentWhenStartedThenNewAgentRuns(
 				attachContext(createTrpcScenarioDriver(context), context),
 			);
 		} finally {

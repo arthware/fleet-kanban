@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -5,7 +6,8 @@ import { join } from "node:path";
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
-import type { AgentDriver, AgentObservationMessage, LaunchIdentityPlan, ObservationRequest } from "../driver";
+import { deriveHomeAgentClaudeSessionId } from "../../terminal/home-agent-session-id";
+import type { AgentDriver, AgentObservationMessage, DriverSessionRef, LaunchIdentityPlan, ObservationRequest } from "../driver";
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 
@@ -20,13 +22,31 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 		},
 		identity: {
 			durability: "deterministic",
-			resolve: (input) =>
-				supported({
-					agentSessionId: input.stored ?? `claude-det-${input.ref.taskId}-${input.generation}`,
-					resumeSession: input.lifecycle === "resumable" && input.stored !== null,
-					discoverAfterSpawn: false,
-					durability: "deterministic",
-				} satisfies LaunchIdentityPlan),
+			resolve: (input) => {
+				switch (input.ref.kind) {
+					case "overseer": {
+						const agentSessionId = deriveHomeAgentClaudeSessionId(input.ref.workspaceId, "claude", input.generation);
+						const resumeSession = input.lifecycle === "resumable" || input.lifecycle === "attached";
+						return supported({
+							agentSessionId,
+							resumeSession,
+							discoverAfterSpawn: false,
+							durability: "deterministic",
+						} satisfies LaunchIdentityPlan);
+					}
+					case "card": {
+						const stored = input.stored?.trim() || null;
+						const resumeSession = (input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
+						const agentSessionId = resumeSession ? stored : randomUUID();
+						return supported({
+							agentSessionId,
+							resumeSession,
+							discoverAfterSpawn: false,
+							durability: "deterministic",
+						} satisfies LaunchIdentityPlan);
+					}
+				}
+			},
 		},
 		observe: {
 			artifactPresent: async (input) => {
