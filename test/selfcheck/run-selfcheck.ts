@@ -7,6 +7,7 @@ import {
 	attachContext,
 	createSelfcheckContext,
 	createTrpcScenarioDriver,
+	givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer,
 	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
 	givenCardWithModelOverrideWhenStartedThenCliReceivesModel,
 	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
@@ -73,6 +74,9 @@ async function main(): Promise<void> {
 		} finally {
 			await context.stop();
 		}
+	});
+	await runScenario(results, "an archived card keeps its session pointer", async () => {
+		await givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer();
 	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();

@@ -23,6 +23,7 @@ import {
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
+import { harvestSessions } from "../core/session-ledger";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
@@ -665,6 +666,10 @@ async function writeWorkspaceSessions(
 async function reconcileWorkspaceAgentSessionsLocked(
 	workspaceId: string,
 ): Promise<Record<string, RuntimeTaskSessionSummary>> {
+	// Process-guarded, one-shot legacy harvest: ensures legacy pointers are
+	// durably archived in the ledger before they can be partitioned/pruned.
+	await harvestSessions(workspaceId);
+
 	const currentSessions = await readWorkspaceSessions(workspaceId);
 	let board: RuntimeBoardData | null = null;
 	try {
