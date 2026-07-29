@@ -3,10 +3,10 @@ import { expect, type Page, test } from "@playwright/test";
 import {
 	attachContext,
 	createTrpcScenarioDriver,
-	givenReviewCardWhenSteeredThenMovesToInProgress,
 	type ScenarioDriver,
 	type SelfcheckContext,
 } from "../../test/selfcheck/scenario-api";
+import { givenReviewCardWhenSteeredThenMovesToInProgress } from "../../test/selfcheck/scenarios/givenReviewCardWhenSteeredThenMovesToInProgress";
 
 const baseUrl = process.env.KANBAN_SELFCHECK_BASE_URL;
 const workspaceId = process.env.KANBAN_SELFCHECK_WORKSPACE_ID;

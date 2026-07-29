@@ -3,18 +3,14 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import {
-	attachContext,
-	createSelfcheckContext,
-	createTrpcScenarioDriver,
-	givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer,
-	givenCardWithGoneAgentWhenStartedThenNewAgentRuns,
-	givenCardWithModelOverrideWhenStartedThenCliReceivesModel,
-	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
-	givenLifecycleCardWhenCompletedThenLinkedCardStarts,
-	givenReviewHookWhenIngestedThenOverseerIsNotified,
-	givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts,
-} from "./scenario-api";
+import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
+import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
+import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
+import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
+import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
+import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
+import { givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts } from "./scenarios/givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts";
 
 interface ScenarioResult {
 	name: string;

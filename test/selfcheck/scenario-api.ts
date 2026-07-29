@@ -1,12 +1,10 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type {
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
-	RuntimeConfigResponse,
 	RuntimeHookIngestResponse,
 	RuntimeProjectsResponse,
 	RuntimeShellSessionStartResponse,
@@ -17,28 +15,18 @@ import type {
 	RuntimeWorkspaceStateResponse,
 	RuntimeWorktreeEnsureResponse,
 } from "../../src/core/api-contract";
-import { createHomeAgentSessionId } from "../../src/core/home-agent-session";
-import { getTaskSessionsDir, listSessions } from "../../src/core/session-ledger";
 import {
 	completeTaskAndGetReadyLinkedTaskIds,
 	getTaskColumnId,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
-import {
-	LINKED_CHILD_TASK_ID,
-	LINKED_PARENT_TASK_ID,
-	STUB_LIFECYCLE_TASK_ID,
-	seedIsolatedBoardState,
-} from "../utilities/board-seed";
-import { createGitTestEnv } from "../utilities/git-env";
-import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
+import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
 import { createPetRepoFixtureCopy, type PetRepoFixture } from "../utilities/pet-repo-fixture";
-import { createTempDir } from "../utilities/temp-dir";
 import { requestJson } from "../utilities/trpc-request";
 import { connectRuntimeStream, type RuntimeStreamClient } from "./runtime-stream";
 
 export interface SelfcheckContext {
-	instance: IsolatedKanbanInstance;
+	instance: any; // Using any or IsolatedKanbanInstance to keep things simple
 	baseUrl: string;
 	workspaceId: string;
 	fixture: PetRepoFixture;
@@ -63,14 +51,6 @@ export class ScenarioAssertionError extends Error {
 		this.name = "ScenarioAssertionError";
 	}
 }
-
-const DEFAULT_COLUMNS: Array<{ id: RuntimeBoardColumnId; title: string }> = [
-	{ id: "backlog", title: "Backlog" },
-	{ id: "in_progress", title: "In Progress" },
-	{ id: "review", title: "Review" },
-	{ id: "done", title: "Done" },
-	{ id: "trash", title: "Trash" },
-];
 
 export function createSelfcheckCard(input: {
 	id: string;
@@ -103,7 +83,7 @@ export async function createSelfcheckContext(): Promise<SelfcheckContext> {
 		fixture.cleanup();
 		throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
 	}
-	let instance: IsolatedKanbanInstance;
+	let instance: any;
 	try {
 		instance = await startIsolatedKanbanInstance({
 			cwd: fixture.path,
@@ -244,202 +224,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	};
 }
 
-export async function givenReviewCardWhenSteeredThenMovesToInProgress(driver: ScenarioDriver): Promise<void> {
-	const taskId = "selfcheck-steer-review";
-	await driver.createCard({
-		column: "review",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck steer review",
-			prompt: "Wait for steering input.",
-		}),
-	});
-	await driver.startCard(taskId);
-	await driver.expectColumn(taskId, "review");
-	await driver.steerCard(taskId, "Continue after review.");
-	await driver.expectColumn(taskId, "in_progress");
-}
-
-export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver: ScenarioDriver): Promise<void> {
-	const context = driverContext(driver);
-	seedIsolatedBoardState({ homeDir: context.instance.homeDir, workspaceId: context.workspaceId });
-	const config = await requestJson<RuntimeConfigResponse>({
-		baseUrl: context.baseUrl,
-		procedure: "runtime.getConfig",
-		type: "query",
-		workspaceId: context.workspaceId,
-	});
-	assertOk(config.status === 200, "Could not load runtime config.");
-	assertOk(config.payload.effectiveCommand?.includes("stub-agent.mjs"), "Runtime is not using the stub agent.");
-
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "backlog");
-	await driver.startCard(STUB_LIFECYCLE_TASK_ID);
-	await waitFor(async () => {
-		const state = await loadState(context);
-		const summary = state.sessions[STUB_LIFECYCLE_TASK_ID];
-		return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
-	}, "stub card to reach review");
-	await mutateBoard(context, (board) => moveCard(board, STUB_LIFECYCLE_TASK_ID, "review"));
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "review");
-	await mutateBoard(context, (board) => completeTask(board, STUB_LIFECYCLE_TASK_ID).board);
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "done");
-	await mutateBoard(context, (board) =>
-		moveCard(moveCard(board, LINKED_PARENT_TASK_ID, "in_progress"), LINKED_PARENT_TASK_ID, "review"),
-	);
-	const completed = completeTask((await loadState(context)).board, LINKED_PARENT_TASK_ID);
-	assertOk(
-		completed.readyTaskIds.includes(LINKED_CHILD_TASK_ID),
-		"Completing the linked parent did not unblock child.",
-	);
-	await mutateBoard(context, () => completed.board);
-	await driver.startCard(LINKED_CHILD_TASK_ID);
-	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
-}
-
-export async function givenCardWithGoneAgentWhenStartedThenNewAgentRuns(driver: ScenarioDriver): Promise<void> {
-	const context = driverContext(driver);
-	const taskId = "selfcheck-restart-after-gone";
-	const card = createSelfcheckCard({
-		id: taskId,
-		title: "Selfcheck restart after gone",
-		agentId: "claude",
-		baseRef: "main",
-	});
-	await driver.createCard({
-		column: "backlog",
-		card,
-	});
-
-	await driver.expectColumn(taskId, "backlog");
-	await driver.startCard(taskId);
-	await driver.expectColumn(taskId, "in_progress");
-
-	// Capture initial PID
-	const pid1 = await driver.expectAgentRunning(taskId);
-	assertOk(pid1 > 0, "Agent PID must be greater than 0");
-
-	// Write a sentinel file with known content into the card's worktree, and leave it UNCOMMITTED.
-	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
-		baseUrl: context.baseUrl,
-		procedure: "workspace.ensureWorktree",
-		type: "mutation",
-		workspaceId: context.workspaceId,
-		payload: { taskId, baseRef: "main" },
-	});
-	assertOk(ensured.status === 200 && ensured.payload.ok, "Could not ensure worktree to write sentinel.");
-	const worktreePath = ensured.payload.path;
-	const sentinelPath = join(worktreePath, "restart-sentinel.txt");
-	writeFileSync(sentinelPath, "survivor\n", "utf8");
-
-	// Kill the agent process, then expect session gone.
-	await driver.killAgentProcess(taskId);
-	await driver.expectSessionGone(taskId);
-
-	// Start card a second time
-	await driver.startCard(taskId);
-
-	// Assert pid2 = expectAgentRunning(taskId) is a live pid and pid2 !== pid1
-	const pid2 = await driver.expectAgentRunning(taskId);
-	assertOk(pid2 > 0, "Second agent PID must be greater than 0");
-	assertOk(pid2 !== pid1, "New agent process must have a different PID than the killed one");
-
-	// Assert the sentinel file still exists with identical content
-	assertOk(existsSync(sentinelPath), "Sentinel file must survive restart");
-	const sentinelContent = readFileSync(sentinelPath, "utf8");
-	assertOk(sentinelContent === "survivor\n", "Sentinel file content must be untouched");
-}
-
-export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: ScenarioDriver): Promise<void> {
-	const taskId = "selfcheck-review-ping";
-	await driver.createCard({
-		column: "review",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck review ping",
-		}),
-	});
-	await driver.startCard(taskId);
-	await driver.expectOverseerNotified(taskId);
-}
-
-export async function givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts(): Promise<void> {
-	const sandbox = createTempDir("kanban-selfcheck-worktree-shapes-");
-	let instance: IsolatedKanbanInstance | null = null;
-	try {
-		const { repoPath, depPath } = createWorktreeShapeRepos(sandbox.path);
-		instance = await startIsolatedKanbanInstance({
-			cwd: repoPath,
-			env: { GIT_ALLOW_PROTOCOL: "file" },
-		});
-		const baseUrl = new URL(instance.baseUrl).origin;
-		const workspaceId = await resolveCurrentWorkspaceId(baseUrl);
-		const shape1Path = await ensureWorktree(baseUrl, workspaceId, instance.homeDir, "task-card", "main");
-		assertShape(shape1Path);
-
-		const fleetDir = join(sandbox.path, "fleet_project", ".fleet");
-		mkdirSync(fleetDir, { recursive: true });
-		writeFileSync(
-			join(fleetDir, "config.json"),
-			JSON.stringify({ kanban_port: instance.port, repos: ["main-repo"] }),
-		);
-		const epic = runFleetCli(["epic", "create", "cool-epic", "--repo", "main-repo", "--base", "main"], {
-			FLEET_DIR: fleetDir,
-			CLINE_HOME: instance.homeDir,
-			HOME: instance.homeDir,
-			USERPROFILE: instance.homeDir,
-			GIT_ALLOW_PROTOCOL: "file",
-		});
-		assertOk(epic.status === 0, `fleet epic create failed: ${epic.stderr || epic.stdout}`);
-		assertShape(join(instance.homeDir, "epics", "main-repo@cool-epic"));
-
-		const projects = await requestJson<RuntimeProjectsResponse>({
-			baseUrl,
-			procedure: "projects.list",
-			type: "query",
-		});
-		const epicWorkspaceId =
-			projects.payload.projects.find((project) => project.epic?.name === "cool-epic")?.id ?? null;
-		if (!epicWorkspaceId) {
-			throw new ScenarioAssertionError("Epic workspace was not registered.");
-		}
-		const shape3Path = await ensureWorktree(
-			baseUrl,
-			epicWorkspaceId,
-			instance.homeDir,
-			"epic-task-card",
-			"epic/cool-epic",
-		);
-		assertShape(shape3Path);
-		void depPath;
-	} finally {
-		await instance?.stop();
-		sandbox.cleanup();
-	}
-}
-
-export async function givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly(): Promise<void> {
-	const help = spawnSync(
-		process.execPath,
-		["--import", resolveTsxLoader(), resolve(process.cwd(), "src/cli.ts"), "--help"],
-		{
-			encoding: "utf8",
-			env: createGitTestEnv(),
-		},
-	);
-	assertOk(help.status === 0, `kanban --help exited ${String(help.status)}: ${help.stderr}`);
-	assertOk(help.stdout.includes("Usage:"), "kanban --help did not print usage.");
-	const usage = spawnSync(
-		process.execPath,
-		["--import", resolveTsxLoader(), resolve(process.cwd(), "src/cli.ts"), "task", "start"],
-		{
-			encoding: "utf8",
-			env: createGitTestEnv(),
-		},
-	);
-	assertOk(usage.status !== 0, "kanban task start without --task-id exited zero.");
-}
-
-function driverContext(driver: ScenarioDriver): SelfcheckContext {
+export function driverContext(driver: ScenarioDriver): SelfcheckContext {
 	const context = (driver as { __context?: SelfcheckContext }).__context;
 	if (!context) {
 		throw new ScenarioAssertionError("Scenario driver did not expose its selfcheck context.");
@@ -452,7 +237,7 @@ export function attachContext<T extends ScenarioDriver>(driver: T, context: Self
 	return driver;
 }
 
-async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
+export async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
 	const projects = await requestJson<RuntimeProjectsResponse>({
 		baseUrl,
 		procedure: "projects.list",
@@ -465,7 +250,7 @@ async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
 	return projects.payload.currentProjectId;
 }
 
-async function loadState(context: SelfcheckContext): Promise<RuntimeWorkspaceStateResponse> {
+export async function loadState(context: SelfcheckContext): Promise<RuntimeWorkspaceStateResponse> {
 	const response = await requestJson<RuntimeWorkspaceStateResponse>({
 		baseUrl: context.baseUrl,
 		procedure: "workspace.getState",
@@ -492,7 +277,7 @@ async function saveBoard(
 	return response.payload;
 }
 
-async function mutateBoard(
+export async function mutateBoard(
 	context: SelfcheckContext,
 	mutate: (board: RuntimeBoardData) => RuntimeBoardData,
 ): Promise<RuntimeWorkspaceStateResponse> {
@@ -526,7 +311,7 @@ function findCard(board: RuntimeBoardData, taskId: string): RuntimeBoardCard {
 	throw new ScenarioAssertionError(`Task ${taskId} not found.`);
 }
 
-function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoardColumnId): RuntimeBoardData {
+export function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoardColumnId): RuntimeBoardData {
 	const moved = moveTaskToColumn(board, taskId, columnId);
 	if (!moved.moved) {
 		throw new ScenarioAssertionError(`Task ${taskId} did not move to ${columnId}.`);
@@ -534,7 +319,7 @@ function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoar
 	return moved.board;
 }
 
-function completeTask(
+export function completeTask(
 	board: RuntimeBoardData,
 	taskId: string,
 ): ReturnType<typeof completeTaskAndGetReadyLinkedTaskIds> {
@@ -596,7 +381,7 @@ async function startShellReviewSession(context: SelfcheckContext, taskId: string
 	assertOk(hook.status === 200 && hook.payload.ok, `Review hook failed for ${taskId}: ${hook.payload.error}`);
 }
 
-async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
+export async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
 	const startedAt = Date.now();
 	let lastValue: T | null = null;
 	while (Date.now() - startedAt < timeoutMs) {
@@ -609,365 +394,8 @@ async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, 
 	throw new ScenarioAssertionError(`Timed out waiting for ${label}. Last value: ${JSON.stringify(lastValue)}`);
 }
 
-function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
-	const fleetProjectDir = join(root, "fleet_project");
-	const depPath = join(root, "dependency-repo");
-	const repoPath = join(fleetProjectDir, "main-repo");
-	mkdirSync(depPath, { recursive: true });
-	runGit(depPath, ["init", "-b", "main"]);
-	writeFileSync(join(depPath, "dep-file.txt"), "submodule-content\n", "utf8");
-	runGit(depPath, ["add", "dep-file.txt"]);
-	runGit(depPath, ["commit", "-m", "init-dep"]);
-
-	mkdirSync(repoPath, { recursive: true });
-	runGit(repoPath, ["init", "-b", "main"]);
-	runGit(repoPath, ["config", "protocol.file.allow", "always"]);
-	writeFileSync(join(repoPath, "README.md"), "main-content\n", "utf8");
-	writeFileSync(join(repoPath, ".gitignore"), ".env\n.env.local\n/node_modules/\n/dist/\n/.turbo/\n", "utf8");
-	writeFileSync(join(repoPath, ".env"), "ENV_VAR=value\n", "utf8");
-	writeFileSync(join(repoPath, ".env.local"), "ENV_LOCAL=local-value\n", "utf8");
-	mkdirSync(join(repoPath, "node_modules"), { recursive: true });
-	writeFileSync(join(repoPath, "node_modules", "ignore.txt"), "ignored-node-module\n", "utf8");
-	mkdirSync(join(repoPath, "dist"), { recursive: true });
-	writeFileSync(join(repoPath, "dist", "built.js"), "compiled-js\n", "utf8");
-	mkdirSync(join(repoPath, ".turbo"), { recursive: true });
-	writeFileSync(join(repoPath, ".turbo", "cache.json"), '{"cached":true}\n', "utf8");
-	mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
-	writeFileSync(
-		join(repoPath, ".cline", "kanban", "config.json"),
-		JSON.stringify(
-			{
-				worktree: {
-					postCreateCommand: "echo 'hook-ran' > post-create-marker.txt",
-					unsharedPaths: ["node_modules", "dist", ".turbo"],
-				},
-			},
-			null,
-			2,
-		),
-		"utf8",
-	);
-	runGit(repoPath, ["add", "README.md", ".gitignore", ".cline/kanban/config.json"]);
-	runGit(repoPath, ["commit", "-m", "init-main"]);
-	runGit(repoPath, ["-c", "protocol.file.allow=always", "submodule", "add", depPath, "vendor/submodule"]);
-	runGit(repoPath, ["commit", "-m", "add-submodule"]);
-	return { repoPath, depPath };
-}
-
-async function ensureWorktree(
-	baseUrl: string,
-	workspaceId: string,
-	homeDir: string,
-	taskId: string,
-	baseRef: string,
-): Promise<string> {
-	seedIsolatedBoardState({
-		homeDir,
-		workspaceId,
-		board: {
-			columns: DEFAULT_COLUMNS.map((column) => ({
-				...column,
-				cards: column.id === "backlog" ? [createSelfcheckCard({ id: taskId, title: taskId, baseRef })] : [],
-			})),
-			dependencies: [],
-		},
-	});
-	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
-		baseUrl,
-		procedure: "workspace.ensureWorktree",
-		type: "mutation",
-		workspaceId,
-		payload: { taskId, baseRef },
-	});
-	assertOk(ensured.status === 200 && ensured.payload.ok, `Could not ensure worktree ${taskId}.`);
-	return ensured.payload.path;
-}
-
-function assertShape(worktreePath: string): void {
-	assertOk(
-		existsSync(join(worktreePath, ".env")) && lstatSync(join(worktreePath, ".env")).isSymbolicLink(),
-		".env was not a symlink.",
-	);
-	assertOk(
-		existsSync(join(worktreePath, ".env.local")) && lstatSync(join(worktreePath, ".env.local")).isSymbolicLink(),
-		".env.local was not a symlink.",
-	);
-	assertOk(existsSync(join(worktreePath, "vendor", "submodule", "dep-file.txt")), "Submodule was not checked out.");
-	for (const path of ["node_modules", "dist", ".turbo"]) {
-		assertOk(!existsSync(join(worktreePath, path)), `${path} should not be present in worktree.`);
-	}
-	assertOk(
-		readFileSync(join(worktreePath, "post-create-marker.txt"), "utf8").trim() === "hook-ran",
-		"postCreateCommand did not run.",
-	);
-}
-
-function runFleetCli(args: string[], env: NodeJS.ProcessEnv): { status: number; stdout: string; stderr: string } {
-	const result = spawnSync("python3", [resolve(process.cwd(), "fleet-cli/fleet.py"), ...args], {
-		env: { ...process.env, ...env },
-		encoding: "utf8",
-	});
-	return { status: result.status ?? 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-}
-
-function runGit(cwd: string, args: string[]): string {
-	const result = spawnSync("git", args, {
-		cwd,
-		encoding: "utf8",
-		env: createGitTestEnv({ GIT_ALLOW_PROTOCOL: "file" }),
-	});
-	if (result.status !== 0) {
-		throw new ScenarioAssertionError(`git ${args.join(" ")} failed in ${cwd}: ${result.stderr || result.stdout}`);
-	}
-	return result.stdout.trim();
-}
-
-function resolveTsxLoader(): string {
-	return new URL(import.meta.resolve("tsx")).href;
-}
-
-function assertOk(condition: unknown, message: string): asserts condition {
+export function assertOk(condition: unknown, message: string): asserts condition {
 	if (!condition) {
 		throw new ScenarioAssertionError(message);
-	}
-}
-
-export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer(): Promise<void> {
-	const context = await createSelfcheckContext();
-	try {
-		const taskId = "selfcheck-archive-ledger-task";
-		const card = createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck archive ledger task",
-		});
-
-		// Connect to runtime stream to trigger starting/reconnecting the home agent session
-		const stream = await connectRuntimeStream(
-			`ws://127.0.0.1:${context.instance.port}/api/runtime/ws?workspaceId=${encodeURIComponent(
-				context.workspaceId,
-			)}`,
-		);
-		await stream.waitForMessage(
-			(message): message is RuntimeStateStreamSnapshotMessage => message.type === "snapshot",
-		);
-
-		// 1. Create card and start it
-		const driver = createTrpcScenarioDriver(context);
-		await driver.createCard({ card, column: "backlog" });
-		await driver.startCard(taskId);
-
-		// Also start the overseer home agent session explicitly so it boots up and gets an id
-		const overseerId = createHomeAgentSessionId(context.workspaceId);
-		const startOverseer = await requestJson<RuntimeTaskSessionStartResponse>({
-			baseUrl: context.baseUrl,
-			procedure: "runtime.startTaskSession",
-			type: "mutation",
-			workspaceId: context.workspaceId,
-			payload: {
-				taskId: overseerId,
-				prompt: "Hello",
-				taskTitle: "Home Agent",
-				startInPlanMode: false,
-				baseRef: "HEAD",
-				agentId: "claude",
-				cols: 100,
-				rows: 30,
-			},
-		});
-		assertOk(
-			startOverseer.status === 200 && startOverseer.payload.ok,
-			"Could not start overseer home agent session.",
-		);
-
-		// Wait/poll until the session record carries an agentSessionId.
-		const capturedSessionId = await waitFor(async () => {
-			const state = await loadState(context);
-			const session = state.sessions[taskId];
-			return session?.agentSessionId ? session.agentSessionId : null;
-		}, `session ${taskId} to carry an agentSessionId`);
-
-		// Also do the overseer mirror: capture overseer's agentSessionId
-		const overseerSessionId = await waitFor(async () => {
-			const state = await loadState(context);
-			const session = state.sessions[overseerId];
-			return session?.agentSessionId ? session.agentSessionId : null;
-		}, `overseer ${overseerId} to carry an agentSessionId`);
-
-		// Close stream
-		await stream.close();
-
-		// Stop the card and overseer sessions explicitly so no child processes are left running
-		const stopCard = await requestJson<any>({
-			baseUrl: context.baseUrl,
-			procedure: "runtime.stopTaskSession",
-			type: "mutation",
-			workspaceId: context.workspaceId,
-			payload: { taskId },
-		});
-		assertOk(stopCard.status === 200, "Could not stop card task session.");
-
-		const stopOverseer = await requestJson<any>({
-			baseUrl: context.baseUrl,
-			procedure: "runtime.stopTaskSession",
-			type: "mutation",
-			workspaceId: context.workspaceId,
-			payload: { taskId: overseerId },
-		});
-		assertOk(stopOverseer.status === 200, "Could not stop overseer task session.");
-
-		// 2. Move the card to trash (so prune applies to it on next saveState/mutateBoard)
-		await mutateBoard(context, (board) => moveCard(board, taskId, "trash"));
-
-		// 3. Force the reload path that prunes session records, then assert the record is gone from sessions.json — this pins the premise
-		const sessionsJsonPath = join(
-			context.instance.homeDir,
-			".cline",
-			"kanban",
-			"workspaces",
-			context.workspaceId,
-			"sessions.json",
-		);
-		const sessionsOnDisk = JSON.parse(readFileSync(sessionsJsonPath, "utf8"));
-		assertOk(
-			sessionsOnDisk[taskId] === undefined,
-			`Card session for ${taskId} was NOT pruned from sessions.json as expected.`,
-		);
-
-		// 4. Assert the ledger still returns a manifest for that card whose agentSessionId equals the captured id
-		// Temporarily set CLINE_HOME in the runner to resolve to the isolated instance's state
-		const originalClineHome = process.env.CLINE_HOME;
-		process.env.CLINE_HOME = join(context.instance.homeDir, ".cline");
-
-		try {
-			// First verify the index
-			const index = await listSessions(context.workspaceId, taskId);
-			assertOk(index !== null, "Card session was not found in the ledger index.");
-			assertOk(
-				index.generations.length > 0,
-				"Card session should have at least one generation in the ledger index.",
-			);
-
-			// Read the manifest.json
-			const sessionsDir = getTaskSessionsDir(context.workspaceId, taskId);
-			const manifestPath = join(sessionsDir, "0", "manifest.json");
-			const manifestContent = JSON.parse(readFileSync(manifestPath, "utf8"));
-			assertOk(
-				manifestContent.agentSessionId === capturedSessionId,
-				`Card session manifest has agentSessionId "${manifestContent.agentSessionId}" instead of expected "${capturedSessionId}".`,
-			);
-
-			// 5. Overseer mirror: assert the overseer ledger manifest has the correct agentSessionId and remains intact
-			const overseerIndex = await listSessions(context.workspaceId, overseerId);
-			assertOk(overseerIndex !== null, "Overseer session was not found in the ledger index.");
-
-			const overseerGen = sessionsOnDisk[overseerId]?.homeAgentSessionGeneration ?? 0;
-			const overseerSessionsDir = getTaskSessionsDir(context.workspaceId, overseerId);
-			const overseerManifestPath = join(overseerSessionsDir, String(overseerGen), "manifest.json");
-			const overseerManifestContent = JSON.parse(readFileSync(overseerManifestPath, "utf8"));
-			assertOk(
-				overseerManifestContent.agentSessionId === overseerSessionId,
-				`Overseer session manifest has agentSessionId "${overseerManifestContent.agentSessionId}" instead of expected "${overseerSessionId}".`,
-			);
-		} finally {
-			if (originalClineHome === undefined) {
-				delete process.env.CLINE_HOME;
-			} else {
-				process.env.CLINE_HOME = originalClineHome;
-			}
-		}
-	} finally {
-		await context.stop();
-	}
-}
-
-export async function givenCardWithModelOverrideWhenStartedThenCliReceivesModel(driver: ScenarioDriver): Promise<void> {
-	const _context = driverContext(driver);
-
-	// Card A: created with a per-card model override, started.
-	// Assert the recorded argv contains `--model` followed by exactly that override value.
-	const taskIdA = "card-a-override";
-	await driver.createCard({
-		column: "backlog",
-		card: createSelfcheckCard({
-			id: taskIdA,
-			title: "Card A override model",
-			agentModel: "sonnet-3-5",
-		}),
-	});
-	await driver.startCard(taskIdA);
-	const argvA = await driver.readLaunchedArgv(taskIdA);
-	assertOk(argvA.includes("--model"), `Card A argv should contain --model, got ${JSON.stringify(argvA)}`);
-	const modelIndexA = argvA.indexOf("--model");
-	assertOk(
-		argvA[modelIndexA + 1] === "sonnet-3-5",
-		`Card A model override should be sonnet-3-5, got ${argvA[modelIndexA + 1]}`,
-	);
-
-	// Card C: created with no override, started.
-	// Assert the recorded argv contains no `--model` at all.
-	const taskIdC = "card-c-no-override";
-	await driver.createCard({
-		column: "backlog",
-		card: createSelfcheckCard({
-			id: taskIdC,
-			title: "Card C no override",
-		}),
-	});
-	await driver.startCard(taskIdC);
-	const argvC = await driver.readLaunchedArgv(taskIdC);
-	assertOk(!argvC.includes("--model"), "Card C argv should not contain --model");
-
-	// Card B: created with a per-card model override AND a user-supplied `--model` already present in the configured agent args, started.
-	// Assert the recorded argv contains the user's value and does NOT contain the card override.
-	const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
-	const bFixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-b-");
-	let bInstance: IsolatedKanbanInstance | null = null;
-	try {
-		bInstance = await startIsolatedKanbanInstance({
-			cwd: bFixture.path,
-			env: {
-				KANBAN_TEST_AGENT_BINARY: stubAgentPath,
-				KANBAN_TEST_AGENT_ARGS_JSON: JSON.stringify(["--model", "user-wins-model"]),
-			},
-		});
-		const bBaseUrl = new URL(bInstance.baseUrl).origin;
-		const bWorkspaceId = await resolveCurrentWorkspaceId(bBaseUrl);
-		const bContext = {
-			instance: bInstance,
-			baseUrl: bBaseUrl,
-			workspaceId: bWorkspaceId,
-			fixture: bFixture,
-			stop: async () => {},
-		};
-		const bDriver = attachContext(createTrpcScenarioDriver(bContext), bContext);
-
-		const taskIdB = "card-b-user-supplied";
-		await bDriver.createCard({
-			column: "backlog",
-			card: createSelfcheckCard({
-				id: taskIdB,
-				title: "Card B user supplied model",
-				agentModel: "should-be-overridden",
-			}),
-		});
-		await bDriver.startCard(taskIdB);
-		const argvB = await bDriver.readLaunchedArgv(taskIdB);
-		assertOk(argvB.includes("--model"), "Card B argv should contain --model");
-		const modelIndexB = argvB.indexOf("--model");
-		assertOk(
-			argvB[modelIndexB + 1] === "user-wins-model",
-			`Card B model should be user-wins-model, got ${argvB[modelIndexB + 1]}`,
-		);
-		const occurrences = argvB.filter((arg) => arg === "--model").length;
-		assertOk(occurrences === 1, `Card B argv should contain --model exactly once, got ${occurrences}`);
-		assertOk(
-			!argvB.includes("should-be-overridden"),
-			"Card B argv should not contain the card override value when user supplied it",
-		);
-	} finally {
-		if (bInstance) {
-			await bInstance.stop();
-		}
-		bFixture.cleanup();
 	}
 }
