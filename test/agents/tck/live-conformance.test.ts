@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe } from "vitest";
+import { describe, expect } from "vitest";
 
 import { createClaudeDriver } from "../../../src/agents/claude/driver";
 import { createCodexDriver } from "../../../src/agents/codex/driver";
@@ -81,6 +81,15 @@ describe("Live Conformance Suite", () => {
 	describeLiveDriverTck(createClaudeDriver(), {
 		args: (sessionId) => ["--session-id", sessionId, "-p", "reply with OK"],
 		env: { CLAUDE_CODE_ENABLE_AUTO_MODE: "1" },
+		expectations: {
+			assertMessages: (messages) => {
+				const roles = messages.map((m) => m.role);
+				expect(roles).toContain("user");
+			},
+			assertUsage: (usage) => {
+				expect(usage.inputTokens).toBeGreaterThan(0);
+			},
+		},
 	});
 
 	describeLiveDriverTck(createCodexDriver(), {

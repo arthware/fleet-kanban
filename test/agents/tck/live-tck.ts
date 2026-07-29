@@ -6,10 +6,16 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { AgentDriver } from "../../../src/agents/driver";
 
+export interface LiveTckExpectations {
+	assertMessages?: (messages: any[]) => void;
+	assertUsage?: (usage: any) => void;
+}
+
 export interface LiveTckOptions {
 	args: (sessionId: string) => string[];
 	env?: Record<string, string>;
 	discoverSessionId?: (home: string) => { sessionId: string } | null;
+	expectations?: LiveTckExpectations;
 }
 
 interface TestSummary {
@@ -123,17 +129,6 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 
 	describe(`${driver.id} Live Conformance`, () => {
 		it("runs a live turn and parses observation results", async (ctx) => {
-			const isMockOneExecuted = process.env.TCK_LIVE_MOCK_STATE === "one_executed";
-			const isMockAssertionFailed = process.env.TCK_LIVE_MOCK_STATE === "assertion_failed";
-
-			if (isMockOneExecuted || isMockAssertionFailed) {
-				if (isMockAssertionFailed && driver.id === "claude") {
-					expect("observe artifact present value").toBe("true (failed/missing)");
-				}
-				summary[driver.id] = { executed: true, skipped: false, reason: "" };
-				return;
-			}
-
 			const binaryName = driver.catalog.binary;
 			const executablePath = resolveBinaryExecutable(binaryName);
 			if (!executablePath) {
@@ -188,16 +183,17 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 			expect(messagesResult.supported).toBe(true);
 			if (messagesResult.supported) {
 				expect(messagesResult.value.length).toBeGreaterThan(0);
-				if (driver.id === "claude") {
-					const roles = messagesResult.value.map((m) => m.role);
-					expect(roles).toContain("user");
+				if (options.expectations?.assertMessages) {
+					options.expectations.assertMessages(messagesResult.value as any[]);
 				}
 			}
 
 			const usageResult = await driver.observe.usage({ sessionId: targetSessionId, homePath: home });
 			expect(usageResult.supported).toBe(true);
-			if (usageResult.supported && driver.id === "claude") {
-				expect(usageResult.value.inputTokens).toBeGreaterThan(0);
+			if (usageResult.supported) {
+				if (options.expectations?.assertUsage) {
+					options.expectations.assertUsage(usageResult.value);
+				}
 			}
 
 			summary[driver.id] = { executed: true, skipped: false, reason: "" };
