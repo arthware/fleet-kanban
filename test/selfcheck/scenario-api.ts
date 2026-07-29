@@ -752,10 +752,7 @@ export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer
 			const overseerIndex = await listSessions(context.workspaceId, overseerId);
 			assertOk(overseerIndex !== null, "Overseer session was not found in the ledger index.");
 
-			const overseerGen =
-				sessionsOnDisk[overseerId]?.sessionGeneration ??
-				sessionsOnDisk[overseerId]?.homeAgentSessionGeneration ??
-				0;
+			const overseerGen = sessionsOnDisk[overseerId]?.homeAgentSessionGeneration ?? 0;
 			const overseerSessionsDir = getTaskSessionsDir(context.workspaceId, overseerId);
 			const overseerManifestPath = join(overseerSessionsDir, String(overseerGen), "manifest.json");
 			const overseerManifestContent = JSON.parse(readFileSync(overseerManifestPath, "utf8"));

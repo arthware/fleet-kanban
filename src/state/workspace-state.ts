@@ -666,6 +666,10 @@ async function writeWorkspaceSessions(
 async function reconcileWorkspaceAgentSessionsLocked(
 	workspaceId: string,
 ): Promise<Record<string, RuntimeTaskSessionSummary>> {
+	// Process-guarded, one-shot legacy harvest: ensures legacy pointers are
+	// durably archived in the ledger before they can be partitioned/pruned.
+	await harvestSessions(workspaceId);
+
 	const currentSessions = await readWorkspaceSessions(workspaceId);
 	let board: RuntimeBoardData | null = null;
 	try {
@@ -681,9 +685,6 @@ async function reconcileWorkspaceAgentSessionsLocked(
 }
 
 export async function migrateAllWorkspaceAgentSessions(): Promise<void> {
-	// One-shot idempotent harvest: ensure no legacy pointers are pruned
-	await harvestSessions();
-
 	const index = await readWorkspaceIndex();
 	await Promise.all(
 		Object.keys(index.entries).map(async (workspaceId) => {

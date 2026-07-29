@@ -1,8 +1,15 @@
+import * as fsPromises from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { harvestSessions, listSessions, openSession } from "../../../src/core/session-ledger";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	fsImpl,
+	getHarvestedWorkspacesForTests,
+	harvestSessions,
+	listSessions,
+	openSession,
+} from "../../../src/core/session-ledger";
 
 let previousClineHome: string | undefined;
 let tempRoot: string;
@@ -30,6 +37,9 @@ async function writeWorkspaceIndex(workspaces: Record<string, { repoPath: string
 }
 
 beforeEach(async () => {
+	// Clear the one-shot module-level process guard before each test
+	getHarvestedWorkspacesForTests().clear();
+
 	previousClineHome = process.env.CLINE_HOME;
 	tempRoot = await mkdtemp(join(tmpdir(), "kanban-session-ledger-test-"));
 	process.env.CLINE_HOME = join(tempRoot, "home");
@@ -213,7 +223,7 @@ describe("Session Ledger Harvest Migration", () => {
 			},
 		});
 
-		const results = await harvestSessions({ dryRun: true });
+		const results = await harvestSessions("ws-1", { dryRun: true });
 
 		expect(results).toHaveLength(1);
 		expect(results[0]).toEqual({
@@ -255,11 +265,11 @@ describe("Session Ledger Harvest Migration", () => {
 				agentId: "claude",
 				updatedAt: 999999,
 				agentSessionId: "home-session",
-				homeAgentSessionGeneration: 2, //fallback fallback
+				homeAgentSessionGeneration: 2,
 			},
 		});
 
-		const results = await harvestSessions();
+		const results = await harvestSessions("ws-1");
 
 		expect(results).toHaveLength(2);
 
@@ -290,7 +300,7 @@ describe("Session Ledger Harvest Migration", () => {
 					"ws-1",
 					"sessions",
 					"__home_agent__:ws-1",
-					"2", // fallback generation source
+					"2",
 					"manifest.json",
 				),
 				"utf8",
@@ -312,7 +322,7 @@ describe("Session Ledger Harvest Migration", () => {
 		await mkdir(workspaceDir, { recursive: true });
 		await writeFile(join(workspaceDir, "sessions.json"), "{ invalid }", "utf8");
 
-		const results = await harvestSessions();
+		const results = await harvestSessions("ws-1");
 		expect(results).toHaveLength(0);
 	});
 
@@ -328,7 +338,7 @@ describe("Session Ledger Harvest Migration", () => {
 			},
 		});
 
-		const results = await harvestSessions();
+		const results = await harvestSessions("ws-1");
 		expect(results).toHaveLength(0);
 	});
 
@@ -344,10 +354,16 @@ describe("Session Ledger Harvest Migration", () => {
 			},
 		});
 
+		// Clear the process guard first for this test so we simulate fresh state
+		getHarvestedWorkspacesForTests().clear();
+
 		// First harvest run
-		const results1 = await harvestSessions();
+		const results1 = await harvestSessions("ws-1");
 		expect(results1).toHaveLength(1);
 		expect(results1[0].alreadyExisted).toBe(false);
+
+		// Clear guard to allow a second harvest read of the same workspace ID for idempotency test
+		getHarvestedWorkspacesForTests().clear();
 
 		// Add a second card to sessions.json
 		await writeSessionsJson("ws-1", {
@@ -368,7 +384,7 @@ describe("Session Ledger Harvest Migration", () => {
 		});
 
 		// Second harvest run
-		const results2 = await harvestSessions();
+		const results2 = await harvestSessions("ws-1");
 		// Should return results for both, but card-1 should have alreadyExisted: true
 		expect(results2).toHaveLength(2);
 		const c1 = results2.find((r) => r.taskId === "card-1");
@@ -380,5 +396,36 @@ describe("Session Ledger Harvest Migration", () => {
 			expect(c1.alreadyExisted).toBe(true);
 			expect(c2.alreadyExisted).toBe(false);
 		}
+	});
+
+	it("givenHarvest_whenCalledSecondTime_thenPerformsZeroFilesystemReads", async () => {
+		await writeWorkspaceIndex({ "ws-1": { repoPath: "/tmp/repo-1" } });
+		await writeSessionsJson("ws-1", {
+			"card-1": {
+				taskId: "card-1",
+				state: "idle",
+				agentId: "claude",
+				updatedAt: 123456,
+				agentSessionId: "session-1",
+			},
+		});
+
+		// Spy on fsImpl.readFile
+		const readFileSpy = vi.spyOn(fsImpl, "readFile");
+
+		// First call should perform reads
+		await harvestSessions("ws-1");
+		const firstCallReadCount = readFileSpy.mock.calls.length;
+		expect(firstCallReadCount).toBeGreaterThan(0);
+
+		// Reset spy history
+		readFileSpy.mockClear();
+
+		// Second call (process-guarded)
+		const results = await harvestSessions("ws-1");
+		expect(results).toHaveLength(0); // Immediately returned [] due to process guard
+		expect(readFileSpy).toHaveBeenCalledTimes(0); // ASSERT ZERO FILESYSTEM READS!
+
+		readFileSpy.mockRestore();
 	});
 });

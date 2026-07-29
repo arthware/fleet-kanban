@@ -389,8 +389,6 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	// generation. Bumping this starts a fresh conversation while keeping the
 	// synthetic sidebar task id stable and old transcripts on disk.
 	homeAgentSessionGeneration: z.number().int().nonnegative().optional(),
-	// Generalized generation counter for all card sessions and overseers.
-	sessionGeneration: z.number().int().nonnegative().optional(),
 	lastHookAt: z.number().nullable().default(null),
 	latestHookActivity: runtimeTaskHookActivitySchema.nullable().default(null),
 	warningMessage: z.string().nullable().optional(),

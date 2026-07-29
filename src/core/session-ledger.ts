@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { clineHomeDir } from "../config/cline-home";
 import { lockedFileSystem } from "../fs/locked-file-system";
 import { locateAgentTranscript } from "../terminal/agent-transcript-locator";
@@ -53,6 +54,10 @@ export interface HarvestResult {
 	readonly artifactPresent: boolean;
 }
 
+export const fsImpl = {
+	readFile,
+};
+
 export function getWorkspaceDir(workspaceId: string): string {
 	return join(clineHomeDir(), "kanban", "workspaces", workspaceId);
 }
@@ -78,7 +83,7 @@ export async function openSession(params: {
 
 	let existingManifest: SessionLedgerManifest | null = null;
 	try {
-		const raw = await readFile(manifestPath, "utf8");
+		const raw = await fsImpl.readFile(manifestPath, "utf8");
 		existingManifest = JSON.parse(raw) as SessionLedgerManifest;
 	} catch {
 		// Does not exist or unreadable
@@ -141,7 +146,7 @@ async function updateIndex(workspaceId: string, taskId: string, manifest: Sessio
 
 	let index: SessionLedgerIndex | null = null;
 	try {
-		const raw = await readFile(indexPath, "utf8");
+		const raw = await fsImpl.readFile(indexPath, "utf8");
 		index = JSON.parse(raw) as SessionLedgerIndex;
 	} catch {
 		// missing or unreadable
@@ -186,7 +191,7 @@ export async function listSessions(workspaceId: string, taskId: string): Promise
 
 	let index: SessionLedgerIndex | null = null;
 	try {
-		const raw = await readFile(indexPath, "utf8");
+		const raw = await fsImpl.readFile(indexPath, "utf8");
 		index = JSON.parse(raw) as SessionLedgerIndex;
 	} catch {
 		// Missing or corrupt
@@ -211,7 +216,7 @@ export async function listSessions(workspaceId: string, taskId: string): Promise
 				if (!Number.isNaN(genNum)) {
 					const manifestPath = join(sessionsDir, entry.name, "manifest.json");
 					try {
-						const rawManifest = await readFile(manifestPath, "utf8");
+						const rawManifest = await fsImpl.readFile(manifestPath, "utf8");
 						const manifest = JSON.parse(rawManifest) as SessionLedgerManifest;
 						generations.push({
 							generation: manifest.generation,
@@ -301,114 +306,121 @@ async function deriveArtifactDetails(
 	return false;
 }
 
-export async function harvestSessions(options?: { dryRun?: boolean }): Promise<readonly HarvestResult[]> {
-	const workspacesDir = join(clineHomeDir(), "kanban", "workspaces");
-	const indexPath = join(workspacesDir, "index.json");
+const harvestSessionSummarySchema = z.object({
+	agentSessionId: z.string().nullable().optional(),
+	agentId: z.string().nullable().optional(),
+	homeAgentSessionGeneration: z.number().int().nonnegative().optional(),
+	startedAt: z.number().nullable().optional(),
+	updatedAt: z.number(),
+});
 
-	let indexFile: any;
-	try {
-		const raw = await readFile(indexPath, "utf8");
-		indexFile = JSON.parse(raw);
-	} catch {
+const harvestSessionsFileSchema = z.record(z.string(), harvestSessionSummarySchema);
+
+// Module-level guard to ensure the harvest runs at most once per process per workspace
+const harvestedWorkspaces = new Set<string>();
+
+export async function harvestSessions(
+	workspaceId: string,
+	options?: { dryRun?: boolean },
+): Promise<readonly HarvestResult[]> {
+	if (harvestedWorkspaces.has(workspaceId)) {
 		return [];
 	}
 
-	if (!indexFile || !indexFile.entries) {
+	const workspacesDir = join(clineHomeDir(), "kanban", "workspaces");
+	const sessionsPath = join(workspacesDir, workspaceId, "sessions.json");
+	let sessions: Record<string, z.infer<typeof harvestSessionSummarySchema>>;
+	try {
+		const raw = await fsImpl.readFile(sessionsPath, "utf8");
+		sessions = harvestSessionsFileSchema.parse(JSON.parse(raw));
+	} catch {
 		return [];
 	}
 
 	const results: HarvestResult[] = [];
 
-	for (const workspaceId of Object.keys(indexFile.entries)) {
-		const sessionsPath = join(workspacesDir, workspaceId, "sessions.json");
-		let sessions: Record<string, any>;
+	for (const [taskId, summary] of Object.entries(sessions)) {
+		const agentSessionId = summary.agentSessionId;
+		if (!agentSessionId) {
+			continue;
+		}
+
+		const kind = isHomeAgentSessionId(taskId) ? "home-agent" : "card";
+		const generation = kind === "home-agent" ? (summary.homeAgentSessionGeneration ?? 0) : 0;
+		const agentId = summary.agentId ?? "claude";
+
+		const sessionsDir = getTaskSessionsDir(workspaceId, taskId);
+		const genDir = join(sessionsDir, String(generation));
+		const manifestPath = join(genDir, "manifest.json");
+
+		let alreadyExisted = false;
 		try {
-			const raw = await readFile(sessionsPath, "utf8");
-			sessions = JSON.parse(raw);
+			await stat(manifestPath);
+			alreadyExisted = true;
 		} catch {
-			continue;
+			// doesn't exist
 		}
 
-		if (!sessions || typeof sessions !== "object") {
-			continue;
+		const usage = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheCreationTokens: 0,
+			costUsd: null,
+		};
+		const source = {
+			artifactPath: null,
+			artifactSeenAt: null,
+			artifactMtimeMs: null,
+			artifactBytes: null,
+		};
+
+		const artifactPresent = await deriveArtifactDetails(agentId, agentSessionId, usage, source);
+
+		if (!options?.dryRun) {
+			if (!alreadyExisted) {
+				await mkdir(genDir, { recursive: true });
+				const manifest: SessionLedgerManifest = {
+					schemaVersion: 1,
+					taskId,
+					kind,
+					generation,
+					agentId,
+					agentSessionId,
+					openedAt: summary.startedAt ?? summary.updatedAt,
+					closedAt: summary.updatedAt,
+					outcome: "unknown",
+					usage,
+					source,
+					body: {
+						captured: false,
+						capturedAt: null,
+						messageCount: 0,
+						bytes: 0,
+						truncated: false,
+					},
+				};
+				await lockedFileSystem.writeJsonFileAtomic(manifestPath, manifest);
+				await updateIndex(workspaceId, taskId, manifest);
+			}
 		}
 
-		for (const [taskId, summary] of Object.entries(sessions)) {
-			const agentSessionId = summary.agentSessionId;
-			if (!agentSessionId) {
-				continue;
-			}
+		results.push({
+			workspaceId,
+			taskId,
+			agentSessionId,
+			alreadyExisted,
+			artifactPresent,
+		});
+	}
 
-			const kind = isHomeAgentSessionId(taskId) ? "home-agent" : "card";
-			const generation =
-				kind === "home-agent" ? (summary.sessionGeneration ?? summary.homeAgentSessionGeneration ?? 0) : 0;
-			const agentId = summary.agentId ?? "claude";
-
-			const sessionsDir = getTaskSessionsDir(workspaceId, taskId);
-			const genDir = join(sessionsDir, String(generation));
-			const manifestPath = join(genDir, "manifest.json");
-
-			let alreadyExisted = false;
-			try {
-				await stat(manifestPath);
-				alreadyExisted = true;
-			} catch {
-				// doesn't exist
-			}
-
-			const usage = {
-				inputTokens: 0,
-				outputTokens: 0,
-				cacheReadTokens: 0,
-				cacheCreationTokens: 0,
-				costUsd: null,
-			};
-			const source = {
-				artifactPath: null,
-				artifactSeenAt: null,
-				artifactMtimeMs: null,
-				artifactBytes: null,
-			};
-
-			const artifactPresent = await deriveArtifactDetails(agentId, agentSessionId, usage, source);
-
-			if (!options?.dryRun) {
-				if (!alreadyExisted) {
-					await mkdir(genDir, { recursive: true });
-					const manifest: SessionLedgerManifest = {
-						schemaVersion: 1,
-						taskId,
-						kind,
-						generation,
-						agentId,
-						agentSessionId,
-						openedAt: summary.startedAt ?? summary.updatedAt,
-						closedAt: summary.updatedAt,
-						outcome: "unknown",
-						usage,
-						source,
-						body: {
-							captured: false,
-							capturedAt: null,
-							messageCount: 0,
-							bytes: 0,
-							truncated: false,
-						},
-					};
-					await lockedFileSystem.writeJsonFileAtomic(manifestPath, manifest);
-					await updateIndex(workspaceId, taskId, manifest);
-				}
-			}
-
-			results.push({
-				workspaceId,
-				taskId,
-				agentSessionId,
-				alreadyExisted,
-				artifactPresent,
-			});
-		}
+	if (!options?.dryRun) {
+		harvestedWorkspaces.add(workspaceId);
 	}
 
 	return results;
+}
+
+export function getHarvestedWorkspacesForTests(): Set<string> {
+	return harvestedWorkspaces;
 }
