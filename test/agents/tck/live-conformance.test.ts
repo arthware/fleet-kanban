@@ -100,5 +100,6 @@ describe("Live Conformance Suite", () => {
 	describeLiveDriverTck(createGeminiDriver(), {
 		args: () => ["--yolo", "-i", "reply with OK"],
 		discoverSessionId: findLatestGeminiSession,
+		requiredEnv: ["GEMINI_API_KEY"],
 	});
 });

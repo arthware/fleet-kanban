@@ -4,16 +4,17 @@ import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { AgentDriver } from "../../../src/agents/driver";
+import type { AgentDriver, AgentObservationMessage, AgentUsage } from "../../../src/agents/driver";
 
 export interface LiveTckExpectations {
-	assertMessages?: (messages: any[]) => void;
-	assertUsage?: (usage: any) => void;
+	assertMessages?: (messages: readonly AgentObservationMessage[]) => void;
+	assertUsage?: (usage: AgentUsage) => void;
 }
 
 export interface LiveTckOptions {
 	args: (sessionId: string) => string[];
 	env?: Record<string, string>;
+	requiredEnv?: readonly string[];
 	discoverSessionId?: (home: string) => { sessionId: string } | null;
 	expectations?: LiveTckExpectations;
 }
@@ -137,10 +138,14 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 				return;
 			}
 
-			if (driver.id === "gemini" && !process.env.GEMINI_API_KEY) {
-				summary[driver.id] = { executed: false, skipped: true, reason: "GEMINI_API_KEY env var missing" };
-				ctx.skip();
-				return;
+			if (options.requiredEnv) {
+				for (const key of options.requiredEnv) {
+					if (!process.env[key]) {
+						summary[driver.id] = { executed: false, skipped: true, reason: `${key} env var missing` };
+						ctx.skip();
+						return;
+					}
+				}
 			}
 
 			const sessionId = randomUUID();
@@ -158,7 +163,12 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 
 			if (runResult.error || runResult.status !== 0) {
 				if (isUnauthenticated(runResult)) {
-					summary[driver.id] = { executed: false, skipped: true, reason: "Not authenticated" };
+					const code = runResult.status !== null ? `Exit code ${runResult.status}` : "Error";
+					const out = (runResult.stdout?.toString() || "") + (runResult.stderr?.toString() || "");
+					const cleanOut = out.replace(/\s+/g, " ").trim().substring(0, 300);
+					const detailedReason = `Not authenticated (${code}: "${cleanOut}")`;
+
+					summary[driver.id] = { executed: false, skipped: true, reason: detailedReason };
 					ctx.skip();
 					return;
 				} else {
@@ -184,7 +194,7 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 			if (messagesResult.supported) {
 				expect(messagesResult.value.length).toBeGreaterThan(0);
 				if (options.expectations?.assertMessages) {
-					options.expectations.assertMessages(messagesResult.value as any[]);
+					options.expectations.assertMessages(messagesResult.value);
 				}
 			}
 
