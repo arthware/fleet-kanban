@@ -128,7 +128,92 @@ kanban_bin() {
   return 1
 }
 
-kanban_running() { curl -fsS --max-time 3 "$KANBAN_URL/api/trpc/projects.list" >/dev/null 2>&1; }
+kanban_probe_status() {
+  # 1s is enough because /api/healthz is a process-only response; any slower means
+  # the listener exists but is not promptly serving, not that the port is empty.
+  URL="$KANBAN_URL" python3 - <<'PY'
+import os
+import socket
+import sys
+import urllib.error
+import urllib.request
+
+base_url = os.environ.get("URL", "http://127.0.0.1:3484").rstrip("/")
+
+def probe(path, timeout):
+    try:
+        with urllib.request.urlopen(f"{base_url}{path}", timeout=timeout) as response:
+            response.read(1)
+            return ("ok", str(response.status))
+    except urllib.error.HTTPError as error:
+        return ("http", str(error.code))
+    except TimeoutError:
+        return ("timeout", "")
+    except urllib.error.URLError as error:
+        reason = error.reason
+        if isinstance(reason, TimeoutError) or isinstance(reason, socket.timeout):
+            return ("timeout", "")
+        if isinstance(reason, ConnectionRefusedError):
+            return ("refused", "")
+        return ("network", str(reason))
+    except socket.timeout:
+        return ("timeout", "")
+    except Exception as error:
+        return ("network", str(error))
+
+kind, detail = probe("/api/healthz", 1)
+if kind == "ok":
+    print("running")
+    sys.exit(0)
+if kind == "refused":
+    print("down")
+    sys.exit(0)
+if kind == "timeout":
+    print("timeout")
+    sys.exit(0)
+if kind == "http" and detail == "404":
+    fallback_kind, fallback_detail = probe("/api/trpc/projects.list", 3)
+    if fallback_kind == "ok":
+        print("legacy_running")
+    elif fallback_kind == "refused":
+        print("down")
+    elif fallback_kind == "timeout":
+        print("legacy_timeout")
+    else:
+        print(f"legacy_unhealthy:{fallback_detail or fallback_kind}")
+    sys.exit(0)
+if kind == "http":
+    print(f"unhealthy:{detail}")
+else:
+    print(f"unhealthy:{detail or kind}")
+PY
+}
+
+kanban_running() {
+  case "$(kanban_probe_status 2>/dev/null)" in
+    running|legacy_running) return 0;;
+    *) return 1;;
+  esac
+}
+
+kanban_require_running() {
+  local status; status="$(kanban_probe_status 2>/dev/null || echo unhealthy:probe-error)"
+  case "$status" in
+    running|legacy_running) return 0;;
+    down)
+      dim "board not running — start it: fleet kanban start"; return 1;;
+    timeout)
+      dim "board listener at $KANBAN_URL did not answer the liveness probe; not starting another board"; return 1;;
+    legacy_timeout)
+      dim "board listener at $KANBAN_URL looks like an older board, but projects.list timed out; not starting another board"; return 1;;
+    unhealthy:*)
+      dim "board answered but liveness failed (${status#unhealthy:}); not starting another board"; return 1;;
+    legacy_unhealthy:*)
+      dim "board listener at $KANBAN_URL looks like an older board, but fallback liveness failed (${status#legacy_unhealthy:}); not starting another board"; return 1;;
+    *)
+      dim "board liveness probe failed ($status); not starting another board"; return 1;;
+  esac
+}
 
 kanban_install() {
   # --source <checkout>: build our fork and run this project from it (dogfood)
@@ -213,7 +298,12 @@ PY
 
 kanban_start() {
   local dir="${1:-$PWD}"
-  kanban_running && { say "already running"; kanban_sync_projects; _kanban_url_banner; return 0; }
+  local status; status="$(kanban_probe_status 2>/dev/null || echo unhealthy:probe-error)"
+  case "$status" in
+    running|legacy_running) say "already running"; kanban_sync_projects; _kanban_url_banner; return 0;;
+    down) ;;
+    *) kanban_require_running; return 1;;
+  esac
   local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
   git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || dir="$HOME"
   [ -n "$CLINE_HOME_DIR" ] && { mkdir -p "$CLINE_HOME_DIR"; dim "  state: $CLINE_HOME_DIR (isolated)"; }
@@ -247,12 +337,16 @@ kanban_stop() {
 }
 
 kanban_status() {
-  if kanban_running; then
+  local status; status="$(kanban_probe_status 2>/dev/null || echo unhealthy:probe-error)"
+  if [ "$status" = "running" ] || [ "$status" = "legacy_running" ]; then
     say "kanban running at $KANBAN_URL"
     curl -s "$KANBAN_URL/api/trpc/projects.list" | python3 -c "import sys,json;ps=json.load(sys.stdin)['result']['data']['projects'];print(f'  {len(ps)} projects:');[print('   ',p['id'],'->',p['path'].replace('$HOME','~')) for p in ps]" 2>/dev/null
-  else
+  elif [ "$status" = "down" ]; then
     dim "kanban not running (port $KANBAN_PORT)"; echo "  start it:  fleet kanban start"
     kanban_bin >/dev/null || echo "  (not installed yet:  fleet kanban install)"
+  else
+    kanban_require_running
+    return 1
   fi
 }
 
@@ -430,8 +524,8 @@ fleet_kanban() {
     daemon)         shift
                     dim "note: 'fleet kanban daemon' is deprecated — use 'fleet service {start|stop|status}'"
                     kanban_daemon "$@";;
-    sync)           kanban_running || { dim "not running — start it: fleet kanban start"; return 1; }; say "syncing projects → $KANBAN_URL"; kanban_sync_projects;;
-    open)           kanban_running || kanban_start; command -v open >/dev/null && open "$KANBAN_URL";;
+    sync)           kanban_require_running || return 1; say "syncing projects → $KANBAN_URL"; kanban_sync_projects;;
+    open)           kanban_running || kanban_start || return 1; command -v open >/dev/null && open "$KANBAN_URL";;
     status|"")      kanban_status;;
     *) echo "usage: fleet kanban [install|start|stop|restart|daemon|sync|open|status]" >&2; return 1;;
   esac
@@ -1157,7 +1251,7 @@ fleet_task() {
   fi
 
   if [ "$sub" != "land" ]; then
-    kanban_running || { dim "board not running — start it: fleet kanban start"; return 1; }
+    kanban_require_running || return 1
   fi
   case "$sub" in
     create|new|add)

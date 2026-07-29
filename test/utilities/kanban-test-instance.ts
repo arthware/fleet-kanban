@@ -8,6 +8,7 @@ import { createGitTestEnv } from "./git-env";
 import { createTempDir } from "./temp-dir";
 
 const requireFromHere = createRequire(import.meta.url);
+const RESERVED_RUNTIME_PORTS = new Set([3200, 3500]);
 
 /**
  * Allocate a random free TCP port on the loopback interface.
@@ -37,6 +38,9 @@ export async function getAvailablePort(): Promise<number> {
 	});
 	if (!port) {
 		throw new Error("Could not allocate a test port.");
+	}
+	if (RESERVED_RUNTIME_PORTS.has(port)) {
+		return await getAvailablePort();
 	}
 	return port;
 }
@@ -171,6 +175,9 @@ export interface KanbanServerHandle {
  * its home under the throwaway `homeDir` rather than any inherited real board.
  */
 export async function startKanbanServer(input: StartKanbanServerInput): Promise<KanbanServerHandle> {
+	if (RESERVED_RUNTIME_PORTS.has(input.port)) {
+		throw new Error(`Refusing to start isolated Kanban test server on reserved live-board port ${input.port}.`);
+	}
 	const cliEntrypoint = resolve(process.cwd(), "src/cli.ts");
 	const shutdownIpcHookPath = resolveShutdownIpcHookPath();
 	const tsxLoaderImportSpecifier = resolveTsxLoaderImportSpecifier();

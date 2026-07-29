@@ -5,6 +5,7 @@ coverage
 .DS_Store
 test-results
 playwright-report
+.selfcheck-artifacts
 .worktrees
 .sentry-artifacts
 .env

@@ -96,6 +96,7 @@ export function BoardColumn({
 		<section
 			id={column.id === "trash" ? "kb-archived-column" : undefined}
 			data-column-id={column.id}
+			data-testid={`board-column-${column.id}`}
 			className="flex flex-col min-w-0 min-h-0 bg-surface-1 rounded-lg overflow-hidden border border-border"
 			style={{
 				flex: "1 1 0",
@@ -164,6 +165,7 @@ export function BoardColumn({
 												key={card.id}
 												data-task-id={card.id}
 												data-column-id={column.id}
+												data-testid={`board-card-${card.id}`}
 												style={{ marginBottom: 6 }}
 											>
 												{inlineTaskEditor}
