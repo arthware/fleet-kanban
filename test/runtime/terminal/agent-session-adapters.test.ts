@@ -5,10 +5,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
 import {
 	getAgentSubmitEnterDelayMs,
 	prepareAgentLaunch,
+	SUBMIT_ENTER_DELAY_MS,
 	toBracketedPaste,
 } from "../../../src/terminal/agent-session-adapters";
 
@@ -58,6 +60,27 @@ function getCodexConfigOverrideValues(args: string[], key: string): string[] {
 	return values;
 }
 
+function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "running",
+		agentId: "codex",
+		workspacePath: "/tmp/worktree",
+		pid: 1234,
+		startedAt: 1,
+		updatedAt: 1,
+		lastOutputAt: 1,
+		reviewReason: null,
+		exitCode: null,
+		agentSessionId: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		latestTurnCheckpoint: null,
+		previousTurnCheckpoint: null,
+		...overrides,
+	};
+}
+
 afterEach(() => {
 	if (originalHome === undefined) {
 		delete process.env.HOME;
@@ -87,6 +110,64 @@ afterEach(() => {
 });
 
 describe("prepareAgentLaunch hook strategies", () => {
+	it("given Codex prompt-ready PTY bytes from a real prompt, when the adapter detector sees them during attention review, then it emits the prompt-ready event", async () => {
+		// given
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-codex",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			workspaceId: "workspace-1",
+		});
+		const summary = createSummary({
+			agentId: "codex",
+			state: "awaiting_review",
+			reviewReason: "attention",
+		});
+
+		// when
+		const event = launch.detectOutputTransition?.(
+			"\u001b[2mctrl-c to exit\u001b[22m\n  \u001b[32m›\u001b[39m ",
+			summary,
+		);
+
+		// then
+		expect(event).toEqual({ type: "agent.prompt-ready" });
+	});
+
+	it("given Codex is resting for human review, when prompt-like PTY bytes arrive, then the adapter reports no prompt-ready event", async () => {
+		// given
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-codex",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			workspaceId: "workspace-1",
+		});
+		const summary = createSummary({
+			agentId: "codex",
+			state: "awaiting_review",
+			reviewReason: "exit",
+		});
+
+		// when
+		const event = launch.detectOutputTransition?.("› ", summary);
+
+		// then
+		expect(event).toBeNull();
+	});
+
+	it("given per-harness submit timing is requested, when the agent is Gemini, then it returns the Gemini 300 ms delay", () => {
+		expect(getAgentSubmitEnterDelayMs("gemini")).toBe(300);
+		expect(getAgentSubmitEnterDelayMs("codex")).toBe(SUBMIT_ENTER_DELAY_MS);
+	});
+
 	it("configures Codex hooks without legacy notify", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
