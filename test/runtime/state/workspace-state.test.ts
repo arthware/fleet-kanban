@@ -354,7 +354,7 @@ describe.sequential("workspace agent session reconciliation", () => {
 			createBoard({
 				backlog: [
 					{
-						...createCard("task-card"),
+						...createCard("task-session"),
 						agentId: "cursor" as RuntimeBoardCard["agentId"],
 					},
 				],
@@ -392,6 +392,13 @@ describe.sequential("workspace agent session reconciliation", () => {
 		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId);
 		const runningTaskId = "task-running";
 		const liveLookingTaskId = "task-live-looking";
+
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard(runningTaskId), createCard(liveLookingTaskId)],
+			}),
+		);
 
 		await writeSessionsJson(context.workspaceId, {
 			[runningTaskId]: createSession(runningTaskId, {
@@ -532,5 +539,187 @@ describe("workspace epic metadata persistence", () => {
 		await setWorkspaceEpic(context.workspaceId, null);
 		const cleared = await getWorkspaceEpic(context.workspaceId);
 		expect(cleared).toBeNull();
+	});
+});
+
+describe("workspace sessions scoping, pruning, and liveness reconciliation", () => {
+	it("scopes and prunes card sessions to active board cards, drops other workspaces cards, and bounds latestHookActivity", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		// Let's set up 4 cards on the board
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("card-1"), createCard("card-2"), createCard("card-3"), createCard("card-4")],
+			}),
+		);
+
+		// Reset the board cache so it re-reads from disk
+		resetWorkspaceBoardCacheForTests();
+
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId);
+		const foreignHomeAgentId = createHomeAgentSessionId("other-workspace-id");
+
+		// 1. Load a persisted state with 200 records and 4 cards -> 4 (+ this workspace's overseer) survive
+		// 2. Load a state containing another workspace's card record -> dropped
+		const sessions: Record<string, any> = {
+			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, { agentSessionId: "home-session" }),
+			[foreignHomeAgentId]: createSession(foreignHomeAgentId, { agentSessionId: "other-home-session" }),
+			"card-1": createSession("card-1", { agentSessionId: "session-1" }),
+			"card-2": createSession("card-2", { agentSessionId: "session-2" }),
+			"card-3": createSession("card-3", { agentSessionId: "session-3" }),
+			"card-4": createSession("card-4", { agentSessionId: "session-4" }),
+			"other-workspace-card": createSession("other-workspace-card", { agentSessionId: "other-card-session" }),
+		};
+
+		// 196 other card sessions (not on the board, so they should be pruned)
+		for (let i = 5; i <= 200; i++) {
+			sessions[`card-${i}`] = createSession(`card-${i}`, { agentSessionId: `session-${i}` });
+		}
+
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		// Trigger partition/reconciliation
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+
+		// Assertions:
+		// Active card sessions survive
+		expect(migrated["card-1"]).toBeDefined();
+		expect(migrated["card-2"]).toBeDefined();
+		expect(migrated["card-3"]).toBeDefined();
+		expect(migrated["card-4"]).toBeDefined();
+
+		// Home agent for this workspace survives
+		expect(migrated[canonicalHomeAgentId]).toBeDefined();
+
+		// Other workspace home agent is dropped
+		expect(migrated[foreignHomeAgentId]).toBeUndefined();
+
+		// Other workspace card is dropped
+		expect(migrated["other-workspace-card"]).toBeUndefined();
+
+		// Stale / un-boarded card sessions are pruned
+		expect(migrated["card-5"]).toBeUndefined();
+		expect(migrated["card-200"]).toBeUndefined();
+	});
+
+	it("reconciles dead running card/overseer sessions to interrupted on cold load, while a genuinely live session survives, and keeps records when board.json is unreadable", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		// Write a card to the board so it doesn't get pruned
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("running-card")],
+			}),
+		);
+		resetWorkspaceBoardCacheForTests();
+
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId);
+
+		// Write sessions.json with:
+		// - running-card as running (process is dead, so it should flip to interrupted)
+		const sessions: Record<string, any> = {
+			"running-card": createSession("running-card", {
+				state: "running",
+				pid: 99999,
+				startedAt: 12345,
+				agentSessionId: "session-running-card",
+				agentSessionLifecycle: "attached",
+			}),
+			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, {
+				state: "running",
+				pid: 99999,
+				startedAt: 12345,
+				agentSessionId: "session-canonical",
+				agentSessionLifecycle: "attached",
+			}),
+		};
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		// Run liveness reconciliation
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+
+		// Assert they are flipped to interrupted
+		expect(migrated["running-card"]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+		expect(migrated[canonicalHomeAgentId]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+
+		// 3. Test that when board.json is unreadable, nothing is dropped
+		const boardPath = join(tempRoot, "home", "kanban", "workspaces", context.workspaceId, "board.json");
+		await writeFile(boardPath, "{ invalid json", "utf8");
+		resetWorkspaceBoardCacheForTests();
+
+		// Re-write sessions
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		await migrateAllWorkspaceAgentSessions();
+
+		const migratedWithUnreadableBoard = await readSessionsJson(context.workspaceId);
+
+		// Card sessions are NOT dropped because board was unreadable!
+		expect(migratedWithUnreadableBoard["running-card"]).toBeDefined();
+		// Home agent still survives/is processed
+		expect(migratedWithUnreadableBoard[canonicalHomeAgentId]).toBeDefined();
+	});
+
+	it("bounds latestHookActivity size to prevent record ballooning", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("active-card")],
+			}),
+		);
+		resetWorkspaceBoardCacheForTests();
+
+		const hugeString = "A".repeat(50000); // 50 KB
+
+		const sessions: Record<string, any> = {
+			"active-card": createSession("active-card", {
+				agentSessionId: "active-session-id",
+				latestHookActivity: {
+					activityText: hugeString,
+					toolName: "Read",
+					toolInputSummary: hugeString,
+					finalMessage: hugeString,
+					hookEventName: "AfterTool",
+					notificationType: null,
+					source: "claude",
+				},
+			}),
+		};
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+		const activity = (migrated["active-card"] as any).latestHookActivity;
+
+		expect(activity).toBeDefined();
+		expect(activity.activityText.length).toBeLessThan(1100);
+		expect(activity.activityText).toContain("...");
+		expect(activity.toolInputSummary.length).toBeLessThan(1100);
+		expect(activity.toolInputSummary).toContain("...");
+		expect(activity.finalMessage.length).toBeLessThan(1100);
+		expect(activity.finalMessage).toContain("...");
+
+		// Size assertion: serialized JSON of the session is way below the original oversized 150+ KB
+		const serializedSize = JSON.stringify(migrated).length;
+		expect(serializedSize).toBeLessThan(5000); // well bounded!
 	});
 });
