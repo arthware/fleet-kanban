@@ -25,6 +25,8 @@
       ".nuxt",
       ".output",
       "*.tsbuildinfo"
-    ]
+    ],
+    "postCreateCommand": "npm install && npm --prefix web-ui install",
+    "postCreateTimeoutMs": 180000
   }
 }
