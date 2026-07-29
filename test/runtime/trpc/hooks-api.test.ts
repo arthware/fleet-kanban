@@ -220,14 +220,14 @@ describe("createHooksApi", () => {
 		expect(manager.transitionToRunning).toHaveBeenCalledTimes(1);
 	});
 
-	it("given a completed Review card, when an automatic to_in_progress hook arrives, then it stays dormant", async () => {
+	it("given a completed Review card, when an explicit to_in_progress hook arrives, then it resumes running", async () => {
 		// given
 		const notifyTaskReadyForReview = vi.fn(async () => undefined);
 		const ensureAutoReviewPrForTask = vi.fn(async () => undefined);
 		const manager = {
 			getSummary: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
 			transitionToReview: vi.fn(),
-			transitionToRunning: vi.fn(),
+			transitionToRunning: vi.fn(() => createSummary({ state: "running", reviewReason: null })),
 			applyHookActivity: vi.fn(),
 			applyTurnCheckpoint: vi.fn(),
 		} as unknown as TerminalSessionManager;
@@ -251,13 +251,13 @@ describe("createHooksApi", () => {
 
 		// then
 		expect(response).toEqual({ ok: true });
-		expect(manager.transitionToRunning).not.toHaveBeenCalled();
+		expect(manager.transitionToRunning).toHaveBeenCalledWith("task-1");
 		expect(manager.transitionToReview).not.toHaveBeenCalled();
 		expect(notifyTaskReadyForReview).not.toHaveBeenCalled();
 		expect(ensureAutoReviewPrForTask).not.toHaveBeenCalled();
 	});
 
-	it("given a home-agent session resting at hook review, when an automatic to_in_progress hook arrives, then it resumes running", async () => {
+	it("given a home-agent session resting at hook review, when an explicit to_in_progress hook arrives, then it resumes running", async () => {
 		// given
 		const taskId = createHomeAgentSessionId("workspace-1");
 		const manager = {
@@ -287,6 +287,41 @@ describe("createHooksApi", () => {
 		expect(response).toEqual({ ok: true });
 		expect(manager.transitionToRunning).toHaveBeenCalledWith(taskId);
 		expect(manager.transitionToReview).not.toHaveBeenCalled();
+	});
+
+	it("given a Review card with no turn-start hook, when activity arrives, then it stays in review", async () => {
+		// given
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
+			transitionToReview: vi.fn(),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		// when
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "activity",
+			metadata: { source: "gemini", hookEventName: "AfterTool" },
+		});
+
+		// then
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToRunning).not.toHaveBeenCalled();
+		expect(manager.transitionToReview).not.toHaveBeenCalled();
+		expect(manager.applyHookActivity).toHaveBeenCalledWith("task-1", {
+			source: "gemini",
+			hookEventName: "AfterTool",
+		});
 	});
 
 	it("captures a turn checkpoint when transitioning to review", async () => {

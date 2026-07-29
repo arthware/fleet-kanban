@@ -5,10 +5,9 @@ import type {
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
 import { parseHookIngestRequest } from "../core/api-validation";
-import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { loadWorkspaceContextById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
-import { canWakeFromAnyReviewReason, isNeedsInputReviewHook } from "../terminal/session-state-machine";
+import { isNeedsInputReviewHook } from "../terminal/session-state-machine";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
 
@@ -31,23 +30,14 @@ export interface CreateHooksApiDependencies {
 	ensureAutoReviewPrForTask?: (input: { workspaceId: string; taskId: string; cwd: string }) => Promise<unknown>;
 }
 
-function canTransitionTaskForHookEvent(
-	taskId: string,
-	summary: RuntimeTaskSessionSummary,
-	event: RuntimeHookEvent,
-): boolean {
+function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event: RuntimeHookEvent): boolean {
 	if (event === "activity") {
 		return false;
 	}
 	if (event === "to_review") {
 		return summary.state === "running";
 	}
-	if (summary.state !== "awaiting_review") {
-		return false;
-	}
-	return isHomeAgentSessionId(taskId)
-		? canWakeFromAnyReviewReason(summary.reviewReason)
-		: summary.reviewReason === "needs_input";
+	return summary.state === "awaiting_review";
 }
 
 export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcContext["hooksApi"] {
@@ -80,7 +70,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					} satisfies RuntimeHookIngestResponse;
 				}
 
-				if (!canTransitionTaskForHookEvent(taskId, summary, event)) {
+				if (!canTransitionTaskForHookEvent(summary, event)) {
 					if (body.metadata) {
 						manager.applyHookActivity(taskId, body.metadata);
 					}
