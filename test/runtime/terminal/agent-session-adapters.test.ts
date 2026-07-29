@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -246,108 +246,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(getCodexConfigOverrideValues(launch.args, "check_for_update_on_startup")).toEqual(["false"]);
 	});
 
-	it("given a Cursor home sidebar session, when it launches with a prompt, then the sidebar guidance is sent with the prompt", async () => {
-		// given
-		setupTempHome();
-		setKanbanProcessContext();
-
-		// when
-		const launch = await prepareAgentLaunch({
-			taskId: "__home_agent__:workspace-1:cursor",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			cwd: "/tmp",
-			prompt: "Create a task for the failing login test",
-		});
-
-		// then
-		const initialPrompt = launch.args.at(-1) ?? "";
-		expect(initialPrompt).toContain("Kanban sidebar agent");
-		expect(initialPrompt).toContain("Current home agent: `cursor`");
-		expect(initialPrompt).toContain("cursor-agent mcp login linear");
-		expect(initialPrompt).toContain("# User Request");
-		expect(initialPrompt).toContain("Create a task for the failing login test");
-	});
-
-	it("given cursor-agent is installed, when a card selects Cursor and starts, then cursor-agent launches with prompt hooks and autonomous args", async () => {
-		// given
-		const cwd = setupTempHome();
-
-		// when
-		const launch = await prepareAgentLaunch({
-			taskId: "task-cursor",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd,
-			prompt: "Implement Cursor launch support",
-			workspaceId: "workspace-1",
-		});
-
-		// then
-		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-cursor");
-		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
-		expect(launch.args).toContain("--force");
-		expect(launch.args.at(-1)).toBe("Implement Cursor launch support");
-
-		const hooksPath = join(cwd, ".cursor", "hooks.json");
-		const config = JSON.parse(readFileSync(hooksPath, "utf8")) as {
-			version?: number;
-			hooks?: Record<string, Array<{ command?: string }>>;
-		};
-		expect(config.version).toBe(1);
-		expect(config.hooks?.beforeSubmitPrompt?.[0]?.command).toContain("to_in_progress");
-		expect(config.hooks?.beforeShellExecution?.[0]?.command).toContain("to_in_progress");
-		expect(config.hooks?.afterFileEdit?.[0]?.command).toContain("activity");
-		expect(config.hooks?.stop?.[0]?.command).toContain("to_review");
-		expect(config.hooks?.stop?.[0]?.command).toContain("Waiting for review");
-	});
-
-	it("given cursor-agent starts a plan card, then Cursor receives a normal prompt and no native plan flag", async () => {
-		// given
-		const cwd = setupTempHome();
-
-		// when
-		const launch = await prepareAgentLaunch({
-			taskId: "task-cursor-plan",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd,
-			prompt: "Design Cursor plan handling",
-			workspaceId: "workspace-1",
-		});
-
-		// then
-		expect(launch.args).not.toContain("--plan");
-		expect(launch.args).toContain("--force");
-		expect(launch.args.at(-1)).toBe("Design Cursor plan handling");
-	});
-
-	it("given cursor-agent starts a normal card, then Cursor launch args are unchanged", async () => {
-		// given
-		const cwd = setupTempHome();
-
-		// when
-		const launch = await prepareAgentLaunch({
-			taskId: "task-cursor-normal",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd,
-			prompt: "Implement Cursor plan handling",
-			workspaceId: "workspace-1",
-		});
-
-		// then
-		expect(launch.args).toContain("--force");
-		expect(launch.args.at(-1)).toBe("Implement Cursor plan handling");
-	});
-
 	it("disables Codex startup update checks for Kanban-launched sessions", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -459,162 +357,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(settings.hooks).toBeUndefined();
 	});
 
-	it("writes OpenCode plugin with root-session filtering and permission hooks", async () => {
-		setupTempHome();
-		await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		const pluginPath = join(homedir(), ".cline", "kanban", "hooks", "opencode", "kanban.js");
-		const plugin = readFileSync(pluginPath, "utf8");
-		expect(plugin).toContain("parentID");
-		expect(plugin).toContain('"permission.ask"');
-		expect(plugin).toContain('"tool.execute.before"');
-		expect(plugin).toContain('"tool.execute.after"');
-		expect(plugin).toContain("session.status");
-		expect(plugin).toContain("message.part.updated");
-		expect(plugin).toContain("last_assistant_message");
-		expect(plugin).toContain("--metadata-base64");
-		expect(plugin).toContain('if (kind === "review")');
-		expect(plugin).toContain('currentState = "idle"');
-	});
-
-	it("loads OpenCode preferred model from LOCALAPPDATA state and auth paths", async () => {
-		const homePath = setupTempHome();
-		const localAppDataPath = join(homePath, "AppData", "Local");
-		process.env.LOCALAPPDATA = localAppDataPath;
-
-		const statePath = join(localAppDataPath, "opencode", "state");
-		mkdirSync(statePath, { recursive: true });
-		writeFileSync(
-			join(statePath, "model.json"),
-			JSON.stringify(
-				{
-					recent: [
-						{ providerID: "anthropic", modelID: "claude-3-7-sonnet" },
-						{ providerID: "openai", modelID: "gpt-4o" },
-					],
-				},
-				null,
-				2,
-			),
-			"utf8",
-		);
-
-		const authPath = join(localAppDataPath, "opencode");
-		mkdirSync(authPath, { recursive: true });
-		writeFileSync(
-			join(authPath, "auth.json"),
-			JSON.stringify(
-				{
-					openai: { key: "sk-test" },
-				},
-				null,
-				2,
-			),
-			"utf8",
-		);
-
-		const launch = await prepareAgentLaunch({
-			taskId: "task-opencode-model",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-		});
-
-		const modelIndex = launch.args.indexOf("--model");
-		expect(modelIndex).toBeGreaterThan(-1);
-		expect(launch.args[modelIndex + 1]).toBe("openai/gpt-4o");
-	});
-
-	it("writes Droid settings with hook transitions and runtime autonomy mode", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-1");
-		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
-
-		const settingsArgIndex = launch.args.indexOf("--settings");
-		expect(settingsArgIndex).toBeGreaterThanOrEqual(0);
-		const settingsPath = launch.args[settingsArgIndex + 1];
-		expect(settingsPath).toBeDefined();
-
-		const settings = JSON.parse(readFileSync(settingsPath ?? "", "utf8")) as {
-			autonomyMode?: string;
-			hooks?: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>;
-		};
-		expect(settings.autonomyMode).toBe("auto-high");
-		expect(settings.hooks?.Stop?.[0]?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.Notification?.[0]?.hooks?.[0]?.command).toContain("activity");
-		expect(settings.hooks?.Notification?.[1]?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.PreToolUse?.[0]?.matcher).toBe("*");
-		expect(settings.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command).toContain("activity");
-		const preToolInProgressHook = settings.hooks?.PreToolUse?.find(
-			(hook) => hook.matcher === "Read|Grep|Glob|FetchUrl|WebSearch|Execute|Task|Edit|Create",
-		);
-		expect(preToolInProgressHook?.hooks?.[0]?.command).toContain("to_in_progress");
-		const preToolReviewHook = settings.hooks?.PreToolUse?.find((hook) => hook.matcher === "AskUser");
-		expect(preToolReviewHook?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.PostToolUse?.[0]?.matcher).toBe("*");
-		expect(settings.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain("activity");
-		const postToolInProgressHook = settings.hooks?.PostToolUse?.find((hook) => hook.matcher === "AskUser");
-		expect(postToolInProgressHook?.hooks?.[0]?.command).toContain("to_in_progress");
-		expect(settings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command).toContain("to_in_progress");
-	});
-
-	it("writes Kiro agent hooks and uses a Kanban-managed soft planning prompt", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-kiro-1",
-			agentId: "kiro",
-			binary: "kiro-cli",
-			args: ["chat"],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "Investigate deployment drift",
-			workspaceId: "workspace-1",
-		});
-
-		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-kiro-1");
-		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
-		expect(launch.args).toContain("--agent");
-		expect(launch.args[launch.args.indexOf("--agent") + 1]).toBe("kanban");
-		expect(launch.args).toContain("--trust-all-tools");
-		const initialPrompt = launch.args.at(-1) ?? "";
-		expect(initialPrompt).toBe("Investigate deployment drift");
-
-		const configPath = join(homedir(), ".kiro", "agents", "kanban.json");
-		const config = JSON.parse(readFileSync(configPath, "utf8")) as {
-			tools?: string[];
-			hooks?: Record<string, Array<{ command?: string }>>;
-		};
-		expect(config.tools).toEqual(["*"]);
-		expect(config.hooks?.agentSpawn?.[0]?.command).toContain("to_in_progress");
-		expect(config.hooks?.userPromptSubmit?.[0]?.command).toContain("to_in_progress");
-		expect(config.hooks?.preToolUse?.[0]?.command).toContain("activity");
-		expect(config.hooks?.preToolUse?.[1]?.command).toContain("to_in_progress");
-		expect(config.hooks?.postToolUse?.[0]?.command).toContain("activity");
-		expect(config.hooks?.stop?.[0]?.command).toContain("to_review");
-		expect(config.hooks?.stop?.[0]?.command).toContain("Waiting for review");
-	});
-
 	it("materializes task images for CLI prompts", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -676,91 +418,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.deferredStartupInput).toBeUndefined();
 	});
 
-	it("writes Cline hook scripts and injects --hooks-dir", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "cline",
-			binary: "cline",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		const hooksDir = join(homedir(), ".cline", "kanban", "hooks", "cline");
-		const notificationHookPath =
-			process.platform === "win32" ? join(hooksDir, "Notification.ps1") : join(hooksDir, "Notification");
-		const taskCompleteHookPath =
-			process.platform === "win32" ? join(hooksDir, "TaskComplete.ps1") : join(hooksDir, "TaskComplete");
-		const userPromptSubmitHookPath =
-			process.platform === "win32" ? join(hooksDir, "UserPromptSubmit.ps1") : join(hooksDir, "UserPromptSubmit");
-		const preToolUseHookPath =
-			process.platform === "win32" ? join(hooksDir, "PreToolUse.ps1") : join(hooksDir, "PreToolUse");
-		const postToolUseHookPath =
-			process.platform === "win32" ? join(hooksDir, "PostToolUse.ps1") : join(hooksDir, "PostToolUse");
-
-		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-1");
-		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
-
-		const hooksDirArgIndex = launch.args.indexOf("--hooks-dir");
-		expect(hooksDirArgIndex).toBeGreaterThanOrEqual(0);
-		expect(launch.args[hooksDirArgIndex + 1]).toBe(hooksDir);
-
-		expect(existsSync(notificationHookPath)).toBe(true);
-		expect(existsSync(taskCompleteHookPath)).toBe(true);
-		expect(existsSync(userPromptSubmitHookPath)).toBe(true);
-		expect(existsSync(preToolUseHookPath)).toBe(true);
-		expect(existsSync(postToolUseHookPath)).toBe(true);
-
-		const notificationScript = readFileSync(notificationHookPath, "utf8");
-		expect(notificationScript).toContain("hooks");
-		expect(notificationScript).toContain("to_review");
-		expect(notificationScript).toContain("user_attention");
-		expect(notificationScript).toContain("completion_result");
-		expect(notificationScript).toContain('{"cancel":false}');
-
-		const taskCompleteScript = readFileSync(taskCompleteHookPath, "utf8");
-		expect(taskCompleteScript).toContain("hooks");
-		expect(taskCompleteScript).toContain("to_review");
-		expect(taskCompleteScript).toContain('{"cancel":false}');
-
-		const userPromptSubmitScript = readFileSync(userPromptSubmitHookPath, "utf8");
-		expect(userPromptSubmitScript).toContain("hooks");
-		expect(userPromptSubmitScript).toContain("to_in_progress");
-		expect(userPromptSubmitScript).toContain('{"cancel":false}');
-
-		const preToolUseScript = readFileSync(preToolUseHookPath, "utf8");
-		expect(preToolUseScript).toContain("hooks");
-		expect(preToolUseScript).toContain("activity");
-		expect(preToolUseScript).toContain("to_in_progress");
-		expect(preToolUseScript).toContain("to_review");
-		expect(preToolUseScript).toContain("ask_followup_question");
-		expect(preToolUseScript).toContain("plan_mode_respond");
-
-		const postToolUseScript = readFileSync(postToolUseHookPath, "utf8");
-		expect(postToolUseScript).toContain("hooks");
-		expect(postToolUseScript).toContain("activity");
-		expect(postToolUseScript).toContain("to_in_progress");
-		expect(postToolUseScript).toContain("ask_followup_question");
-		expect(postToolUseScript).toContain("plan_mode_respond");
-	});
-
-	it("given Cline CLI starts a plan card, then it receives the Fleet plan directive without --plan", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-cline-plan",
-			agentId: "cline",
-			binary: "cline",
-			args: [],
-			cwd: "/tmp",
-			prompt: "Design native Cline plan handling",
-		});
-
-		expect(launch.args).not.toContain("--plan");
-		expect(launch.args.at(-1)).toBe("Design native Cline plan handling");
-	});
-
 	it("given Gemini launch resumes a trashed card, when preparing launch, then Gemini resumes the latest session", async () => {
 		// given
 		setupTempHome();
@@ -804,61 +461,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(claudeLaunch.args).toContain("--continue");
-
-		const opencodeLaunch = await prepareAgentLaunch({
-			taskId: "task-opencode",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(opencodeLaunch.args).toContain("--continue");
-
-		const droidLaunch = await prepareAgentLaunch({
-			taskId: "task-droid",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(droidLaunch.args).toContain("--resume");
-
-		const kiroLaunch = await prepareAgentLaunch({
-			taskId: "task-kiro",
-			agentId: "kiro",
-			binary: "kiro-cli",
-			args: ["chat"],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(kiroLaunch.args).toContain("--resume");
-
-		const cursorLaunch = await prepareAgentLaunch({
-			taskId: "task-cursor",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(cursorLaunch.args).toContain("--continue");
-
-		const clineLaunch = await prepareAgentLaunch({
-			taskId: "task-cline",
-			agentId: "cline",
-			binary: "cline",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(clineLaunch.args).toContain("--continue");
 	});
 
 	it("places Codex hook config before the resume subcommand", async () => {
@@ -910,7 +512,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args).toContain("--yolo");
 	});
 
-	it("applies autonomous mode flags in adapters for non-droid CLIs", async () => {
+	it("applies autonomous mode flags in adapters for surviving CLIs", async () => {
 		setupTempHome();
 
 		const claudeLaunch = await prepareAgentLaunch({
@@ -938,39 +540,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
-
-		const kiroLaunch = await prepareAgentLaunch({
-			taskId: "task-kiro-auto",
-			agentId: "kiro",
-			binary: "kiro-cli",
-			args: ["chat"],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(kiroLaunch.args).toContain("--trust-all-tools");
-
-		const cursorLaunch = await prepareAgentLaunch({
-			taskId: "task-cursor-auto",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(cursorLaunch.args).toContain("--force");
-
-		const clineLaunch = await prepareAgentLaunch({
-			taskId: "task-cline-auto",
-			agentId: "cline",
-			binary: "cline",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(clineLaunch.args).toContain("--auto-approve-all");
 	});
 
 	it("does not add a Claude permission mode when args already set one", async () => {
@@ -1140,22 +709,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args[resumeIndex + 1]).toBe("stored-gemini-id");
 	});
 
-	it("resumes a Cursor session without appending the initial prompt", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-cursor-resume",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: [],
-			cwd: "/tmp",
-			prompt: "Original card prompt",
-			resumeSession: true,
-		});
-
-		expect(launch.args).toContain("--continue");
-		expect(launch.args).not.toContain("Original card prompt");
-	});
-
 	it("does not pass any resume flag for a fresh Codex session", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -1224,39 +777,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(geminiLaunch.args).toContain("--yolo");
-
-		const clineLaunch = await prepareAgentLaunch({
-			taskId: "task-cline-no-auto",
-			agentId: "cline",
-			binary: "cline",
-			args: ["--auto-approve-all"],
-			autonomousModeEnabled: false,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(clineLaunch.args).toContain("--auto-approve-all");
-
-		const kiroLaunch = await prepareAgentLaunch({
-			taskId: "task-kiro-no-auto",
-			agentId: "kiro",
-			binary: "kiro-cli",
-			args: ["chat", "--trust-all-tools"],
-			autonomousModeEnabled: false,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(kiroLaunch.args).toContain("--trust-all-tools");
-
-		const cursorLaunch = await prepareAgentLaunch({
-			taskId: "task-cursor-no-auto",
-			agentId: "cursor",
-			binary: "cursor-agent",
-			args: ["--force"],
-			autonomousModeEnabled: false,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(cursorLaunch.args).toContain("--force");
 	});
 });
 

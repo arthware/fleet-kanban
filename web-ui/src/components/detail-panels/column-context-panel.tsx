@@ -31,7 +31,6 @@ function ColumnSection({
 	moveToTrashLoadingById,
 	activeDragSourceColumnId,
 	workspacePath,
-	defaultClineModelId,
 }: {
 	column: BoardColumn;
 	selectedCardId: string;
@@ -53,7 +52,6 @@ function ColumnSection({
 	moveToTrashLoadingById?: Record<string, boolean>;
 	activeDragSourceColumnId?: BoardColumnId | null;
 	workspacePath?: string | null;
-	defaultClineModelId?: string | null;
 }): React.ReactElement {
 	const [open, setOpen] = useState(defaultOpen);
 	const canCreate = column.id === "backlog" && onCreateTask;
@@ -193,7 +191,6 @@ function ColumnSection({
 												isOpenPrLoading={openPrTaskLoadingById?.[card.id] ?? false}
 												isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
 												workspacePath={workspacePath}
-												defaultClineModelId={defaultClineModelId}
 												onSaveTitle={onSaveTitle}
 												onClick={() => {
 													if (column.id === "backlog") {
@@ -224,7 +221,6 @@ function ColumnSection({
 export function ColumnContextPanel({
 	selection,
 	workspacePath,
-	defaultClineModelId,
 	onCardSelect,
 	taskSessions,
 	onTaskDragEnd,
@@ -264,7 +260,6 @@ export function ColumnContextPanel({
 	openPrTaskLoadingById?: Record<string, boolean>;
 	moveToTrashLoadingById?: Record<string, boolean>;
 	panelWidth?: string;
-	defaultClineModelId?: string | null;
 }): React.ReactElement {
 	const [activeDragSourceColumnId, setActiveDragSourceColumnId] = useState<BoardColumnId | null>(null);
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -360,7 +355,6 @@ export function ColumnContextPanel({
 							}
 							activeDragSourceColumnId={activeDragSourceColumnId}
 							workspacePath={workspacePath}
-							defaultClineModelId={defaultClineModelId}
 						/>
 					))}
 				</div>

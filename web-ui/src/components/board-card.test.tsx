@@ -117,7 +117,7 @@ function createSummary(
 	return {
 		taskId: "task-1",
 		state,
-		agentId: "cline",
+		agentId: "claude",
 		workspacePath: "/tmp/worktree",
 		pid: null,
 		startedAt: 1,
@@ -616,7 +616,7 @@ describe("BoardCard", () => {
 
 	it("shows cyan classes for a Cline agent card", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ agentId: "cline" })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="backlog" />);
 		});
 
 		expect(container.textContent).toContain("Cline default");
@@ -737,135 +737,6 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("Auto-");
 	});
 
-	it("shows formatted agent override details with model name and reasoning effort", async () => {
-		mockWorkspaceSnapshot = {
-			taskId: "task-1",
-			path: "/tmp/worktrees/task-1",
-			branch: "feature/override",
-			isDetached: false,
-			headCommit: "1234567890abcdef",
-			changedFiles: 2,
-			additions: 5,
-			deletions: 1,
-		};
-
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						agentId: "cline",
-						clineSettings: {
-							modelId: "openai/gpt-5.5",
-							reasoningEffort: "low",
-						},
-					})}
-					index={0}
-					columnId="review"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("Cline");
-		expect(container.textContent).toContain("GPT-5.5 (Low)");
-		expect(container.textContent).not.toContain("openai/gpt-5.5");
-	});
-
-	it("shows the task-level indicator for reasoning-only overrides", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						clineSettings: {
-							reasoningEffort: "low",
-						},
-					})}
-					index={0}
-					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("GPT-5.5 (Low)");
-	});
-
-	it("shows a fallback indicator for reasoning-only overrides without a resolved default model", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						clineSettings: {
-							reasoningEffort: "low",
-						},
-					})}
-					index={0}
-					columnId="backlog"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("Default model (Low)");
-	});
-
-	it("shows explicit default reasoning metadata for reasoning-only task overrides", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						agentId: "cline",
-						clineSettings: {},
-					})}
-					index={0}
-					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("GPT-5.5 (Default)");
-		expect(container.textContent).not.toContain("GPT-5.5 (High)");
-	});
-
-	it("does not mislabel provider-only overrides as the global default model", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						clineSettings: {
-							providerId: "groq",
-						},
-					})}
-					index={0}
-					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("Provider: groq");
-		expect(container.textContent).not.toContain("GPT-5.5");
-	});
-
-	it("does not show inherited global reasoning for explicit model overrides using default effort", async () => {
-		await act(async () => {
-			root.render(
-				<BoardCard
-					card={createCard({
-						agentId: "cline",
-						clineSettings: {
-							modelId: "openai/gpt-5.5",
-						},
-					})}
-					index={0}
-					columnId="backlog"
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("GPT-5.5");
-		expect(container.textContent).not.toContain("GPT-5.5 (High)");
-	});
-
 	it("shows tool input details in the session preview text", async () => {
 		await act(async () => {
 			root.render(
@@ -876,7 +747,7 @@ describe("BoardCard", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "claude",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),
@@ -941,7 +812,7 @@ describe("BoardCard", () => {
 					index={0}
 					columnId="in_progress"
 					sessionSummary={createSummary("running", {
-						agentId: "kiro",
+						agentId: "gemini",
 						latestHookActivity: {
 							activityText: "Using fs_write: src/index.ts",
 							toolName: "fs_write",
@@ -949,7 +820,7 @@ describe("BoardCard", () => {
 							finalMessage: null,
 							hookEventName: "preToolUse",
 							notificationType: null,
-							source: "kiro",
+							source: "gemini",
 						},
 					})}
 				/>,
@@ -994,7 +865,7 @@ describe("BoardCard", () => {
 					index={0}
 					columnId="review"
 					sessionSummary={createSummary("awaiting_review", {
-						agentId: "kiro",
+						agentId: "gemini",
 						latestHookActivity: {
 							activityText: "Waiting for review",
 							toolName: "fs_write",
@@ -1002,7 +873,7 @@ describe("BoardCard", () => {
 							finalMessage: null,
 							hookEventName: "stop",
 							notificationType: null,
-							source: "kiro",
+							source: "gemini",
 						},
 					})}
 				/>,
@@ -1023,7 +894,7 @@ describe("BoardCard", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "claude",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),

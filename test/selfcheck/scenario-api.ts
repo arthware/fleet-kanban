@@ -80,7 +80,7 @@ export function createSelfcheckCard(input: {
 		prompt: input.prompt ?? input.title,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		agentId: input.agentId ?? "droid",
+		agentId: input.agentId ?? "claude",
 		baseRef: input.baseRef ?? "main",
 		createdAt: now,
 		updatedAt: now,

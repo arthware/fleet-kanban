@@ -103,13 +103,6 @@ function parseAutoReviewValue(value: unknown): { autoReviewEnabled: boolean; aut
 	return { autoReviewEnabled: true, autoReviewMode: mode };
 }
 
-function parseBooleanValue(key: string, value: unknown): boolean {
-	if (typeof value === "boolean") {
-		return value;
-	}
-	throw frontmatterError(`"${key}" must be a boolean (true or false).`);
-}
-
 function parseStringList(key: string, value: unknown): string[] {
 	if (!Array.isArray(value)) {
 		throw frontmatterError(`"${key}" must be a list.`);

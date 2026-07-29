@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Command, CornerDownLeft, FileText, MessageSq
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
-import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
+import { MarkdownContent } from "@/components/detail-panels/markdown-content";
 import {
 	buildDisplayItems,
 	buildHighlightedLineMap,
@@ -557,7 +557,7 @@ function TaskFileContent({
 	if (isMarkdownPath(path)) {
 		return (
 			<div className="min-w-0 overflow-auto px-4 py-3">
-				<ClineMarkdownContent content={content} />
+				<MarkdownContent content={content} />
 			</div>
 		);
 	}

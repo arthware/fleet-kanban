@@ -1,64 +1,37 @@
 // Composes the sidebar agent surface for the current workspace.
-// It decides whether the synthetic home session should render native Cline
-// chat or a terminal panel and wires that surface to shared runtime actions.
+// It renders the synthetic home session as a terminal panel and wires that
+// surface to shared runtime actions.
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
-import { ClineAgentChatPanel } from "@/components/detail-panels/cline-agent-chat-panel";
 import { Spinner } from "@/components/ui/spinner";
-import { createIdleTaskSession } from "@/hooks/app-utils";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
-import { useClineChatRuntimeActions } from "@/hooks/use-cline-chat-runtime-actions";
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { selectLatestTaskChatMessageForTask } from "@/runtime/native-agent";
-import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
-import type {
-	RuntimeConfigResponse,
-	RuntimeGitRepositoryInfo,
-	RuntimeStateStreamTaskChatMessage,
-	RuntimeTaskChatMessage,
-	RuntimeTaskSessionSummary,
-} from "@/runtime/types";
+import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useTerminalThemeColors } from "@/terminal/theme-colors";
 
 interface UseHomeSidebarAgentPanelInput {
 	/**
-	 * The workspace that hosts the sidebar agent chat — the pinned architect when
+	 * The workspace that hosts the sidebar agent — the pinned architect when
 	 * the board has one, otherwise the selected project. Kept stable across
-	 * project-selector changes so the architect chat is never torn down or swapped.
+	 * project-selector changes so the architect session is never torn down or swapped.
 	 */
 	agentWorkspaceId: string | null;
 	hasNoProjects: boolean;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
-	clineSessionContextVersion: number;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
 	workspaceGit: RuntimeGitRepositoryInfo | null;
-	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null;
-	taskChatMessagesByTaskId: Record<string, RuntimeTaskChatMessage[]>;
 	startFreshSessionNonce?: number;
-}
-
-async function stopHomeSidebarTaskSession(workspaceId: string, taskId: string): Promise<void> {
-	try {
-		await getRuntimeTrpcClient(workspaceId).runtime.stopTaskSession.mutate({
-			taskId,
-		});
-	} catch {
-		// Ignore stop errors during stale-session cleanup.
-	}
 }
 
 export function useHomeSidebarAgentPanel({
 	agentWorkspaceId,
 	hasNoProjects,
 	runtimeProjectConfig,
-	clineSessionContextVersion,
 	taskSessions,
 	workspaceGit,
-	latestTaskChatMessage,
-	taskChatMessagesByTaskId,
 	startFreshSessionNonce = 0,
 }: UseHomeSidebarAgentPanelInput): ReactElement | null {
 	const isMobile = useIsMobile();
@@ -91,20 +64,8 @@ export function useHomeSidebarAgentPanel({
 		currentProjectId: agentWorkspaceId,
 		runtimeProjectConfig,
 		workspaceGit,
-		clineSessionContextVersion,
-		sessionSummaries: effectiveSessionSummaries,
-		setSessionSummaries,
 		upsertSessionSummary,
 		startFreshSessionNonce,
-	});
-	const currentTaskIdRef = useRef<string | null>(null);
-
-	useEffect(() => {
-		currentTaskIdRef.current = taskId;
-	}, [taskId]);
-	const { sendTaskChatMessage, loadTaskChatMessages, cancelTaskChatTurn } = useClineChatRuntimeActions({
-		currentProjectId: agentWorkspaceId,
-		onSessionSummary: upsertSessionSummary,
 	});
 
 	const selectedAgentLabel = useMemo(() => {
@@ -118,34 +79,6 @@ export function useHomeSidebarAgentPanel({
 	}, [runtimeProjectConfig]);
 
 	const homeAgentPanelSummary = taskId ? (effectiveSessionSummaries[taskId] ?? null) : null;
-	const homeTaskChatMessages = taskId ? (taskChatMessagesByTaskId[taskId] ?? null) : null;
-	const latestHomeTaskChatMessage = selectLatestTaskChatMessageForTask(taskId, latestTaskChatMessage);
-
-	const handleSendHomeClineChatMessage = useCallback(
-		async (messageTaskId: string, text: string, options?: { mode?: "act" | "plan" }) => {
-			const result = await sendTaskChatMessage(messageTaskId, text, options);
-			if (!result.ok) {
-				return result;
-			}
-			if (agentWorkspaceId) {
-				if (currentTaskIdRef.current !== messageTaskId) {
-					await stopHomeSidebarTaskSession(agentWorkspaceId, messageTaskId);
-				}
-			}
-			return result;
-		},
-		[agentWorkspaceId, sendTaskChatMessage],
-	);
-
-	const handleLoadHomeClineChatMessages = useCallback(
-		async (messageTaskId: string) => await loadTaskChatMessages(messageTaskId),
-		[loadTaskChatMessages],
-	);
-
-	const handleCancelHomeClineChatTurn = useCallback(
-		async (messageTaskId: string) => await cancelTaskChatTurn(messageTaskId),
-		[cancelTaskChatTurn],
-	);
 
 	if (hasNoProjects || !agentWorkspaceId) {
 		return null;
@@ -156,26 +89,6 @@ export function useHomeSidebarAgentPanel({
 			<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 py-6">
 				<Spinner size={20} />
 			</div>
-		);
-	}
-
-	if (panelMode === "chat" && taskId) {
-		return (
-			<ClineAgentChatPanel
-				key={taskId}
-				taskId={taskId}
-				summary={homeAgentPanelSummary ?? createIdleTaskSession(taskId)}
-				defaultMode="act"
-				showComposerModeToggle={false}
-				workspaceId={agentWorkspaceId}
-				runtimeConfig={runtimeProjectConfig}
-				onSendMessage={handleSendHomeClineChatMessage}
-				onCancelTurn={handleCancelHomeClineChatTurn}
-				onLoadMessages={handleLoadHomeClineChatMessages}
-				incomingMessage={latestHomeTaskChatMessage}
-				incomingMessages={homeTaskChatMessages}
-				composerPlaceholder="Ask Cline to add, edit, start, or link tasks"
-			/>
 		);
 	}
 
@@ -196,17 +109,9 @@ export function useHomeSidebarAgentPanel({
 		);
 	}
 
-	if (runtimeProjectConfig.selectedAgentId !== "cline") {
-		return (
-			<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-				No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
-			</div>
-		);
-	}
-
 	return (
 		<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-			Select a Cline provider in Settings to start a home chat session.
+			No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
 		</div>
 	);
 }

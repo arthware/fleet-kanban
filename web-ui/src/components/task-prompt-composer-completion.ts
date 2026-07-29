@@ -1,25 +1,20 @@
-export type ClineComposerCompletionKind = "mention" | "slash";
+export type TaskPromptComposerCompletionKind = "mention" | "slash";
 
-export interface ActiveClineComposerToken {
-	kind: ClineComposerCompletionKind;
+export interface ActiveTaskPromptComposerToken {
+	kind: TaskPromptComposerCompletionKind;
 	start: number;
 	end: number;
 	query: string;
-}
-
-export interface ClineComposerCompletionSuggestion {
-	id: string;
-	kind: ClineComposerCompletionKind;
-	label: string;
-	detail?: string;
-	insertText: string;
 }
 
 function isTokenBoundaryCharacter(value: string | undefined): boolean {
 	return !value || /\s/.test(value);
 }
 
-export function detectActiveClineComposerToken(value: string, cursorIndex: number): ActiveClineComposerToken | null {
+export function detectActiveTaskPromptComposerToken(
+	value: string,
+	cursorIndex: number,
+): ActiveTaskPromptComposerToken | null {
 	if (cursorIndex < 0 || cursorIndex > value.length) {
 		return null;
 	}
@@ -74,13 +69,9 @@ export function buildMentionInsertText(filePath: string): string {
 	return normalizedPath.includes(" ") ? `@"${normalizedPath}"` : `@${normalizedPath}`;
 }
 
-export function buildSlashCommandInsertText(commandName: string): string {
-	return `/${commandName}`;
-}
-
-export function applyClineComposerCompletion(
+export function applyTaskPromptComposerCompletion(
 	value: string,
-	token: ActiveClineComposerToken,
+	token: ActiveTaskPromptComposerToken,
 	replacement: string,
 ): { value: string; cursor: number } {
 	const before = value.slice(0, token.start);

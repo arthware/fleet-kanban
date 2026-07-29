@@ -3,16 +3,14 @@
 // reloads/restarts that identity in place when the selected agent configuration changes.
 
 import { createHomeAgentSessionId } from "@runtime-home-agent-session";
-import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { notifyError, showAppToast } from "@/components/app-toaster";
-import { getRuntimeClineProviderSettings, isNativeClineAgentSelected } from "@/runtime/native-agent";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
 
-type HomeAgentPanelMode = "chat" | "terminal";
+type HomeAgentPanelMode = "terminal";
 
 interface HomeAgentDescriptor {
 	panelMode: HomeAgentPanelMode;
@@ -23,9 +21,6 @@ interface UseHomeAgentSessionInput {
 	currentProjectId: string | null;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
 	workspaceGit: RuntimeGitRepositoryInfo | null;
-	clineSessionContextVersion: number;
-	sessionSummaries: Record<string, RuntimeTaskSessionSummary>;
-	setSessionSummaries: Dispatch<SetStateAction<Record<string, RuntimeTaskSessionSummary>>>;
 	upsertSessionSummary: (summary: RuntimeTaskSessionSummary) => void;
 	startFreshSessionNonce?: number;
 }
@@ -65,9 +60,6 @@ export function useHomeAgentSession({
 	currentProjectId,
 	runtimeProjectConfig,
 	workspaceGit,
-	clineSessionContextVersion,
-	sessionSummaries,
-	setSessionSummaries: _setSessionSummaries,
 	upsertSessionSummary,
 	startFreshSessionNonce = 0,
 }: UseHomeAgentSessionInput): UseHomeAgentSessionResult {
@@ -75,13 +67,10 @@ export function useHomeAgentSession({
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
 	const startedSessionKeysRef = useRef(new Set<string>());
 	const pendingStartRequestIdsRef = useRef(new Map<string, number>());
-	const previousClineSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
-	const previousClineConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
 	const previousTerminalConfigByWorkspaceRef = useRef(new Map<string, RuntimeConfigResponse>());
 	const previousFreshStartNonceByWorkspaceRef = useRef(new Map<string, number>());
 	const nextStartRequestIdRef = useRef(0);
 	const disposedRef = useRef(false);
-	const clineProviderSettings = getRuntimeClineProviderSettings(runtimeProjectConfig);
 
 	useEffect(() => {
 		latestBaseRefRef.current = resolveHomeAgentBaseRef(workspaceGit);
@@ -92,19 +81,13 @@ export function useHomeAgentSession({
 			return null;
 		}
 
-		let panelMode: HomeAgentPanelMode;
-		if (isNativeClineAgentSelected(runtimeProjectConfig.selectedAgentId)) {
-			panelMode = "chat";
-		} else {
-			if (!runtimeProjectConfig.effectiveCommand) {
-				return null;
-			}
-			panelMode = "terminal";
+		if (!runtimeProjectConfig.effectiveCommand) {
+			return null;
 		}
 
 		const taskId = createHomeAgentSessionId(currentProjectId, runtimeProjectConfig.selectedAgentId);
 		return {
-			panelMode,
+			panelMode: "terminal",
 			taskId,
 		};
 	}, [currentProjectId, runtimeProjectConfig]);
@@ -159,77 +142,6 @@ export function useHomeAgentSession({
 			taskId: previousTaskId,
 		});
 	}, [currentProjectId, descriptorTaskId, hasLoadedRuntimeProjectConfig]);
-
-	// When MCP settings or auth change, the runtime bumps the Cline session context version.
-	// Cline provider/model changes do the same. Reload the existing home chat in
-	// place so it keeps the same sidebar task id and messages, but restarts the
-	// underlying Cline session with the fresh runtime config.
-	useEffect(() => {
-		if (!currentProjectId || !descriptor || descriptor.panelMode !== "chat" || !runtimeProjectConfig) {
-			return;
-		}
-
-		const previousVersion = previousClineSessionContextVersionByWorkspaceRef.current.get(currentProjectId);
-		previousClineSessionContextVersionByWorkspaceRef.current.set(currentProjectId, clineSessionContextVersion);
-		const previousConfig = previousClineConfigByWorkspaceRef.current.get(currentProjectId);
-		previousClineConfigByWorkspaceRef.current.set(currentProjectId, runtimeProjectConfig);
-
-		const configChanged =
-			previousConfig !== undefined &&
-			(previousConfig.selectedAgentId !== runtimeProjectConfig.selectedAgentId ||
-				getRuntimeClineProviderSettings(previousConfig).providerId !== clineProviderSettings.providerId ||
-				getRuntimeClineProviderSettings(previousConfig).oauthProvider !== clineProviderSettings.oauthProvider ||
-				getRuntimeClineProviderSettings(previousConfig).modelId !== clineProviderSettings.modelId ||
-				getRuntimeClineProviderSettings(previousConfig).baseUrl !== clineProviderSettings.baseUrl ||
-				getRuntimeClineProviderSettings(previousConfig).reasoningEffort !== clineProviderSettings.reasoningEffort);
-
-		const contextChanged = previousVersion !== undefined && previousVersion !== clineSessionContextVersion;
-		if (!configChanged && !contextChanged) {
-			return;
-		}
-
-		if (!sessionSummaries[descriptor.taskId]) {
-			return;
-		}
-
-		let cancelled = false;
-		void getRuntimeTrpcClient(currentProjectId)
-			.runtime.reloadTaskChatSession.mutate({
-				taskId: descriptor.taskId,
-			})
-			.then((response) => {
-				if (cancelled || disposedRef.current) {
-					return;
-				}
-				if (!response.ok || !response.summary) {
-					throw new Error(response.error ?? "Could not reload home agent session.");
-				}
-				upsertSessionSummary(response.summary);
-			})
-			.catch((error) => {
-				if (cancelled || disposedRef.current) {
-					return;
-				}
-				const message = error instanceof Error ? error.message : String(error);
-				notifyError(message);
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [
-		clineProviderSettings.baseUrl,
-		clineProviderSettings.modelId,
-		clineProviderSettings.oauthProvider,
-		clineProviderSettings.providerId,
-		clineProviderSettings.reasoningEffort,
-		clineSessionContextVersion,
-		currentProjectId,
-		descriptor,
-		runtimeProjectConfig,
-		sessionSummaries,
-		upsertSessionSummary,
-	]);
 
 	// The terminal home-agent identity no longer rotates on an agent/command change
 	// (the task id is derived, not suffixed with the agent). Reload it in place:
@@ -388,7 +300,7 @@ export function useHomeAgentSession({
 				notifyError(message);
 			}
 		})();
-	}, [currentProjectId, descriptor, sessionSummaries, upsertSessionSummary]);
+	}, [currentProjectId, descriptor, upsertSessionSummary]);
 
 	useEffect(() => {
 		return () => {
@@ -396,8 +308,6 @@ export function useHomeAgentSession({
 			desiredTaskIdByWorkspaceRef.current.clear();
 			startedSessionKeysRef.current.clear();
 			pendingStartRequestIdsRef.current.clear();
-			previousClineSessionContextVersionByWorkspaceRef.current.clear();
-			previousClineConfigByWorkspaceRef.current.clear();
 			previousTerminalConfigByWorkspaceRef.current.clear();
 			previousFreshStartNonceByWorkspaceRef.current.clear();
 		};

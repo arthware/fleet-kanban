@@ -698,7 +698,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="cline"
+					selectedAgentId="claude"
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -726,7 +726,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={selection}
 					currentProjectId="workspace-1"
-					selectedAgentId="cline"
+					selectedAgentId="claude"
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -754,7 +754,7 @@ describe("CardDetailView", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "claude",
 						workspacePath: null,
 						pid: null,
 						startedAt: null,
@@ -789,7 +789,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="cline"
+					selectedAgentId="claude"
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
@@ -859,7 +859,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="cline"
+					selectedAgentId="claude"
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -894,7 +894,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="cline"
+					selectedAgentId="claude"
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}

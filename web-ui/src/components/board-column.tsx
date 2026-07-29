@@ -40,7 +40,6 @@ export function BoardColumn({
 	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
-	defaultClineModelId,
 	defaultAgentId,
 }: {
 	column: BoardColumnModel;
@@ -72,7 +71,6 @@ export function BoardColumn({
 	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
-	defaultClineModelId?: string | null;
 	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const canCreate = column.id === "backlog" && onCreateTask;
@@ -196,7 +194,6 @@ export function BoardColumn({
 											workspaceId={workspaceId}
 											workspacePath={workspacePath}
 											taskWorktreesRoot={taskWorktreesRoot}
-											defaultClineModelId={defaultClineModelId}
 											defaultAgentId={defaultAgentId}
 											onSaveTitle={onSaveTitle}
 											onClick={() => {

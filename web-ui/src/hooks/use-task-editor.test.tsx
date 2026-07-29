@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTaskEditor } from "@/hooks/use-task-editor";
-import type { RuntimeAgentId, RuntimeTaskClineSettings } from "@/runtime/types";
+import type { RuntimeAgentId } from "@/runtime/types";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
 
 function createTask(taskId: string, prompt: string, createdAt: number, overrides: Partial<BoardCard> = {}): BoardCard {
@@ -39,7 +39,6 @@ interface HookSnapshot {
 	newTaskImages: TaskImage[];
 	newTaskBranchRef: string;
 	newTaskAgentId: RuntimeAgentId | undefined;
-	newTaskClineSettings: RuntimeTaskClineSettings | undefined;
 	editingTaskId: string | null;
 	editTaskPrompt: string;
 	editTaskStartInPlanMode: boolean;
@@ -56,7 +55,6 @@ interface HookSnapshot {
 	setEditTaskAutoReviewEnabled: (value: boolean) => void;
 	setEditTaskAutoReviewMode: (value: TaskAutoReviewMode) => void;
 	setNewTaskAgentId: (value: RuntimeAgentId | undefined) => void;
-	setNewTaskClineSettings: (value: RuntimeTaskClineSettings | undefined) => void;
 }
 
 function requireSnapshot(snapshot: HookSnapshot | null): HookSnapshot {
@@ -96,7 +94,6 @@ function HookHarness({
 			newTaskImages: editor.newTaskImages,
 			newTaskBranchRef: editor.newTaskBranchRef,
 			newTaskAgentId: editor.newTaskAgentId,
-			newTaskClineSettings: editor.newTaskClineSettings,
 			editingTaskId: editor.editingTaskId,
 			editTaskPrompt: editor.editTaskPrompt,
 			editTaskStartInPlanMode: editor.editTaskStartInPlanMode,
@@ -113,7 +110,6 @@ function HookHarness({
 			setEditTaskAutoReviewEnabled: editor.setEditTaskAutoReviewEnabled,
 			setEditTaskAutoReviewMode: editor.setEditTaskAutoReviewMode,
 			setNewTaskAgentId: editor.setNewTaskAgentId,
-			setNewTaskClineSettings: editor.setNewTaskClineSettings,
 		});
 	}, [
 		board,
@@ -132,7 +128,6 @@ function HookHarness({
 		editor.newTaskImages,
 		editor.newTaskBranchRef,
 		editor.newTaskAgentId,
-		editor.newTaskClineSettings,
 		editor.setEditTaskAutoReviewEnabled,
 		editor.setEditTaskAutoReviewMode,
 		editor.setEditTaskPrompt,
@@ -315,11 +310,6 @@ describe("useTaskEditor", () => {
 		});
 		await act(async () => {
 			requireSnapshot(latestSnapshot).setNewTaskAgentId("codex");
-			requireSnapshot(latestSnapshot).setNewTaskClineSettings({
-				providerId: "provider-abc",
-				modelId: "model-xyz",
-				reasoningEffort: "low",
-			});
 		});
 
 		await act(async () => {});
@@ -337,7 +327,6 @@ describe("useTaskEditor", () => {
 		expect(snapshot.newTaskPrompt).toBe("");
 		expect(snapshot.newTaskBranchRef).toBe("main");
 		expect(snapshot.newTaskAgentId).toBeUndefined();
-		expect(snapshot.newTaskClineSettings).toBeUndefined();
 		expect(snapshot.board.columns[0]?.cards.some((card) => card.prompt === "Create another task")).toBe(true);
 	});
 	it("copies attached images to each split task and clears the draft images", async () => {
@@ -395,41 +384,6 @@ describe("useTaskEditor", () => {
 		expect(requireSnapshot(latestSnapshot).newTaskImages).toEqual([]);
 	});
 
-	it("persists reasoning-only task overrides when model/provider stay inherited", async () => {
-		let latestSnapshot: HookSnapshot | null = null;
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					initialBoard={createBoard()}
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-		});
-
-		await act(async () => {
-			requireSnapshot(latestSnapshot).handleOpenCreateTask();
-		});
-
-		await act(async () => {
-			requireSnapshot(latestSnapshot).setNewTaskPrompt("Reasoning override only");
-			requireSnapshot(latestSnapshot).setNewTaskClineSettings({
-				reasoningEffort: "low",
-			});
-		});
-
-		await act(async () => {
-			requireSnapshot(latestSnapshot).handleCreateTask();
-		});
-
-		const createdCard = requireSnapshot(latestSnapshot).board.columns[0]?.cards[0];
-		expect(createdCard?.clineSettings).toEqual({
-			reasoningEffort: "low",
-		});
-	});
-
 	it("preserves per-task agent/model override fields on each split task", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
@@ -450,11 +404,6 @@ describe("useTaskEditor", () => {
 
 		await act(async () => {
 			requireSnapshot(latestSnapshot).setNewTaskAgentId("codex");
-			requireSnapshot(latestSnapshot).setNewTaskClineSettings({
-				providerId: "provider-abc",
-				modelId: "model-xyz",
-				reasoningEffort: "medium",
-			});
 		});
 
 		let createdTaskIds: string[] = [];
@@ -467,11 +416,6 @@ describe("useTaskEditor", () => {
 		expect(backlogCards).toHaveLength(3);
 		for (const card of backlogCards) {
 			expect(card.agentId).toBe("codex");
-			expect(card.clineSettings).toEqual({
-				providerId: "provider-abc",
-				modelId: "model-xyz",
-				reasoningEffort: "medium",
-			});
 		}
 	});
 });
