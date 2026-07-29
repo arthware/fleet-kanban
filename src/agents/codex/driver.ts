@@ -2,10 +2,25 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import {
+	getRuntimeAgentBinaryCandidates,
+	RUNTIME_AGENT_CATALOG,
+	type RuntimeAgentCatalogEntry,
+} from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import type { AgentDriver, AgentObservationMessage, DriverSessionRef, LaunchIdentityPlan, ObservationRequest } from "../driver";
+import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
+import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
+import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
+import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import type {
+	AgentDriver,
+	AgentObservationMessage,
+	LaunchIdentityPlan,
+	LaunchPlan,
+	ObservationRequest,
+} from "../driver";
 import { supported, unsupported } from "../driver";
+import { hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
@@ -13,9 +28,103 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 		id: "codex",
 		catalog: catalogEntryById("codex"),
 		launch: {
-			preflight: async () => unsupported("codex launch is not bound yet"),
-			prepare: async () => unsupported("codex launch is not bound yet"),
-			applyModel: (args, model) => supported([...args, "--model", model]),
+			preflight: async () => {
+				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
+				if (testFail) {
+					return unsupported(testFail);
+				}
+				const isTest =
+					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
+				if (!isTest) {
+					const candidates = getRuntimeAgentBinaryCandidates("codex");
+					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
+					if (!binary) {
+						return unsupported("binary missing: 'codex' CLI binary not found on PATH");
+					}
+					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
+						return unsupported("not trusted: workspace is not trusted");
+					}
+				}
+				return supported({ ok: true as const });
+			},
+			prepare: async (input) => {
+				const codexArgs = [...input.args];
+				const env: Record<string, string | undefined> = {};
+				const binary = input.binary;
+				const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId, {
+					architectContextPreamble: input.architectContextPreamble ?? undefined,
+				});
+
+				if (!hasCodexConfigOverride(codexArgs, "check_for_update_on_startup")) {
+					codexArgs.push("-c", "check_for_update_on_startup=false");
+				}
+
+				if (input.autonomousModeEnabled && !hasCliOption(codexArgs, "--dangerously-bypass-approvals-and-sandbox")) {
+					codexArgs.push("--dangerously-bypass-approvals-and-sandbox");
+				}
+
+				const codexSessionId = input.agentSessionId?.trim();
+				if (input.resumeSession && codexSessionId) {
+					// Resume the exact prior conversation by id instead of `resume --last`.
+					if (!codexArgs.includes("resume")) {
+						codexArgs.push("resume");
+					}
+					if (!codexArgs.includes(codexSessionId)) {
+						codexArgs.push(codexSessionId);
+					}
+				} else if (input.resumeFromTrash) {
+					if (!codexArgs.includes("resume")) {
+						codexArgs.push("resume");
+					}
+					if (!hasCliOption(codexArgs, "--last")) {
+						codexArgs.push("--last");
+					}
+				}
+
+				if (appendedSystemPrompt && !hasCodexConfigOverride(codexArgs, "developer_instructions")) {
+					codexArgs.push("-c", `developer_instructions=${JSON.stringify(appendedSystemPrompt)}`);
+				}
+
+				// Apply model using applyModel method
+				const finalArgs = [...codexArgs];
+				if (input.agentModel) {
+					if (hasCliOption(finalArgs, "--model") || hasCliOption(finalArgs, "-m")) {
+						// user-supplied model wins
+					} else {
+						finalArgs.push("--model", input.agentModel);
+					}
+				}
+
+				const hasWorkspaceId = input.workspaceId?.trim();
+				if (hasWorkspaceId) {
+					configureCodexHooks(finalArgs);
+					Object.assign(
+						env,
+						createHookRuntimeEnv({
+							taskId: input.taskId,
+							workspaceId: hasWorkspaceId,
+						}),
+					);
+				}
+
+				const prompt = input.prompt;
+				const trimmed = prompt.trim();
+				if (trimmed) {
+					finalArgs.push(trimmed);
+				}
+
+				return supported({
+					binary,
+					args: finalArgs,
+					env,
+				} satisfies LaunchPlan);
+			},
+			applyModel: (args, model) => {
+				if (hasCliOption(args, "--model") || hasCliOption(args, "-m")) {
+					return supported(args);
+				}
+				return supported([...args, "--model", model]);
+			},
 		},
 		identity: {
 			durability: "persisted",
@@ -24,7 +133,8 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 					case "overseer":
 					case "card": {
 						const stored = input.stored?.trim() || null;
-						const resumeSession = (input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
+						const resumeSession =
+							(input.lifecycle === "resumable" || input.lifecycle === "attached") && stored !== null;
 						const agentSessionId = resumeSession ? stored : null;
 						return supported({
 							agentSessionId,

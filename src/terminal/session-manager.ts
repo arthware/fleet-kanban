@@ -1,9 +1,5 @@
-// PTY-backed runtime for non-Cline task sessions and the workspace shell terminal.
-// It owns process lifecycle, terminal protocol filtering, and summary updates
-// for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-
+import { DRIVERS, type DriverSessionRef } from "../agents/driver";
 import type {
 	RuntimeAgentSessionLifecycle,
 	RuntimeTaskHookActivity,
@@ -15,7 +11,6 @@ import type {
 } from "../core/api-contract";
 import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
-import { DRIVERS, type DriverSessionRef } from "../agents/driver";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -23,7 +18,6 @@ import {
 	prepareAgentLaunch,
 } from "./agent-session-adapters";
 import { classifyAgentSessionLifecycle } from "./agent-session-launch";
-import { deriveHomeAgentClaudeSessionId } from "./home-agent-session-id";
 import { locateAgentTranscript } from "./agent-transcript-locator";
 import {
 	hasClaudeWorkspaceTrustPrompt,
@@ -34,6 +28,7 @@ import {
 import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
 import { captureGeminiSessionId } from "./gemini-session-capture";
+import { deriveHomeAgentClaudeSessionId } from "./home-agent-session-id";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
 import { reduceSessionTransition, type SessionTransitionEvent } from "./session-state-machine";
@@ -413,7 +408,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			args: request.args,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
-			prompt: ref.kind === "overseer" ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
+			prompt:
+				ref.kind === "overseer" ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
 			agentModel: request.agentModel,
 			images: request.images,
 			resumeFromTrash: request.resumeFromTrash,
