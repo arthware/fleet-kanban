@@ -8,6 +8,17 @@ Definition of Done names).
 · **Sibling:** [`44010-session-kinds.md`](44010-session-kinds.md) · **Acceptance case:**
 [`95a9d-pi-agent-harness.md`](95a9d-pi-agent-harness.md)
 
+**Operator decisions folded in after review** (settled; not open questions):
+
+1. **Supported harnesses are exactly `claude`, `codex`, `gemini`, `pi`.** Cursor, OpenCode, Droid and
+   Kiro are retired alongside Cline. The accepted trade is *"once we have the pattern, adding a driver
+   is easy"* — which card 7 exists to prove. Costs and effect on the port's generality: §"Why
+   narrowing to four harnesses does not weaken the carve".
+2. **Overseer sessions may run on `claude` and `codex` only.** This turned out to expose a real gap —
+   codex cannot offer today's deterministic-resume guarantee — resolved in §"Overseer identity: the
+   durability gap".
+3. **The conformance suite is a first-class deliverable: the driver TCK.** §"The driver TCK".
+
 **Root cause in one sentence:** there is no boundary between *the agent harness* and *the board*, so
 each harness's native vocabulary (`Stop`, `AfterAgent`, a `›` in the PTY) is translated **directly
 into board-lifecycle verbs** at whichever site happens to need it — which means the same question is
@@ -339,7 +350,8 @@ export interface AgentDriver {
 	readonly control: ControlPort;
 }
 
-export const DRIVERS: Record<RuntimeAgentId, AgentDriver> = { … }; // exhaustive, as ADAPTERS is today
+// Exhaustive, as ADAPTERS is today — but over four ids, not eight (operator decision 1).
+export const DRIVERS: Record<RuntimeAgentId, AgentDriver> = { claude, codex, gemini, pi };
 ```
 
 Capabilities are total and refusable:
@@ -483,6 +495,70 @@ const plan = driver.identity.resolve({
 The manager keeps the orchestration (spawn, wire, emit) and loses the harness knowledge. That is the
 whole shape of the migration in one line of code.
 
+### Overseer identity: the durability gap — decided here, not in card 3
+
+Operator decision 2 (overseers on claude and codex only) exposed a gap the first draft did not answer,
+and it belongs in the design because it is a *contract* question, not an implementation detail.
+
+**The guarantee.** `9e74b48` (#152) gave the architect chat a **deterministic** session id — one that
+can be recomputed from `(workspaceId, generation)` without reading any persisted state — so the
+conversation survives a board restart and cannot be orphaned by a lost or corrupt `sessions.json`.
+
+**Why codex cannot offer it today.** The two harnesses mint identity in structurally different ways:
+
+| Harness | Mechanism | Evidence | Durability |
+|---|---|---|---|
+| claude | **assigns**: the runtime picks the id and launches under it (`--session-id`), resumes with `--resume <id>` | `adapters.ts:806-808`, `:798-800`; `session-manager.ts:358-365` | **deterministic** |
+| codex | **discovers**: codex picks its own rollout id, polled out of `~/.codex/sessions/` after boot (20 × 500 ms) | `session-manager.ts:656-657`; resume via `codex resume <id>` at `adapters.ts:1018-1025` | **persisted** |
+| gemini | discovers, same shape | `session-manager.ts:662-663` | **persisted** |
+| pi | caller-chosen `--session-dir` | `95a9d` §6B | **deterministic** (by construction) |
+
+So a codex overseer carries two concrete weaknesses claude's does not:
+
+- a window of **up to 10 s after launch with no id at all** — a board crash inside it orphans the
+  conversation outright;
+- resume that **depends on `sessions.json` surviving**, which is exactly the dependency #152 was
+  written to remove.
+
+**Decision: option (c), bounded — codex overseers are allowed with an explicitly weaker, declared
+guarantee.** Option (a) (`unsupported()` + policy forbids codex overseers) is rejected because it
+collapses the operator's stated overseer set to claude alone, contradicting decision 2. Option (b) (a
+new durable-identity mechanism for codex) is **not rejected — it is unverified**, and the design must
+not assume it (see the lead in open question 3).
+
+**How it is expressed, and why this shape:**
+
+```ts
+export type IdentityDurability =
+	| "deterministic" // recomputable from (ref, generation); survives loss of persisted state
+	| "persisted"     // resumable only while the stored id survives; a boot window has no id
+	| "none";         // no id-based resume at all
+
+export interface IdentityPort {
+	readonly durability: IdentityDurability;
+	resolve(input: ResolveIdentityInput): Capability<LaunchIdentityPlan>;
+}
+```
+
+The important part is **who owns which fact**:
+
+- The **driver** states a *capability* — `durability`. It is a fact about the CLI and it must be
+  honest: gemini's is `"persisted"`, identical to codex's, because the mechanism is identical.
+- The **session-kind policy** (sibling design) states a *requirement* —
+  `overseer.minimumIdentityDurability = "persisted"`, plus the operator's explicit allow-list.
+
+This matters because it would be tempting to encode "overseers are claude and codex only" *inside the
+drivers*, by having gemini's `identity.resolve` return `unsupported()` for `kind: "overseer"`. That
+would be a **lie**: gemini is technically no less capable than codex here, and the exclusion is an
+operator preference, not a capability. Putting a product decision inside a driver is the precise
+mistake this whole design exists to stop — so the capability fact lives in the driver, the preference
+lives in the policy table, and the TCK asserts the driver told the truth (§"The driver TCK",
+assertion 6).
+
+**Named risk accepted:** a codex architect session can be lost in a way a claude one cannot. The
+mitigation is not code — it is that the weakness is now *declared* rather than discovered, and card 3
+implements a decision instead of making one.
+
 ### Transport-agnosticism, expressed member by member
 
 The four concerns most likely to leak a subprocess, and the contract that keeps them honest:
@@ -511,23 +587,33 @@ scripted list of facts and an in-memory message log. It is:
   than being discovered years later;
 - the harness that lets every layer above the port be tested **without spawning a CLI**, which is
   most of the reason today's manager is untestable;
-- ~200 lines, and it is the reference implementation new driver authors read.
+- **required to pass the TCK itself** (below) — which proves the suite is satisfiable rather than
+  aspirational, and makes the fake the **reference implementation** a new driver author copies;
+- ~200 lines.
 
 It is not optional decoration; it is the load-bearing mitigation for the one risk this design cannot
 otherwise manage.
 
-### Testability: one conformance suite, every driver
+### The driver TCK
+
+The TCK is a **first-class deliverable**, not a test file that falls out of card 2. It
+is an abstract compliance suite runnable against *any* `AgentDriver`, real or fake, and it is the
+artifact that makes "adding a harness is one file" checkable instead of aspirational.
 
 ```ts
-// test/agents/driver-contract.ts
-export function describeDriverContract(driver: AgentDriver, fixtures: DriverFixtures): void;
+// test/agents/tck/driver-tck.ts
+export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures): void;
 
-// test/agents/drivers.contract.test.ts
-const FIXTURES: Record<RuntimeAgentId, DriverFixtures> = { … }; // exhaustive — adding an id breaks the build
+// test/agents/tck/drivers.tck.test.ts
+const FIXTURES: Record<RuntimeAgentId, DriverFixtures> = { claude, codex, gemini, pi };
+// exhaustive — adding an id to the enum breaks the build until fixtures exist
+
+// test/agents/tck/fake-driver.tck.test.ts
+describeDriverTck(fakeDriver, FAKE_FIXTURES); // the suite must be satisfiable; this is the proof
 ```
 
 Each driver supplies **recorded** fixtures — a real captured transcript, real hook payloads, real PTY
-output bytes. The suite asserts, once, for every driver:
+output bytes. The TCK asserts, once, for every driver:
 
 1. **Vocabulary** — every fixture signal maps to a declared `AgentFact`; no fixture produces an
    unmapped native event silently.
@@ -540,10 +626,27 @@ output bytes. The suite asserts, once, for every driver:
 5. **Observation round-trip** — parsing the recorded transcript yields a non-empty, correctly-roled
    message list. **This single assertion would have caught the gemini bug**, because the fixture is a
    real gemini file and the expectation is "not empty".
-6. **Identity round-trip** — `resolve` for each `SessionKind` × lifecycle produces a launchable plan.
+6. **Identity round-trip, with overseer identity made explicit.** `resolve` for each `SessionKind` ×
+   lifecycle produces a launchable plan. For `SessionKind = "overseer"` the driver must **either**
+   produce a resumable plan whose durability matches its declared `identity.durability`, **or** return
+   `unsupported(reason)` with a non-empty reason — and a driver declaring
+   `durability: "deterministic"` must produce the *same* id twice for the same
+   `(ref, generation)`. This is where decision 2 is encoded and enforced: claude proves determinism by
+   round-trip, codex proves it does **not** claim determinism, and no driver can quietly claim a
+   guarantee it cannot keep.
 
-Per-driver quirks stay in per-driver tests. The contract suite is what stops three implementations of
-one meaning from drifting apart unnoticed, which is what happened.
+**Pass condition for a new driver** (this is the TCK's contract, and card 7's acceptance test — not
+prose): a harness is correctly integrated iff, after adding it,
+
+- `describeDriverTck` passes for it with **its own fixtures**, and
+- `git diff --stat` for the change shows **only** `src/agents/<id>/*`, `test/agents/tck/fixtures/<id>/*`,
+  the `FIXTURES` / `DRIVERS` entries, and the `RuntimeAgentId` enum.
+
+Any other file in that diff is a failure of the port's carve, and the correct response is to report it
+rather than work around it.
+
+Per-driver quirks stay in per-driver tests. The TCK is what stops three implementations of one meaning
+from drifting apart unnoticed, which is what happened.
 
 ### Stability failure modes — prevented vs merely surfaced
 
@@ -583,9 +686,17 @@ Under this design, `95a9d`'s integration outline collapses:
 | F · readiness/resume | `runtime-api.ts` edits | `launch.preflight(): Capability<…>` |
 | G · UI | selector list | driven from `DRIVERS` |
 
-**The test:** adding pi must be *one new file in `src/agents/` plus one enum entry*. If a build card
-for pi has to touch `session-manager.ts`, `agent-transcript-reader.ts` or `hooks.ts`, the carve was
-wrong and card 7 in the disposition is where we find out — cheaply, and before the port ossifies.
+**The test**, stated as the TCK's pass condition rather than as prose: pi is correctly integrated iff
+`describeDriverTck(piDriver, PI_FIXTURES)` passes **and** the change's `git diff --stat` touches
+nothing outside `src/agents/pi/*`, `test/agents/tck/fixtures/pi/*`, the `DRIVERS`/`FIXTURES` entries
+and the `RuntimeAgentId` enum. If pi has to touch `session-manager.ts`, `agent-transcript-reader.ts`
+or `hooks.ts`, the carve was wrong and card 7 is where we find out — cheaply, and before the port
+ossifies.
+
+Pi also carries disproportionate weight after the harness narrowing: it is the only supported harness
+that is neither hook-driven nor PTY-scraped, and (with the fake driver) one of only two that do not
+follow claude's launch shape. It is not a nice-to-have acceptance case; it is half the remaining
+pressure on the carve.
 
 Note that `95a9d` step E is the tell: pi needs two *new* fields on `PreparedAgentLaunch` and two new
 branches in `onExit`, for behaviour (`the harness exits at a turn boundary`) that is not exotic at
@@ -611,7 +722,7 @@ reducer, thin drivers — and it is what exists today in degraded form (`hooks-a
 2. It cannot be transport-agnostic. "Native event" for a PTY driver is a hook payload; for an SDK
    driver it is an SDK event object; for codex it is a regex match on bytes. There is no type that
    spans them except `unknown`.
-3. It makes the conformance suite impossible. You cannot write one test that every driver passes if
+3. It makes the TCK impossible. You cannot write one test that every driver passes if
    each driver's output is in a different vocabulary.
 
 **Chosen: the driver normalizes.** The driver is the *only* place that knows both the harness's
@@ -641,7 +752,7 @@ detecting "the harness printed its prompt" is a fact about the harness. What doe
 "remember to ask" failure that the sibling design diagnoses for session kinds: the compiler is happy,
 the harness is wrong, nothing fails. A required member returning `unsupported("gemini CLI has no
 --model flag")` costs one line per driver and converts an omission into a documented decision that the
-conformance suite can assert against.
+TCK can assert against.
 
 ### Why merge the catalog into the driver
 
@@ -653,11 +764,61 @@ behavioural fact. One module per harness, exporting one `AgentDriver` whose `cat
 the static facts, means the four places become one and the "is it installed" question becomes a driver
 member the Cline-shaped special case can't survive.
 
-### Why the seven `<agent>-*.ts` files become driver-private
+### Why narrowing to four harnesses does not weaken the carve
 
-`claude-permission-strategy.ts`, `claude-workspace-trust.ts`, `codex-workspace-trust.ts`,
-`codex-hook-config.ts`, `codex-session-capture.ts`, `gemini-session-capture.ts`, `opencode-paths.ts` —
-a flat directory of quirks with no owner, importable from anywhere. Moving them under
+Operator decision 1 retires cursor, opencode, droid and kiro alongside cline. The operator asked
+directly whether dropping to one transport-shape family weakens the port's generality, and whether the
+fake driver plus pi still cover enough shape. Taking those in order.
+
+**What it saves, measured.** The four retiring adapters are 323 lines
+(`cursor` 74, `opencode` 60, `droid` 84, `kiro` 105 — `adapters.ts:926-999, 1394-1642`) plus 575 lines
+of helper modules (`opencode-paths.ts` 89, `droid-hook-events.ts` 168, `kiro-hook-events.ts` 318),
+plus four catalog entries, four `runtime-config.ts:81-88` clauses, and their web-ui onboarding
+entries — on top of Cline's 7,098 source and 4,262 test lines. More importantly it halves the
+recurring cost of everything downstream: every `Record<RuntimeAgentId, …>` needs four answers rather
+than eight, and the TCK needs four fixture sets rather than eight. Cards 3–6 are roughly half the work
+they were.
+
+**Does it weaken the port's generality? Partly — and precisely where it matters least.** Break the
+diversity down by the axis each sub-port is stressed on:
+
+| Axis | Before (8 harnesses) | After (4 + fake) | Effect |
+|---|---|---|---|
+| **Transport** | 2 shapes: PTY subprocess (7) + in-process SDK (cline) | 2 shapes: PTY subprocess (3) + in-process (fake) + pi's exit-at-turn-boundary subprocess | **Unchanged.** All four retired harnesses were plain PTY subprocesses; they contributed *zero* transport variety. The only non-subprocess implementation was always going to be cline-or-fake |
+| **Signal mechanism** | 3 kinds, but 6 of 8 harnesses were variants of claude's config-time hooks | 4 kinds across 4 harnesses: claude = hooks bound to distinct events · gemini = one hook classified at runtime · codex = rollout watcher **and** PTY scraping · pi = artifact tailing + exit | **Stronger per harness.** The retired four added instances, not kinds |
+| **Identity** | assign / discover / none | assign (claude) · discover (codex, gemini) · caller-chosen dir (pi) | **Preserved, and now load-bearing** — this axis is exactly what decision 2 turned on |
+| **Observation** | 3 transcript formats (claude, codex, gemini); the other five were unknown to the locator | 4 (claude, codex, gemini, pi) | **Improved** — the retired four contributed nothing here |
+| **Launch shape** | 8 shapes: settings.json, plugin file, `-c` overrides, hook scripts, agent config, system settings path | 4 | **Genuinely thinner.** This is the real loss |
+
+So the honest answer: the only sub-port that loses meaningful pressure is **`launch`** — and `launch`
+is the one surface that already has an interface and 56 tests (§"Coverage follows the contract"). It
+is the lowest-risk member in the port. The axes that actually decide whether the carve is right —
+signal mechanism, identity, transport — are preserved or improved.
+
+**Do the fake driver and pi cover enough?** Yes, and they are load-bearing rather than incidental:
+
+- The **fake driver** is the *only* thing keeping transport-agnosticism honest, before and after the
+  narrowing. Retiring cline did not change that; retiring four PTY harnesses does not either. This is
+  the strongest argument for treating it as a deliverable rather than a test helper.
+- **Pi** is the only harness that is neither hook-driven nor PTY-scraped, and the only one that exits
+  at turn boundaries. It stresses `signals` and `control` in ways claude/codex/gemini do not.
+
+**The cost to name.** With four drivers, `DRIVERS` is small enough that someone will reasonably ask
+"why an interface at all — why not just four files?". The answer is card 7 and the TCK: the interface
+is not there to manage four harnesses today, it is there so the fifth costs one file and one fixture
+set. If that is not true when pi lands, the question is fair and we should hear it.
+
+**Second-order effect worth flagging:** the narrowing makes card 1 bigger and riskier (Cline plus four
+adapters plus their web-ui surfaces in one card), while making cards 3–6 smaller. That is a good trade
+— card 1 is mostly deletion and is verifiable by "the board still starts and runs a claude card" — but
+it should be scoped and reviewed as the largest card in the plan, not the easiest.
+
+### Why the remaining `<agent>-*.ts` files become driver-private
+
+After the narrowing, six survive: `claude-permission-strategy.ts`, `claude-workspace-trust.ts`,
+`codex-workspace-trust.ts`, `codex-hook-config.ts`, `codex-session-capture.ts`,
+`gemini-session-capture.ts` (`opencode-paths.ts` is deleted by card 1) — a flat directory of quirks
+with no owner, importable from anywhere. Moving them under
 `src/agents/<id>/` makes the blast radius of a harness quirk exactly one harness. `claude-workspace-trust.ts:74`
 (`agentId === "claude" && isTaskWorktreePath(cwd)`) stops needing to ask which agent it is, because
 only the claude driver can reach it.
@@ -667,7 +828,7 @@ only the claude driver can reach it.
 | Option | Cost | Risk | Verdict |
 |---|---|---|---|
 | **1. Incremental refactor in place** — widen `AgentSessionAdapter` site by site | Lowest per step | Each widening is another optional field, another manager branch. This is what produced `PreparedAgentLaunch`'s two detector fields and `95a9d`'s request for two more. No point at which a contract exists to test against | **Rejected.** It is indistinguishable from what we already do, and the four wake-rule patches are the evidence of where it leads |
-| **2. Strangler-fig** — build the port + conformance suite + fake driver behind the existing surface, migrate one concern at a time across all harnesses, delete the old path as each lands | Highest total, spread over ~7 shippable cards; every card green | The seam between old and new during migration; `session-manager.ts` is 1,305 lines and hot | **Recommended** |
+| **2. Strangler-fig** — build the port + TCK + fake driver behind the existing surface, migrate one concern at a time across all harnesses, delete the old path as each lands | Highest total, spread over ~7 shippable cards; every card green | The seam between old and new during migration; `session-manager.ts` is 1,305 lines and hot | **Recommended** |
 | **3. Big-bang rewrite** of `src/terminal/` + the state machine | Shortest total if it works | Behaviour is **not pinned** (see below). A rewrite reproduces unpinned behaviour badly, and there is no way to ship it incrementally — the board is dogfooding itself on this runtime, so a bad landing costs the team its tooling | **Rejected** |
 
 **Why not big-bang, specifically.** The card asks not to assume incrementalism is right, and the
@@ -689,8 +850,10 @@ nothing.
 4. per-harness transcript parse fidelity — **pin the *desired* behaviour for gemini, not the current
    one**, since the current one is the bug.
 5. claude deterministic overseer session id + resume (`:357-365`).
-6. droid device-attribute suppression (`:621`) and the gemini 300 ms submit delay — small, but they
-   are exactly the kind of undocumented quirk a rewrite silently drops.
+6. the gemini 300 ms submit delay (`adapters.ts:1080`) and codex's bracketed-paste Enter bookkeeping —
+   small, but exactly the kind of undocumented quirk a rewrite silently drops. (Droid's
+   device-attribute suppression at `:621` was on this list before operator decision 1; it is now
+   deleted by card 1 instead of pinned, which is the narrowing paying for itself.)
 7. **The gemini stall itself**, per §"what I can and cannot confirm" — one live session, captured.
 
 **Why Cline's retirement is step one rather than a side quest.** It is the largest available
@@ -767,17 +930,31 @@ instead, which makes B strictly smaller.
   today — but it is friction, and someone will feel it.
 - **Churn on the hottest file in the runtime.** `session-manager.ts` is 1,305 lines and every card
   from 3 onward touches it.
-- **The fake driver is code we maintain** that ships no user value directly. Its value is entirely in
-  what it prevents.
+- **The fake driver and the TCK are code we maintain** that ship no user value directly. Their value
+  is entirely in what they prevent — and after the harness narrowing the fake driver is the *only*
+  thing keeping transport-agnosticism honest, so it cannot be the thing that gets trimmed when the
+  plan runs long.
+- **Four harnesses walk away** (operator decision 1). Anyone using cursor, opencode, droid or kiro
+  loses them at card 1, and the `launch` sub-port loses half its shape variety
+  (§"Why narrowing to four harnesses does not weaken the carve"). The accepted trade is that
+  re-adding one becomes a driver file plus a fixture set — which card 7 is the proof of, and which is
+  unproven until card 7 lands.
+- **Codex overseers get a weaker durability guarantee than claude ones**
+  (§"Overseer identity: the durability gap"). Declared rather than hidden, but a real reduction
+  against #152's intent.
 
 **Is there a cheaper design that gets 80%?** Yes, and it should be said plainly: **cards 0, 1, 4 and 5
-alone** — characterize, retire Cline, make transcript/usage dispatch a table, and normalize the signal
-vocabulary — would remove the gemini transcript bug, the gemini double-hop, the `to_review`-at-the-edge
-defect and one of the three wake-rule copies, at maybe 40% of the total cost. What it would *not* buy
-is the property the card actually asks for: **adding a harness is one file**. Launch, identity and
-control would still be scattered, and pi would still need to touch `session-manager.ts`. If the
-operator wants the stability win and not the extensibility win, that subset is the honest smaller
-scope — and it is a legitimate choice, not a degraded one.
+alone** — characterize, retire the five unsupported harnesses, make transcript/usage dispatch a table,
+and normalize the signal vocabulary — would remove the gemini transcript bug, the gemini double-hop,
+the `to_review`-at-the-edge defect and one of the three wake-rule copies, at maybe 40% of the total
+cost. Operator decision 1 makes this subset *cheaper still*, since card 1 grows and cards 3/6 are the
+ones dropped. What it would *not* buy is the property the card actually asks for: **adding a harness
+is one file** — and after narrowing to four harnesses that property is the whole justification for the
+narrowing, since re-adding cursor or droid is now a driver-file exercise or it is nothing. Launch,
+identity and control would still be scattered, pi would still need to touch `session-manager.ts`, and
+there would be no TCK to check the claim. If the operator wants the stability win and not the
+extensibility win, that subset is the honest smaller scope — but note it and decision 1 pull in
+opposite directions, and that tension should be resolved deliberately rather than by drift.
 
 ### Rejected alternatives
 
@@ -818,21 +995,32 @@ we will not be able to tell which one broke the board.
    candidate mechanisms (no redundancy; two-process delivery) and rejects the card's traced chain as
    non-differentiating. This must be settled by one captured live session before card 5 is scoped.
    **Recommendation:** first task of card 0.
-2. **Is `progress` (`activity`) worth keeping as a fact at all?** It never moves the board; it only
+2. **Can codex be given a durable identity at spawn?** If yes, codex overseers upgrade from
+   `"persisted"` to `"deterministic"` and the weakness named in §"Overseer identity" disappears.
+   There is a **concrete lead, not yet a mechanism**: `codex resume` accepts *"Session id (UUID) or
+   session name"*, and the binary carries `/name` and `/rename` slash commands plus the string
+   `"config when a session name is given"` — so codex sessions are nameable and resolvable by name.
+   What I could **not** verify is whether a name can be set non-interactively at launch: there is no
+   `--session-name` flag in `codex --help`, and I did not find a `-c` config key for it. Settle with
+   one experiment (launch codex with a candidate `-c` key, then `codex resume <name>`). **If it
+   works, the fix is a one-line change to the codex driver's `durability` and `resolve`, and no
+   change above the port** — which is itself a small, real test of the carve. Assigned to card 3;
+   the design does not depend on the answer.
+3. **Is `progress` (`activity`) worth keeping as a fact at all?** It never moves the board; it only
    feeds `latestHookActivity` for display. It could be a separate, lower-priority channel rather than
    a `SessionSignal` variant, which would make the fact vocabulary purely lifecycle. Leaning towards
    keeping it as a variant for one delivery path, but it is a real choice.
-3. **Where does auto-restart policy sit?** `shouldAutoRestart` (`session-manager.ts`) is board policy,
+4. **Where does auto-restart policy sit?** `shouldAutoRestart` (`session-manager.ts`) is board policy,
    but pi needs `autoRestartOnExit: false` (`95a9d` §6B) which is a harness fact. Proposed split: the
    driver reports `session.ended{outcome: "completed"}` vs `"failed"`, and the *policy* decides — so
    pi needs no flag. Needs checking against pi's real exit behaviour.
-4. **How much of `web-ui` does the Cline retirement take?** 23 files touch it. Card 1 should scope
+5. **How much of `web-ui` does the Cline retirement take?** 23 files touch it. Card 1 should scope
    this explicitly; a half-removed chat panel is worse than either end state.
-5. **Does `RuntimeHookEvent` stay on the wire?** It is the persistence/wire boundary
+6. **Does `RuntimeHookEvent` stay on the wire?** It is the persistence/wire boundary
    (Constitution Article 7), so changes must be additive. Proposal: it survives as the hook CLI's
    transport encoding, `to_needs_input` is added additively, and the runtime's vocabulary is
    `AgentFact`. Confirm no persisted state carries `RuntimeHookEvent` values.
-6. **GitHub #180 (column moves in a browser `useEffect`)** is out of scope and this design does not
+7. **GitHub #180 (column moves in a browser `useEffect`)** is out of scope and this design does not
    fix it. It does remove the excuse: once the server distinguishes `turn.ended` from
    `attention.required`, it has the information a server-side column move needs, which it does not
    have today. Worth noting when #180 is scoped; not a dependency.
@@ -846,13 +1034,16 @@ we will not be able to tell which one broke the board.
 | # | Card | Scope | Agent | Depends on | Risk |
 |---|---|---|---|---|---|
 | **0** | Characterize | Golden fixtures + tests for the seven unpinned behaviours in §"What must be pinned". No behaviour change. Includes the **one live gemini session capture** that settles open question 1. | codex | — | Low; high information |
-| **1** | Retire Cline | Delete `src/cline-sdk/` (17 modules), the `cline` adapter + catalog entry, the `useClinePath` fork (`runtime-api.ts:612`), the second wake-rule copy, and the dead `web-ui` surfaces. | codex | — | **Medium-high** — wide, but mechanical and mostly deletion |
-| **2** | Define the port | `src/agents/driver.ts`, `session-signal.ts`, `Capability<T>`, `describeDriverContract`, **the fake driver**. No production wiring. | codex | — | Low — green by construction |
-| **3** | Bind launch + identity | Fold `ADAPTERS` + `agent-catalog` + the four id-minting sites into `DRIVERS`. `session-manager.ts:359` becomes `identity.resolve`. | codex | 2, `44010` card A | Medium |
+| **1** | Retire Cline **+ cursor / opencode / droid / kiro** | Delete `src/cline-sdk/` (17 modules), the `useClinePath` fork (`runtime-api.ts:612`), the second wake-rule copy; delete the `cursor`/`opencode`/`droid`/`kiro` adapters (323 lines, `adapters.ts:926-999, 1394-1642`), `opencode-paths.ts`, `droid-hook-events.ts`, `kiro-hook-events.ts` (575 lines), their catalog + `runtime-config.ts:81-88` + `agent-registry.ts` entries, and all five harnesses' `web-ui` surfaces. Leaves `RuntimeAgentId` = claude, codex, gemini. | codex | — | **Highest of the deletion cards** — the largest card in the plan; scope and review it as such. Verifiable by "the board still starts and runs a claude card and a codex card" |
+| **2** | Define the port + **the TCK** | `src/agents/driver.ts`, `session-signal.ts`, `Capability<T>`, `IdentityDurability`, `describeDriverTck`, **the fake driver — which must pass the TCK**. No production wiring. | codex | — | Low — green by construction |
+| **3** | Bind launch + identity | Fold `ADAPTERS` + `agent-catalog` + the id-minting sites into `DRIVERS` (**3 drivers**). `session-manager.ts:359` becomes `identity.resolve`. Encode the durability decision (§"Overseer identity") and settle **open question 2** with the one codex experiment. | codex | 2, `44010` card A | Medium |
 | **4** | Bind observation | `locate` + `parse` + `usage` become `observe`. **Fixes the gemini transcript bug and gemini usage.** | codex | 2 | Low, high value |
 | **5** | Bind signals | Drivers emit `AgentFact`; `hooks-api.ts` stops mapping to board verbs; delete `isNeedsInputReviewHook`; delete gemini's `spawnBackgroundKanban` double-hop; move `codexPromptDetector` + the manager's three codex branches into the codex driver. | codex | 2, 4, **`44010` card B** | **Highest** — the load-bearing seam |
-| **6** | Bind control + environment | steer/submit/interrupt/restart-eligibility/terminal quirks; the seven `<agent>-*.ts` files become driver-private. | codex | 3, 5 | Medium |
-| **7** | Add pi | One driver file + one enum entry. **If any other file must change, the carve was wrong** — report that rather than working around it. | codex | 6 | Low; it is the test |
+| **6** | Bind control + environment | steer/submit/interrupt/restart-eligibility/terminal quirks; the remaining six `<agent>-*.ts` files become driver-private. | codex | 3, 5 | Medium |
+| **7** | Add pi | One driver file + one fixture set. **Pass condition is the TCK's, not a judgement call:** `describeDriverTck(piDriver, PI_FIXTURES)` green **and** `git diff --stat` touching nothing outside `src/agents/pi/*`, `test/agents/tck/fixtures/pi/*`, the `DRIVERS`/`FIXTURES` entries and the `RuntimeAgentId` enum. If any other file must change, **report it as a carve failure** rather than working around it. | codex | 6 | Low; it is the test |
+
+Cards 3–6 are scoped to **four drivers** (claude, codex, gemini after card 1; pi from card 7), not
+eight — roughly half the work each was before operator decision 1.
 
 **Parallelism.** 0, 1 and 2 are independent and can run together. 3 and 4 can run together once 2
 lands. 5 is the serialization point.
@@ -864,6 +1055,11 @@ lands. 5 is the serialization point.
 
 - Card 0: the gemini live-session capture is a *deliverable*, not a nice-to-have. Everything in card 5
   is scoped from it.
+- Card 1: this is the biggest card in the plan and it removes five harnesses at once. It is mostly
+  deletion, but it must land *whole* — a half-removed Cline chat panel or a catalog entry with no
+  adapter is worse than either end state (open question 5).
+- Card 3: settling **open question 2** (can codex be given a durable identity at spawn?) is part of
+  the card, not a follow-up. One experiment; a positive result is a one-line driver change.
 - Card 4: pin the *desired* gemini parse behaviour; the current behaviour is the bug (evidence in
   §Verdict).
 - Cards 3–6: update `docs/architecture/concepts/agent-catalog.md`, delete
