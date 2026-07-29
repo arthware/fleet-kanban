@@ -5,13 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ClineSdkAccumulatedUsage } from "../../../src/cline-sdk/sdk-runtime-boundary";
-import {
-	deriveClaudeUsage,
-	deriveCodexUsage,
-	mapClineUsage,
-	readAgentUsage,
-} from "../../../src/terminal/agent-usage-reader";
+import { deriveClaudeUsage, deriveCodexUsage, readAgentUsage } from "../../../src/terminal/agent-usage-reader";
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
@@ -190,29 +184,6 @@ describe("deriveCodexUsage", () => {
 	});
 });
 
-describe("mapClineUsage", () => {
-	// Cline reports usage through its SDK, not a transcript. The normalized shape
-	// is a straight pass-through of `SessionAccumulatedUsage` — the only renames
-	// are cacheWriteTokens → cacheCreationTokens and totalCost → costUsd.
-	it("passes SDK usage through, renaming cache-write and carrying Cline's own cost", () => {
-		const sdkUsage: ClineSdkAccumulatedUsage = {
-			inputTokens: 1200,
-			outputTokens: 340,
-			cacheReadTokens: 5000,
-			cacheWriteTokens: 800,
-			totalCost: 0.0123,
-		};
-
-		expect(mapClineUsage(sdkUsage)).toEqual({
-			inputTokens: 1200,
-			outputTokens: 340,
-			cacheReadTokens: 5000,
-			cacheCreationTokens: 800,
-			costUsd: 0.0123,
-		});
-	});
-});
-
 describe("readAgentUsage — claude", () => {
 	let homePath = "";
 
@@ -322,18 +293,6 @@ describe("readAgentUsage — codex", () => {
 
 	it("reports absent with null usage when the rollout is gone", async () => {
 		const result = await readAgentUsage({ agentId: "codex", sessionId: "missing", homePath });
-
-		expect(result).toEqual({ present: false, usage: null });
-	});
-});
-
-describe("readAgentUsage — cline", () => {
-	// Cline usage is SDK-reported, not transcript-derived, and the derive-on-read
-	// endpoint holds no live ClineCore handle to call getAccumulatedUsage — so the
-	// reader returns absent until that handle is reachable (mapClineUsage is the
-	// ready mapping). This pins the documented deferral.
-	it("returns absent because no live SDK handle is reachable on the read path", async () => {
-		const result = await readAgentUsage({ agentId: "cline", sessionId: "any", homePath: tmpdir() });
 
 		expect(result).toEqual({ present: false, usage: null });
 	});

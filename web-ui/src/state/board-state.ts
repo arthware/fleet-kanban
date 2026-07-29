@@ -675,8 +675,7 @@ export function applyTaskDetailClineSettingsSelection(
 		return { board, updated: false };
 	}
 
-	const hasExplicitTaskAgentSettings =
-		selection.card.agentId === "cline" || selection.card.clineSettings !== undefined;
+	const hasExplicitTaskAgentSettings = selection.card.clineSettings !== undefined;
 	if (!hasExplicitTaskAgentSettings) {
 		return { board, updated: false };
 	}
@@ -712,8 +711,7 @@ export function applyTaskDetailClineSettingsChange(
 		return { board, updated: false };
 	}
 
-	const hasExplicitTaskAgentSettings =
-		selection.card.agentId === "cline" || selection.card.clineSettings !== undefined;
+	const hasExplicitTaskAgentSettings = selection.card.clineSettings !== undefined;
 	if (!hasExplicitTaskAgentSettings) {
 		return { board, updated: false };
 	}
@@ -725,7 +723,7 @@ export function applyTaskDetailClineSettingsChange(
 	}
 
 	return applyTaskDetailClineSettingsSelection(board, taskId, {
-		agentId: "cline",
+		agentId: "claude",
 		clineSettings: {
 			providerId: nextTaskProviderId,
 			modelId: nextTaskModelId,

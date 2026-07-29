@@ -9,7 +9,6 @@ import {
 	type AgentTranscriptLoadResult,
 	AgentTranscriptPanel,
 } from "@/components/detail-panels/agent-transcript-panel";
-import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/components/detail-panels/cline-agent-chat-panel";
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
@@ -17,19 +16,14 @@ import { ExternalIssueBadge } from "@/components/external-issue-badge";
 import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
-import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
-import type { ClineChatMessage } from "@/hooks/use-cline-chat-session";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ResizableBottomPane } from "@/resize/resizable-bottom-pane";
 import { ResizeHandle } from "@/resize/resize-handle";
 import { useCardDetailLayout } from "@/resize/use-card-detail-layout";
 import { useResizeDrag } from "@/resize/use-resize-drag";
-import { isNativeClineAgentSelected } from "@/runtime/native-agent";
 import type {
 	RuntimeAgentId,
-	RuntimeClineReasoningEffort,
 	RuntimeConfigResponse,
-	RuntimeTaskSessionMode,
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesMode,
 } from "@/runtime/types";
@@ -357,13 +351,8 @@ export function CardDetailView({
 	moveToTrashLoadingById,
 	onAddReviewComments,
 	onSendReviewComments,
-	onSendClineChatMessage,
-	onCancelClineChatTurn,
-	onLoadClineChatMessages,
 	onLoadTaskTranscript,
 	onResumeTask,
-	latestClineChatMessage,
-	streamedClineChatMessages,
 	onMoveToTrash,
 	isMoveToTrashLoading,
 	gitHistoryPanel,
@@ -382,8 +371,6 @@ export function CardDetailView({
 	isBottomTerminalExpanded,
 	onBottomTerminalToggleExpand,
 	isDocumentVisible = true,
-	onClineSettingsSaved,
-	onTaskClineSettingsChanged,
 }: {
 	selection: CardSelection;
 	currentProjectId: string | null;
@@ -416,17 +403,8 @@ export function CardDetailView({
 	moveToTrashLoadingById?: Record<string, boolean>;
 	onAddReviewComments?: (taskId: string, text: string) => void;
 	onSendReviewComments?: (taskId: string, text: string) => void;
-	onSendClineChatMessage?: (
-		taskId: string,
-		text: string,
-		options?: { mode?: RuntimeTaskSessionMode },
-	) => Promise<ClineChatActionResult>;
-	onCancelClineChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
-	onLoadClineChatMessages?: (taskId: string) => Promise<ClineChatMessage[] | null>;
 	onLoadTaskTranscript?: (taskId: string) => Promise<AgentTranscriptLoadResult | null>;
 	onResumeTask?: (card: BoardCard) => void;
-	latestClineChatMessage?: ClineChatMessage | null;
-	streamedClineChatMessages?: ClineChatMessage[] | null;
 	onMoveToTrash: () => void;
 	isMoveToTrashLoading?: boolean;
 	gitHistoryPanel?: ReactNode;
@@ -445,12 +423,6 @@ export function CardDetailView({
 	isBottomTerminalExpanded?: boolean;
 	onBottomTerminalToggleExpand?: () => void;
 	isDocumentVisible?: boolean;
-	onClineSettingsSaved?: () => void;
-	onTaskClineSettingsChanged?: (settings: {
-		providerId: string;
-		modelId: string;
-		reasoningEffort: RuntimeClineReasoningEffort | "";
-	}) => void;
 }): React.ReactElement {
 	const isMobile = useIsMobile();
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
@@ -473,11 +445,8 @@ export function CardDetailView({
 	const { startDrag: startAgentPanelResize } = useResizeDrag();
 	const { startDrag: startDetailDiffResize } = useResizeDrag();
 	const detailLayoutRef = useRef<HTMLDivElement | null>(null);
-	const hasExplicitTaskClineSettings =
-		selection.card.agentId === "cline" || selection.card.clineSettings !== undefined;
 	const mainRowRef = useRef<HTMLDivElement | null>(null);
 	const detailDiffRowRef = useRef<HTMLDivElement | null>(null);
-	const clineAgentChatPanelRef = useRef<ClineAgentChatPanelHandle | null>(null);
 
 	const handleSeparatorMouseDown = useResizeHandler(
 		detailLayoutRef,
@@ -537,13 +506,10 @@ export function CardDetailView({
 	const isTaskTerminalEnabled =
 		(selection.column.id === "in_progress" || selection.column.id === "review") &&
 		hasLiveTerminalSession(sessionSummary);
-	const effectiveTaskAgentId = sessionSummary?.agentId ?? selection.card.agentId ?? selectedAgentId;
-	const showClineAgentChatPanel = isNativeClineAgentSelected(effectiveTaskAgentId);
 	// A non-Cline task whose PTY has exited but that captured a CLI session id is an
 	// *ended, durable* session: render its persisted transcript read-only instead of
 	// the blank dead terminal. `agentSessionId` gates out never-started backlog cards.
 	const showEndedTranscript =
-		!showClineAgentChatPanel &&
 		Boolean(onLoadTaskTranscript) &&
 		Boolean(sessionSummary?.agentSessionId) &&
 		!hasLiveTerminalSession(sessionSummary);
@@ -639,69 +605,22 @@ export function CardDetailView({
 
 	const handleAddDiffComments = useCallback(
 		(formatted: string) => {
-			if (showClineAgentChatPanel) {
-				clineAgentChatPanelRef.current?.appendToDraft(formatted);
-				setIsDiffExpanded(false);
-				return;
-			}
 			onAddReviewComments?.(selection.card.id, formatted);
 		},
-		[onAddReviewComments, selection.card.id, showClineAgentChatPanel],
+		[onAddReviewComments, selection.card.id],
 	);
 
 	const handleSendDiffComments = useCallback(
 		(formatted: string) => {
-			if (showClineAgentChatPanel) {
-				void clineAgentChatPanelRef.current?.sendText(formatted);
-				setIsDiffExpanded(false);
-				return;
-			}
 			onSendReviewComments?.(selection.card.id, formatted);
 			setIsDiffExpanded(false);
 		},
-		[onSendReviewComments, selection.card.id, showClineAgentChatPanel],
+		[onSendReviewComments, selection.card.id],
 	);
 
 	const showBottomTerminal = bottomTerminalOpen && !!bottomTerminalTaskId;
 
-	const agentChatPanel = showClineAgentChatPanel ? (
-		<ClineAgentChatPanel
-			ref={clineAgentChatPanelRef}
-			taskId={selection.card.id}
-			summary={sessionSummary}
-			taskColumnId={selection.column.id}
-			defaultMode="act"
-			showComposerModeToggle={false}
-			workspaceId={currentProjectId}
-			runtimeConfig={runtimeConfig}
-			taskClineSettings={selection.card.clineSettings}
-			taskHasExplicitClineSettings={hasExplicitTaskClineSettings}
-			onClineSettingsSaved={onClineSettingsSaved}
-			onTaskClineSettingsChanged={onTaskClineSettingsChanged}
-			onSendMessage={onSendClineChatMessage}
-			onCancelTurn={onCancelClineChatTurn}
-			onLoadMessages={onLoadClineChatMessages}
-			incomingMessages={streamedClineChatMessages}
-			incomingMessage={latestClineChatMessage}
-			onCommit={onAgentCommitTask ? () => onAgentCommitTask(selection.card.id) : undefined}
-			onOpenPr={onAgentOpenPrTask ? () => onAgentOpenPrTask(selection.card.id) : undefined}
-			isCommitLoading={agentCommitTaskLoadingById?.[selection.card.id] ?? false}
-			isOpenPrLoading={agentOpenPrTaskLoadingById?.[selection.card.id] ?? false}
-			showMoveToTrash={showMoveToTrashActions}
-			onMoveToTrash={onMoveToTrash}
-			isMoveToTrashLoading={isMoveToTrashLoading}
-			onCancelAutomaticAction={
-				selection.card.autoReviewEnabled === true && onCancelAutomaticTaskAction
-					? () => onCancelAutomaticTaskAction(selection.card.id)
-					: undefined
-			}
-			cancelAutomaticActionLabel={
-				selection.card.autoReviewEnabled === true
-					? getTaskAutoReviewCancelButtonLabel(selection.card.autoReviewMode)
-					: null
-			}
-		/>
-	) : showEndedTranscript && onLoadTaskTranscript ? (
+	const agentChatPanel = showEndedTranscript && onLoadTaskTranscript ? (
 		<AgentTranscriptPanel
 			taskId={selection.card.id}
 			summary={sessionSummary ?? null}

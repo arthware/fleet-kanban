@@ -101,17 +101,15 @@ export const runtimeSlashCommandsResponseSchema = z.object({
 });
 export type RuntimeSlashCommandsResponse = z.infer<typeof runtimeSlashCommandsResponseSchema>;
 
-export const runtimeAgentIdSchema = z.enum([
-	"claude",
-	"codex",
-	"cursor",
-	"gemini",
-	"opencode",
-	"droid",
-	"kiro",
-	"cline",
-]);
+export const runtimeAgentIdSchema = z.enum(["claude", "codex", "gemini"]);
 export type RuntimeAgentId = z.infer<typeof runtimeAgentIdSchema>;
+const runtimeRetiredAgentIdSchema = z.enum(["cursor", "opencode", "droid", "kiro", "cline"]);
+const runtimePersistedAgentIdSchema = z
+	.union([runtimeAgentIdSchema, runtimeRetiredAgentIdSchema])
+	.transform((agentId): RuntimeAgentId => {
+		const parsed = runtimeAgentIdSchema.safeParse(agentId);
+		return parsed.success ? parsed.data : "claude";
+	});
 
 const runtimeBoardColumnIdEnum = z.enum(["backlog", "in_progress", "review", "done", "trash"]);
 export const runtimeBoardColumnIdSchema = runtimeBoardColumnIdEnum;
@@ -204,7 +202,7 @@ export const runtimeBoardCardSchema = z
 		autoReviewEnabled: z.boolean().optional(),
 		autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
 		images: z.array(runtimeTaskImageSchema).optional(),
-		agentId: runtimeAgentIdSchema.optional(),
+		agentId: runtimePersistedAgentIdSchema.optional(),
 		// Per-card model for the CLI-agent launch path (claude/codex/…). Distinct
 		// from clineSettings (the Cline-SDK path). Passed to the agent CLI as its
 		// native --model flag so mechanical cards can run a cheaper model. Optional
@@ -407,7 +405,7 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	taskId: z.string(),
 	state: runtimeTaskSessionStateSchema,
 	mode: runtimeTaskSessionModeSchema.nullable().optional(),
-	agentId: runtimeAgentIdSchema.nullable(),
+	agentId: runtimePersistedAgentIdSchema.nullable(),
 	workspacePath: z.string().nullable(),
 	pid: z.number().nullable(),
 	startedAt: z.number().nullable(),

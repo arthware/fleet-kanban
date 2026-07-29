@@ -30,16 +30,7 @@ export interface RenderAppendSystemPromptOptions {
 	architectContextPreamble?: string;
 }
 
-const APPEND_PROMPT_AGENT_IDS: readonly RuntimeAgentId[] = [
-	"claude",
-	"codex",
-	"cline",
-	"cursor",
-	"droid",
-	"kiro",
-	"gemini",
-	"opencode",
-];
+const APPEND_PROMPT_AGENT_IDS: readonly RuntimeAgentId[] = ["claude", "codex", "gemini"];
 
 function isRuntimeAgentId(value: string): value is RuntimeAgentId {
 	return APPEND_PROMPT_AGENT_IDS.includes(value as RuntimeAgentId);
@@ -59,22 +50,12 @@ function resolveHomeAgentId(taskId: string): RuntimeAgentId | null {
 
 function renderLinearSetupGuidanceForAgent(agentId: RuntimeAgentId | null): string {
 	switch (agentId) {
-		case "cline":
-			return "- If Linear MCP is not available in the current agent (Cline), direct the user to open settings and go to the MCP section where they can add the Linear integration.";
 		case "claude":
 			return "- If Linear MCP is not available in the current agent (Claude Code), suggest running: `claude mcp add --transport http --scope user linear https://mcp.linear.app/mcp`";
 		case "codex":
 			return "- If Linear MCP is not available in the current agent (OpenAI Codex), suggest running: `codex mcp add linear --url https://mcp.linear.app/mcp`";
-		case "cursor":
-			return "- If Linear MCP is not available in the current agent (Cursor Agent), suggest adding `linear` in `.cursor/mcp.json` or `~/.cursor/mcp.json`, then run: `cursor-agent mcp login linear` (or `agent mcp login linear` if `cursor-agent` is not available)";
 		case "gemini":
 			return "- If Linear MCP is not available in the current agent (Gemini CLI), suggest running: `gemini mcp add linear https://mcp.linear.app/mcp --transport http --scope user`";
-		case "opencode":
-			return "- If Linear MCP is not available in the current agent (OpenCode), suggest running `opencode mcp add`, then use name `linear` and URL `https://mcp.linear.app/mcp`.";
-		case "droid":
-			return "- If Linear MCP is not available in the current agent (Droid), suggest running: `droid mcp add linear https://mcp.linear.app/mcp --type http`";
-		case "kiro":
-			return "- If Linear MCP is not available in the current agent (Kiro CLI), suggest running: `kiro-cli mcp add --name linear --url https://mcp.linear.app/mcp --scope global`";
 		default:
 			return "- If Linear MCP is not available, provide setup instructions for the active agent only, then continue once OAuth is complete.";
 	}

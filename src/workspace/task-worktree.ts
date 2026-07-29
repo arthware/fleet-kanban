@@ -1,7 +1,6 @@
 import { access, lstat, mkdir, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createKanbanClineLogger } from "../cline-sdk/cline-runtime-logger";
 import { loadRuntimeConfig } from "../config/runtime-config";
 import type {
 	RuntimeAgentId,
@@ -33,7 +32,12 @@ const KANBAN_TASK_WORKTREE_SETUP_LOCKFILE_NAME = "kanban-task-worktree-setup.loc
 const TASK_PATCH_FILE_SUFFIX = ".patch";
 const WORKTREE_SKILLS_RELATIVE_PATH = ".agents/skills";
 const WORKTREE_CLAUDE_SKILLS_RELATIVE_PATH = ".claude/skills";
-const LOGGER = createKanbanClineLogger({ component: "worktree-post-create" });
+const LOGGER = {
+	log: (message: string, fields?: Record<string, unknown>) => {
+		const suffix = fields ? ` ${JSON.stringify(fields)}` : "";
+		process.stderr.write(`[kanban] ${message}${suffix}\n`);
+	},
+};
 
 /**
  * Where a card's agent harness discovers its skills inside the worktree.

@@ -1871,7 +1871,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--base-ref <branch>", "Task base branch/ref.")
 		.option("--auto-review-enabled [value]", "Enable auto-review behavior (true|false). Flag-only implies true.")
 		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
-		.option("--agent-id <id>", "Agent override: cline | claude | codex | droid | gemini | opencode | default.")
+		.option("--agent-id <id>", "Agent override: claude | codex | gemini | default.")
 		.option(
 			"--agent-model <id>",
 			"Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Passed as the agent's native --model.",
@@ -1885,18 +1885,6 @@ export function registerTaskCommand(program: Command): void {
 			"External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.",
 		)
 		.option("--issue <ref>", "Alias for --external-issue.")
-		.option(
-			"--cline-provider <id>",
-			'Cline provider override (e.g. anthropic, openai, cline). Use "default" for workspace default.',
-		)
-		.option(
-			"--cline-model <id>",
-			'Cline model override (e.g. claude-sonnet-4-20250514). Use "default" for workspace default.',
-		)
-		.option(
-			"--cline-reasoning-effort <level>",
-			"Cline reasoning effort override: default | low | medium | high | xhigh.",
-		)
 		.action(
 			async (options: {
 				title?: string;
@@ -1915,9 +1903,6 @@ export function registerTaskCommand(program: Command): void {
 				idOnly?: boolean;
 				externalIssue?: string;
 				issue?: string;
-				clineProvider?: string;
-				clineModel?: string;
-				clineReasoningEffort?: string;
 			}) => {
 				await runTaskCommand(
 					async () => {
@@ -1949,11 +1934,6 @@ export function registerTaskCommand(program: Command): void {
 							skill: resolved.skill,
 							cardType: resolved.cardType,
 							externalIssueRef: resolved.externalIssueRef,
-							clineSettings: buildTaskClineSettingsForCreate({
-								providerId: parseOptionalStringOrDefault(options.clineProvider) ?? undefined,
-								modelId: parseOptionalStringOrDefault(options.clineModel) ?? undefined,
-								reasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),
-							}),
 						});
 						return await applyTaskCardLinks(created, resolved.links, options.projectPath);
 					},
@@ -1976,7 +1956,7 @@ export function registerTaskCommand(program: Command): void {
 		.option("--auto-review-mode <mode>", "Auto-review mode: pr.", parseAutoReviewMode)
 		.option(
 			"--agent-id <id>",
-			'Agent override: cline | claude | codex | droid | gemini | opencode. Use "default" to clear.',
+			'Agent override: claude | codex | gemini. Use "default" to clear.',
 		)
 		.option(
 			"--agent-model <id>",
@@ -1988,15 +1968,6 @@ export function registerTaskCommand(program: Command): void {
 			'External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Use "default" to clear. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.',
 		)
 		.option("--issue <ref>", "Alias for --external-issue.")
-		.option(
-			"--cline-provider <id>",
-			'Cline provider override (e.g. anthropic, openai, cline). Use "default" to clear.',
-		)
-		.option("--cline-model <id>", 'Cline model override (e.g. claude-sonnet-4-20250514). Use "default" to clear.')
-		.option(
-			"--cline-reasoning-effort <level>",
-			'Cline reasoning effort override: default | low | medium | high | xhigh. Use "inherit" to clear.',
-		)
 		.action(
 			async (options: {
 				taskId?: string;
@@ -2011,9 +1982,6 @@ export function registerTaskCommand(program: Command): void {
 				skill?: string;
 				externalIssue?: string;
 				issue?: string;
-				clineProvider?: string;
-				clineModel?: string;
-				clineReasoningEffort?: string;
 			}) => {
 				await runTaskCommand(
 					async () =>
@@ -2030,9 +1998,6 @@ export function registerTaskCommand(program: Command): void {
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							skill: parseOptionalStringOrDefault(options.skill),
 							externalIssueRef: parseOptionalStringOrDefault(options.externalIssue ?? options.issue),
-							clineProviderId: parseOptionalStringOrDefault(options.clineProvider),
-							clineModelId: parseOptionalStringOrDefault(options.clineModel),
-							clineReasoningEffort: parseTaskClineReasoningEffort(options.clineReasoningEffort),
 						}),
 				);
 			},

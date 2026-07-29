@@ -1,6 +1,5 @@
 import { Draggable } from "@hello-pangea/dnd";
 import { getRuntimeAgentCatalogEntry } from "@runtime-agent-catalog";
-import { formatClineToolCallLabel } from "@runtime-cline-tool-call-display";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
 import {
 	AlertCircle,
@@ -81,9 +80,6 @@ const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 };
 
 function resolveAgentModelDisplayName(agentId: RuntimeAgentId | null, modelId: string): string {
-	if (agentId === "cline") {
-		return resolveClineModelDisplayName(modelId);
-	}
 	return KNOWN_MODEL_DISPLAY_NAMES[modelId] ?? modelId;
 }
 
@@ -161,7 +157,7 @@ function resolveToolCallLabel(
 		if (!toolInputSummary && !parsedSummary) {
 			return null;
 		}
-		return formatClineToolCallLabel(toolName, toolInputSummary ?? parsedSummary);
+		return toolInputSummary ?? parsedSummary;
 	}
 	if (!activityText) {
 		return null;
@@ -170,7 +166,7 @@ function resolveToolCallLabel(
 	if (!parsed) {
 		return null;
 	}
-	return formatClineToolCallLabel(parsed.toolName, parsed.toolInputSummary);
+	return parsed.toolInputSummary ? `${parsed.toolName}: ${parsed.toolInputSummary}` : parsed.toolName;
 }
 
 function isCardCreditLimitError(summary: RuntimeTaskSessionSummary | undefined): boolean {
@@ -295,16 +291,6 @@ function resolveAgentBadgeInfo(
 		colorClasses = "border-status-green/30 bg-status-green/10 text-status-green";
 	} else if (agentId === "gemini") {
 		colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue";
-	} else if (agentId === "cursor") {
-		colorClasses = "border-status-purple/30 bg-status-purple/10 text-status-purple";
-	} else if (agentId === "cline") {
-		colorClasses = "border-status-cyan/30 bg-status-cyan/10 text-status-cyan";
-	} else if (agentId === "droid") {
-		colorClasses = "border-status-gold/30 bg-status-gold/10 text-status-gold";
-	} else if (agentId === "kiro") {
-		colorClasses = "border-status-violet/30 bg-status-violet/10 text-status-violet";
-	} else if (agentId === "opencode") {
-		colorClasses = "border-status-lime/30 bg-status-lime/10 text-status-lime";
 	}
 
 	if (isTrashCard) {

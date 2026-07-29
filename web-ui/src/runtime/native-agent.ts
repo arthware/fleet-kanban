@@ -8,7 +8,7 @@ import type {
 } from "@/runtime/types";
 
 export function isNativeClineAgentSelected(agentId: RuntimeAgentId | null | undefined): boolean {
-	return agentId === "cline";
+	return false;
 }
 
 export function getRuntimeClineProviderSettings(
@@ -67,14 +67,6 @@ export function isTaskAgentSetupSatisfied(
 ): boolean | null {
 	if (!config) {
 		return null;
-	}
-	if (isNativeClineAgentSelected(config.selectedAgentId)) {
-		if (isClineProviderAuthenticated(getRuntimeClineProviderSettings(config))) {
-			return true;
-		}
-		return config.agents.some(
-			(agent) => agent.id !== "cline" && isRuntimeAgentLaunchSupported(agent.id) && agent.installed,
-		);
 	}
 	return config.agents.some((agent) => isRuntimeAgentLaunchSupported(agent.id) && agent.installed);
 }

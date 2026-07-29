@@ -93,14 +93,13 @@ function getCuratedDefinitions(runtimeConfig: RuntimeConfigState, detected: stri
 		const hasDetectedBinary = getRuntimeAgentBinaryCandidates(entry.id).some((candidate) =>
 			detectedSet.has(candidate),
 		);
-		const isInstalled = entry.id === "cline" ? true : hasDetectedBinary;
 		return {
 			id: entry.id,
 			label: entry.label,
 			binary,
 			command,
 			defaultArgs,
-			installed: isInstalled,
+			installed: hasDetectedBinary,
 			configured: runtimeConfig.selectedAgentId === entry.id,
 		};
 	});
@@ -112,7 +111,7 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 		return null;
 	}
 	const testAgentBinary = process.env[TEST_AGENT_BINARY_ENV]?.trim();
-	if (testAgentBinary && selected.id !== "cline") {
+	if (testAgentBinary) {
 		const args = parseTestAgentArgs(process.env[TEST_AGENT_ARGS_ENV]);
 		return {
 			agentId: selected.id,

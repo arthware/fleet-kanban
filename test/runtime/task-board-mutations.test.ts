@@ -358,7 +358,7 @@ describe("per-task agent/model/provider overrides", () => {
 			{
 				prompt: "Dumb task",
 				baseRef: "main",
-				agentId: "cline",
+				agentId: "claude",
 				clineSettings: {
 					providerId: "anthropic",
 					modelId: "claude-sonnet-4-20250514",
@@ -368,7 +368,7 @@ describe("per-task agent/model/provider overrides", () => {
 			() => "aaaaa111",
 		);
 
-		expect(created.task.agentId).toBe("cline");
+		expect(created.task.agentId).toBe("claude");
 		expect(created.task.clineSettings).toEqual({
 			providerId: "anthropic",
 			modelId: "claude-sonnet-4-20250514",

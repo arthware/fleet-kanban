@@ -37,52 +37,6 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		supportsAgentModelOverride: true,
 	},
 	{
-		id: "cursor",
-		label: "Cursor Agent",
-		shortLabel: "Cursor",
-		binary: "cursor-agent",
-		binaryAliases: ["agent"],
-		baseArgs: [],
-		autonomousArgs: ["--force"],
-		installUrl: "https://cursor.com/docs/cli/overview",
-	},
-	{
-		id: "cline",
-		label: "Cline",
-		shortLabel: "Cline",
-		binary: "cline",
-		baseArgs: [],
-		autonomousArgs: ["--auto-approve-all"],
-		installUrl: "https://github.com/cline/cline",
-	},
-	{
-		id: "opencode",
-		label: "OpenCode",
-		shortLabel: "OpenCode",
-		binary: "opencode",
-		baseArgs: [],
-		autonomousArgs: [],
-		installUrl: "https://github.com/sst/opencode",
-	},
-	{
-		id: "droid",
-		label: "Factory Droid",
-		shortLabel: "Droid",
-		binary: "droid",
-		baseArgs: [],
-		autonomousArgs: ["--auto", "high"],
-		installUrl: "https://docs.factory.ai/cli/getting-started/quickstart",
-	},
-	{
-		id: "kiro",
-		label: "Kiro",
-		shortLabel: "Kiro",
-		binary: "kiro-cli",
-		baseArgs: ["chat"],
-		autonomousArgs: ["--trust-all-tools"],
-		installUrl: "https://kiro.dev",
-	},
-	{
 		id: "gemini",
 		label: "Gemini CLI",
 		shortLabel: "Gemini",
@@ -93,18 +47,7 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	},
 ];
 
-// Temporarily keep launch support scoped to the core agent set.
-// Re-enable additional CLIs by uncommenting entries below when ready.
-export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = [
-	"cline",
-	"claude",
-	"codex",
-	"cursor",
-	"droid",
-	"kiro",
-	// "opencode",
-	"gemini",
-];
+export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = ["claude", "codex", "gemini"];
 
 const RUNTIME_LAUNCH_SUPPORTED_AGENT_ID_SET = new Set<RuntimeAgentId>(RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS);
 

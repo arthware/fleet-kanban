@@ -53,8 +53,8 @@ const CONFIG_FILENAME = "config.json";
 const PROJECT_CONFIG_PARENT_DIR = ".cline";
 const PROJECT_CONFIG_DIR = "kanban";
 const PROJECT_CONFIG_FILENAME = "config.json";
-const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
-const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "cursor", "codex", "droid", "kiro", "gemini"];
+const DEFAULT_AGENT_ID: RuntimeAgentId = "claude";
+const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex", "gemini"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_WORKTREE_POST_CREATE_TIMEOUT_MS = 300_000;
@@ -78,14 +78,7 @@ function getRuntimeHomePath(): string {
 
 function normalizeAgentId(agentId: RuntimeAgentId | string | null | undefined): RuntimeAgentId {
 	if (
-		(agentId === "claude" ||
-			agentId === "codex" ||
-			agentId === "cursor" ||
-			agentId === "gemini" ||
-			agentId === "opencode" ||
-			agentId === "droid" ||
-			agentId === "kiro" ||
-			agentId === "cline") &&
+		(agentId === "claude" || agentId === "codex" || agentId === "gemini") &&
 		isRuntimeAgentLaunchSupported(agentId)
 	) {
 		return agentId;

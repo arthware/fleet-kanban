@@ -341,7 +341,6 @@ describe("CLI-style workspace state notify", () => {
 				});
 				const api = createWorkspaceApi({
 					ensureTerminalManagerForWorkspace: vi.fn(),
-					getScopedClineTaskSessionService: vi.fn(),
 					broadcastRuntimeWorkspaceStateUpdated: stream.hub.broadcastRuntimeWorkspaceStateUpdated,
 					broadcastRuntimeProjectsUpdated: stream.hub.broadcastRuntimeProjectsUpdated,
 					buildWorkspaceStateSnapshot: vi.fn(),
@@ -422,7 +421,6 @@ describe("workspace state broadcast while metadata refresh is blocked", () => {
 			});
 			const api = createWorkspaceApi({
 				ensureTerminalManagerForWorkspace: vi.fn(),
-				getScopedClineTaskSessionService: vi.fn(),
 				broadcastRuntimeWorkspaceStateUpdated: stream.hub.broadcastRuntimeWorkspaceStateUpdated,
 				broadcastRuntimeProjectsUpdated: stream.hub.broadcastRuntimeProjectsUpdated,
 				buildWorkspaceStateSnapshot: vi.fn(),

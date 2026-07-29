@@ -346,6 +346,35 @@ describe.sequential("workspace trash archive", () => {
 });
 
 describe.sequential("workspace agent session reconciliation", () => {
+	it("given retired agent ids are persisted, when the workspace loads, then sessions and cards fall back to Claude", async () => {
+		// given
+		const context = await loadWorkspaceContext(repoPath);
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [
+					{
+						...createCard("task-card"),
+						agentId: "cursor" as RuntimeBoardCard["agentId"],
+					},
+				],
+			}),
+		);
+		await writeSessionsJson(context.workspaceId, {
+			"task-session": {
+				...createSession("task-session"),
+				agentId: "kiro",
+			},
+		});
+
+		// when
+		const state = await loadWorkspaceState(repoPath);
+
+		// then
+		expect(state.board.columns[0]?.cards[0]?.agentId).toBe("claude");
+		expect(state.sessions["task-session"]?.agentId).toBe("claude");
+	});
+
 	it("normalizes dead running sessions, reaps dead and foreign home agents, and is idempotent", async () => {
 		const context = await loadWorkspaceContext(repoPath);
 		const otherRepoPath = join(tempRoot, "other-repo");
