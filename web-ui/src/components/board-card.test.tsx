@@ -117,7 +117,7 @@ function createSummary(
 	return {
 		taskId: "task-1",
 		state,
-		agentId: "cline",
+		agentId: "claude",
 		workspacePath: "/tmp/worktree",
 		pid: null,
 		startedAt: 1,
@@ -616,7 +616,7 @@ describe("BoardCard", () => {
 
 	it("shows cyan classes for a Cline agent card", async () => {
 		await act(async () => {
-			root.render(<BoardCard card={createCard({ agentId: "cline" })} index={0} columnId="backlog" />);
+			root.render(<BoardCard card={createCard({ agentId: "claude" })} index={0} columnId="backlog" />);
 		});
 
 		expect(container.textContent).toContain("Cline default");
@@ -753,7 +753,7 @@ describe("BoardCard", () => {
 			root.render(
 				<BoardCard
 					card={createCard({
-						agentId: "cline",
+						agentId: "claude",
 						clineSettings: {
 							modelId: "openai/gpt-5.5",
 							reasoningEffort: "low",
@@ -781,7 +781,6 @@ describe("BoardCard", () => {
 					})}
 					index={0}
 					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
 				/>,
 			);
 		});
@@ -812,12 +811,11 @@ describe("BoardCard", () => {
 			root.render(
 				<BoardCard
 					card={createCard({
-						agentId: "cline",
+						agentId: "claude",
 						clineSettings: {},
 					})}
 					index={0}
 					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
 				/>,
 			);
 		});
@@ -837,7 +835,6 @@ describe("BoardCard", () => {
 					})}
 					index={0}
 					columnId="backlog"
-					defaultClineModelId="openai/gpt-5.5"
 				/>,
 			);
 		});
@@ -851,7 +848,7 @@ describe("BoardCard", () => {
 			root.render(
 				<BoardCard
 					card={createCard({
-						agentId: "cline",
+						agentId: "claude",
 						clineSettings: {
 							modelId: "openai/gpt-5.5",
 						},
@@ -876,7 +873,7 @@ describe("BoardCard", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "claude",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),
@@ -941,7 +938,7 @@ describe("BoardCard", () => {
 					index={0}
 					columnId="in_progress"
 					sessionSummary={createSummary("running", {
-						agentId: "kiro",
+						agentId: "gemini",
 						latestHookActivity: {
 							activityText: "Using fs_write: src/index.ts",
 							toolName: "fs_write",
@@ -949,7 +946,7 @@ describe("BoardCard", () => {
 							finalMessage: null,
 							hookEventName: "preToolUse",
 							notificationType: null,
-							source: "kiro",
+							source: "gemini",
 						},
 					})}
 				/>,
@@ -994,7 +991,7 @@ describe("BoardCard", () => {
 					index={0}
 					columnId="review"
 					sessionSummary={createSummary("awaiting_review", {
-						agentId: "kiro",
+						agentId: "gemini",
 						latestHookActivity: {
 							activityText: "Waiting for review",
 							toolName: "fs_write",
@@ -1002,7 +999,7 @@ describe("BoardCard", () => {
 							finalMessage: null,
 							hookEventName: "stop",
 							notificationType: null,
-							source: "kiro",
+							source: "gemini",
 						},
 					})}
 				/>,
@@ -1023,7 +1020,7 @@ describe("BoardCard", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "claude",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),

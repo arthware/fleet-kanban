@@ -146,7 +146,7 @@ const markdownComponents: Components = {
 	},
 };
 
-export function ClineMarkdownContent({ content }: { content: string }): ReactElement {
+export function MarkdownContent({ content }: { content: string }): ReactElement {
 	if (!content.trim()) {
 		return <span className="text-text-secondary" />;
 	}

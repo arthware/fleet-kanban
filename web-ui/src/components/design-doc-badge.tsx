@@ -1,7 +1,7 @@
 import { FileText } from "lucide-react";
 import { type MouseEvent, type ReactElement, useState } from "react";
 
-import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
+import { MarkdownContent } from "@/components/detail-panels/markdown-content";
 import { cn } from "@/components/ui/cn";
 import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
 import { type TaskDesignDocCard, useTaskDesignDoc } from "@/hooks/use-task-design-doc";
@@ -61,7 +61,7 @@ export function DesignDocBadge({
 			<Dialog open={isOpen} onOpenChange={setIsOpen} contentClassName="max-w-3xl" contentAriaDescribedBy={undefined}>
 				<DialogHeader title="Design Doc" icon={<FileText size={16} />} />
 				<DialogBody className="max-h-[72vh] bg-surface-1">
-					<ClineMarkdownContent content={designDoc.data.content} />
+					<MarkdownContent content={designDoc.data.content} />
 				</DialogBody>
 			</Dialog>
 		</>

@@ -752,7 +752,7 @@ describe("board dependency state", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "backlog", {
 			prompt: "Task with cline overrides",
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "openai/gpt-5.4",
@@ -872,7 +872,7 @@ describe("board dependency state", () => {
 		}
 
 		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-opus-4.6",
@@ -888,7 +888,7 @@ describe("board dependency state", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "backlog", {
 			prompt: "Task with explicit override",
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-sonnet-4.6",
@@ -903,7 +903,7 @@ describe("board dependency state", () => {
 		}
 
 		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-opus-4.6",
@@ -924,7 +924,7 @@ describe("board dependency state", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "backlog", {
 			prompt: "Task with agent model",
-			agentId: "cline",
+			agentId: "claude",
 			agentModel: "claude-haiku-4-5",
 			baseRef: "main",
 		});
@@ -935,7 +935,7 @@ describe("board dependency state", () => {
 		}
 
 		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-opus-4.6",
@@ -988,7 +988,7 @@ describe("board dependency state", () => {
 		}
 
 		const result = applyTaskDetailClineSettingsSelection(board, task.id, {
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-opus-4.6",
@@ -1039,7 +1039,7 @@ describe("board dependency state", () => {
 		let board = createInitialBoardData();
 		board = addTaskToColumn(board, "backlog", {
 			prompt: "Task pinned to cline",
-			agentId: "cline",
+			agentId: "claude",
 			clineSettings: {
 				providerId: "openrouter",
 				modelId: "anthropic/claude-sonnet-4.6",

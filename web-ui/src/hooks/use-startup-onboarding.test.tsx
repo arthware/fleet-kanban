@@ -143,7 +143,7 @@ describe("useStartupOnboarding", () => {
 			root.render(
 				<HookHarness
 					currentProjectId={null}
-					runtimeProjectConfig={createRuntimeConfigResponse("cline")}
+					runtimeProjectConfig={createRuntimeConfigResponse("claude")}
 					isRuntimeProjectConfigLoading={false}
 					isTaskAgentReady={false}
 					onSnapshot={(snapshot) => {
@@ -199,7 +199,7 @@ describe("useStartupOnboarding", () => {
 			root.render(
 				<HookHarness
 					currentProjectId={"project-1"}
-					runtimeProjectConfig={createRuntimeConfigResponse("cline")}
+					runtimeProjectConfig={createRuntimeConfigResponse("claude")}
 					isRuntimeProjectConfigLoading={false}
 					isTaskAgentReady={false}
 					onSnapshot={(snapshot) => {
@@ -225,7 +225,7 @@ describe("useStartupOnboarding", () => {
 			root.render(
 				<HookHarness
 					currentProjectId={null}
-					runtimeProjectConfig={createRuntimeConfigResponse("cline")}
+					runtimeProjectConfig={createRuntimeConfigResponse("claude")}
 					isRuntimeProjectConfigLoading={false}
 					isTaskAgentReady={false}
 					onSnapshot={(snapshot) => {
@@ -259,7 +259,7 @@ describe("useStartupOnboarding", () => {
 			root.render(
 				<HookHarness
 					currentProjectId={"project-1"}
-					runtimeProjectConfig={createRuntimeConfigResponse("cline")}
+					runtimeProjectConfig={createRuntimeConfigResponse("claude")}
 					isRuntimeProjectConfigLoading={false}
 					isTaskAgentReady={false}
 					onSnapshot={(nextSnapshot) => {

@@ -395,7 +395,7 @@ describe("useTaskSessions", () => {
 		await act(async () => {
 			await latestSnapshot?.startTaskSession({
 				...createTask(),
-				agentId: "cline",
+				agentId: "claude",
 				clineSettings: {
 					providerId: "openrouter",
 					modelId: "anthropic/claude-opus-4.6",
