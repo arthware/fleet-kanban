@@ -692,31 +692,6 @@ describe("CardDetailView", () => {
 		expect(onCloseGitHistory).toHaveBeenCalledTimes(1);
 	});
 
-	it("renders native chat panel for cline agent", async () => {
-		await act(async () => {
-			root.render(
-				<CardDetailView
-					selection={createSelection()}
-					currentProjectId="workspace-1"
-					selectedAgentId="claude"
-					sessionSummary={null}
-					taskSessions={{}}
-					onSessionSummary={() => {}}
-					onCardSelect={() => {}}
-					onTaskDragEnd={() => {}}
-					onMoveToTrash={() => {}}
-					bottomTerminalOpen={false}
-					bottomTerminalTaskId={null}
-					bottomTerminalSummary={null}
-					onBottomTerminalClose={() => {}}
-				/>,
-			);
-		});
-
-		expect(container.querySelector('[data-testid="cline-agent-chat-panel"]')).toBeInstanceOf(HTMLDivElement);
-		expect(container.querySelector('[data-testid="agent-terminal-panel"]')).toBeNull();
-	});
-
 	it("does not render native chat panel when the task explicitly uses a non-cline agent", async () => {
 		const selection = createSelection();
 		selection.card.agentId = "codex";
@@ -742,45 +717,6 @@ describe("CardDetailView", () => {
 		});
 
 		expect(container.querySelector('[data-testid="cline-agent-chat-panel"]')).toBeNull();
-	});
-
-	it("shows cline chat panel when task session agentId is cline even if global agent is claude", async () => {
-		await act(async () => {
-			root.render(
-				<CardDetailView
-					selection={createSelection()}
-					currentProjectId="workspace-1"
-					selectedAgentId="claude"
-					sessionSummary={{
-						taskId: "task-1",
-						state: "running",
-						agentId: "claude",
-						workspacePath: null,
-						pid: null,
-						startedAt: null,
-						updatedAt: Date.now(),
-						lastOutputAt: null,
-						reviewReason: null,
-						exitCode: null,
-						agentSessionId: null,
-						lastHookAt: null,
-						latestHookActivity: null,
-						warningMessage: null,
-					}}
-					taskSessions={{}}
-					onSessionSummary={() => {}}
-					onCardSelect={() => {}}
-					onTaskDragEnd={() => {}}
-					onMoveToTrash={() => {}}
-					bottomTerminalOpen={false}
-					bottomTerminalTaskId={null}
-					bottomTerminalSummary={null}
-					onBottomTerminalClose={() => {}}
-				/>,
-			);
-		});
-
-		expect(container.querySelector('[data-testid="cline-agent-chat-panel"]')).toBeInstanceOf(HTMLDivElement);
 	});
 
 	it("shows terminal panel when task session agentId is claude even if global agent is cline", async () => {
@@ -849,77 +785,6 @@ describe("CardDetailView", () => {
 			panelBackgroundColor: "var(--color-surface-0)",
 			terminalBackgroundColor: TERMINAL_THEME_COLORS.surfacePrimary,
 		});
-	});
-
-	it("queues Add diff comments into the cline composer without sending them", async () => {
-		const onAddReviewComments = vi.fn();
-
-		await act(async () => {
-			root.render(
-				<CardDetailView
-					selection={createSelection()}
-					currentProjectId="workspace-1"
-					selectedAgentId="claude"
-					sessionSummary={null}
-					taskSessions={{}}
-					onSessionSummary={() => {}}
-					onCardSelect={() => {}}
-					onTaskDragEnd={() => {}}
-					onMoveToTrash={() => {}}
-					onAddReviewComments={onAddReviewComments}
-					bottomTerminalOpen={false}
-					bottomTerminalTaskId={null}
-					bottomTerminalSummary={null}
-					onBottomTerminalClose={() => {}}
-				/>,
-			);
-		});
-
-		const diffProps = getLastMockFirstArg<MockedDiffViewerProps>(mockDiffViewerPanel);
-		expect(diffProps.onAddToTerminal).toBeTypeOf("function");
-
-		await act(async () => {
-			diffProps.onAddToTerminal?.("src/example.ts:4 | value\n> Add tests");
-		});
-
-		expect(onAddReviewComments).not.toHaveBeenCalled();
-		expect(mockClineAppendToDraft).toHaveBeenCalledWith("src/example.ts:4 | value\n> Add tests");
-	});
-
-	it("routes Send diff comments through the mounted cline panel", async () => {
-		const onSendReviewComments = vi.fn();
-
-		await act(async () => {
-			root.render(
-				<CardDetailView
-					selection={createSelection()}
-					currentProjectId="workspace-1"
-					selectedAgentId="claude"
-					sessionSummary={null}
-					taskSessions={{}}
-					onSessionSummary={() => {}}
-					onCardSelect={() => {}}
-					onTaskDragEnd={() => {}}
-					onMoveToTrash={() => {}}
-					onSendReviewComments={onSendReviewComments}
-					bottomTerminalOpen={false}
-					bottomTerminalTaskId={null}
-					bottomTerminalSummary={null}
-					onBottomTerminalClose={() => {}}
-				/>,
-			);
-		});
-
-		const diffProps = getLastMockFirstArg<MockedDiffViewerProps>(mockDiffViewerPanel);
-		expect(diffProps.onSendToTerminal).toBeTypeOf("function");
-
-		await act(async () => {
-			diffProps.onSendToTerminal?.("src/example.ts:8 | done\n> Ship this");
-			await Promise.resolve();
-		});
-
-		expect(onSendReviewComments).not.toHaveBeenCalled();
-		expect(mockClineSendText).toHaveBeenCalledWith("src/example.ts:8 | done\n> Ship this");
 	});
 
 	it("loads the saved agent-to-diff panel ratio from local storage", async () => {

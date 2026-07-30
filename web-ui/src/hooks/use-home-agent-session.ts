@@ -3,7 +3,7 @@
 // reloads/restarts that identity in place when the selected agent configuration changes.
 
 import { createHomeAgentSessionId } from "@runtime-home-agent-session";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { notifyError, showAppToast } from "@/components/app-toaster";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
@@ -63,6 +63,11 @@ export function useHomeAgentSession({
 	upsertSessionSummary,
 	startFreshSessionNonce = 0,
 }: UseHomeAgentSessionInput): UseHomeAgentSessionResult {
+	// Bumped when a fresh session has been provisioned, to re-run the start effect below.
+	// That effect gates on refs, which do not re-render, so it needs an explicit signal:
+	// it used to restart only as a side effect of `sessionSummaries` sitting in its
+	// dependency array, and silently stopped restarting the moment that prop went away.
+	const [freshSessionGeneration, setFreshSessionGeneration] = useState(0);
 	const latestBaseRefRef = useRef("HEAD");
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
 	const startedSessionKeysRef = useRef(new Set<string>());
@@ -201,6 +206,7 @@ export function useHomeAgentSession({
 					throw new Error(response.error ?? "Could not start a fresh home agent session.");
 				}
 				upsertSessionSummary(response.summary);
+				setFreshSessionGeneration((generation) => generation + 1);
 			})
 			.catch((error) => {
 				if (cancelled || disposedRef.current) {
@@ -300,7 +306,7 @@ export function useHomeAgentSession({
 				notifyError(message);
 			}
 		})();
-	}, [currentProjectId, descriptor, upsertSessionSummary]);
+	}, [currentProjectId, descriptor, freshSessionGeneration, upsertSessionSummary]);
 
 	useEffect(() => {
 		return () => {

@@ -69,7 +69,14 @@ describe("TaskAgentModelPicker", () => {
 		let options: Array<{ value: string; label: string }> = [];
 
 		act(() => {
-			root.render(<HookHarness defaultAgentId="claude" onOptions={(nextOptions) => (options = nextOptions)} />);
+			root.render(
+				<HookHarness
+					defaultAgentId="claude"
+					onOptions={(nextOptions) => {
+						options = nextOptions;
+					}}
+				/>,
+			);
 		});
 
 		expect(options).toEqual([

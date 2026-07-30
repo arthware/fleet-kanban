@@ -46,9 +46,13 @@ afterAll(() => {
 	}
 });
 
-// Strip ANSI escape codes from a string
+// Strip ANSI escape codes from a string. The escape and CSI introducers are control
+// characters by definition, so matching them here is the point, not an oversight.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI sequences begin with ESC (U+001B) / CSI (U+009B)
+const ANSI_ESCAPE_PATTERN = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
 function stripAnsi(str: string): string {
-	return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
+	return str.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
 // Classify skip reasons with precise categories or return null if it should continue executing

@@ -43,6 +43,7 @@ import {
 	truncateTaskPromptLabel,
 } from "@/utils/task-prompt";
 import { DEFAULT_TEXT_MEASURE_FONT, measureTextWidth, readElementFontShorthand } from "@/utils/text-measure";
+import { formatToolCallLabel } from "./tool-call-label";
 
 interface CardSessionActivity {
 	dotColor: string;
@@ -152,7 +153,7 @@ function resolveToolCallLabel(
 		if (!toolInputSummary && !parsedSummary) {
 			return null;
 		}
-		return toolInputSummary ?? parsedSummary;
+		return formatToolCallLabel(toolName, toolInputSummary ?? parsedSummary);
 	}
 	if (!activityText) {
 		return null;
@@ -161,7 +162,7 @@ function resolveToolCallLabel(
 	if (!parsed) {
 		return null;
 	}
-	return parsed.toolInputSummary ? `${parsed.toolName}: ${parsed.toolInputSummary}` : parsed.toolName;
+	return formatToolCallLabel(parsed.toolName, parsed.toolInputSummary);
 }
 
 function isCardCreditLimitError(summary: RuntimeTaskSessionSummary | undefined): boolean {

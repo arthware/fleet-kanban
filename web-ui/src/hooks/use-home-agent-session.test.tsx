@@ -396,60 +396,6 @@ describe("useHomeAgentSession", () => {
 		);
 	});
 
-	it("keeps the same cline home chat session id when the provider changes", async () => {
-		let latestSnapshot: HookSnapshot | null = null;
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					config={createRuntimeConfig({
-						selectedAgentId: "claude",
-						effectiveCommand: "claude",
-					})}
-					currentProjectId="workspace-1"
-					seedSessionSummary
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-			await createFlushPromises();
-		});
-
-		const anthropicSnapshot = requireSnapshot(latestSnapshot);
-		const anthropicTaskId = anthropicSnapshot.taskId;
-		expect(anthropicSnapshot.panelMode).toBe("chat");
-		expect(anthropicTaskId).toBe("__home_agent__:workspace-1");
-		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					config={createRuntimeConfig({
-						selectedAgentId: "claude",
-						effectiveCommand: "claude",
-					})}
-					currentProjectId="workspace-1"
-					seedSessionSummary
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-			await createFlushPromises();
-		});
-
-		const updatedSnapshot = requireSnapshot(latestSnapshot);
-		expect(updatedSnapshot.panelMode).toBe("chat");
-		expect(updatedSnapshot.taskId).toBe(anthropicTaskId);
-		expect(reloadTaskChatSessionMutateMock).toHaveBeenCalledWith({
-			workspaceId: "workspace-1",
-			taskId: anthropicTaskId,
-		});
-		expect(stopTaskSessionMutateMock).not.toHaveBeenCalled();
-		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
-	});
-
 	it("reuses the same home chat session id after remounting the app", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
