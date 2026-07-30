@@ -1,6 +1,8 @@
 import { getRuntimeAgentBinaryCandidates } from "../../core/agent-catalog";
 import type { RuntimeAgentId } from "../../core/api-contract";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
+import { type Capability, supported, unsupported } from "../capability";
+import type { LaunchPreflight } from "../driver";
 
 export function hasCliOption(args: readonly string[], optionName: string): boolean {
 	for (let i = 0; i < args.length; i += 1) {
@@ -39,15 +41,10 @@ export function withPrompt(
  * 2. KANBAN_TEST_AGENT_BINARY: integration test stub agent path, bypasses path checks.
  * 3. KANBAN_TEST_PREFLIGHT_REAL: force executing the real path checks even during Vitest unit tests.
  */
-export async function binaryPreflight(
-	agentId: RuntimeAgentId,
-): Promise<
-	| { readonly supported: true; readonly value: { readonly ok: true } }
-	| { readonly supported: false; readonly reason: string }
-> {
+export async function binaryPreflight(agentId: RuntimeAgentId): Promise<Capability<LaunchPreflight>> {
 	const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
 	if (testFail) {
-		return { supported: false, reason: testFail };
+		return unsupported(testFail);
 	}
 	const isTest =
 		(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_REAL) ||
@@ -56,11 +53,11 @@ export async function binaryPreflight(
 		const candidates = getRuntimeAgentBinaryCandidates(agentId);
 		const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
 		if (!binary) {
-			return { supported: false, reason: `binary missing: '${agentId}' CLI binary not found on PATH` };
+			return unsupported(`binary missing: '${agentId}' CLI binary not found on PATH`);
 		}
 		if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-			return { supported: false, reason: "not trusted: workspace is not trusted" };
+			return unsupported("not trusted: workspace is not trusted");
 		}
 	}
-	return { supported: true, value: { ok: true as const } };
+	return supported({ ok: true as const });
 }

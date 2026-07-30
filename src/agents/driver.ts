@@ -5,14 +5,14 @@ import type {
 	RuntimeTaskChatMessage,
 	RuntimeTaskTokenUsage,
 } from "../core/api-contract";
+import type { Capability } from "./capability";
 import { createClaudeDriver } from "./claude/driver";
 import { createCodexDriver } from "./codex/driver";
 import { createGeminiDriver } from "./gemini/driver";
 import type { SessionSignal } from "./session-signal";
 
-export type Capability<T> =
-	| { readonly supported: true; readonly value: T }
-	| { readonly supported: false; readonly reason: string };
+export type { Capability };
+export { supported, unsupported } from "./capability";
 
 export type IdentityDurability = "deterministic" | "persisted" | "none";
 
@@ -140,14 +140,6 @@ export interface AgentDriver {
 	readonly observe: ObservationPort;
 	readonly signals: SignalPort;
 	readonly control: ControlPort;
-}
-
-export function supported<T>(value: T): Capability<T> {
-	return { supported: true, value };
-}
-
-export function unsupported<T = never>(reason: string): Capability<T> {
-	return { supported: false, reason };
 }
 
 export const DRIVERS = {
