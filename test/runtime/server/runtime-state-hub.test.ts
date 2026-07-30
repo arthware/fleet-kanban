@@ -28,6 +28,7 @@ import type { CardPrRef } from "../../../src/workspace/card-pr-url";
 const mockMutateWorkspaceState = vi.fn();
 vi.mock("../../../src/state/workspace-state", () => ({
 	mutateWorkspaceState: (...args: any[]) => mockMutateWorkspaceState(...args),
+	mutateWorkspaceStateById: (...args: any[]) => mockMutateWorkspaceState(...args),
 }));
 
 const monitorMockState = vi.hoisted(() => ({
@@ -319,9 +320,9 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a card in in_progress transitioning to awaiting_review, when projected, then it moves to review and broadcasts update", async () => {
 		const board = boardWithCard("in_progress");
-		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
-			const res = mutate(createWorkspaceState(cwd, board));
-			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
 			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
@@ -336,15 +337,15 @@ describe("projectSessionSummaryColumn", () => {
 		);
 
 		expect(result).toBe(true);
-		expect(mockMutateWorkspaceState).toHaveBeenCalled();
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
 	});
 
 	it("given a card in review transitioning to running, when projected, then it moves to in_progress and broadcasts update", async () => {
 		const board = boardWithCard("review");
-		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
-			const res = mutate(createWorkspaceState(cwd, board));
-			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
 			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
@@ -359,15 +360,15 @@ describe("projectSessionSummaryColumn", () => {
 		);
 
 		expect(result).toBe(true);
-		expect(mockMutateWorkspaceState).toHaveBeenCalled();
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
 	});
 
 	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {
 		const board = boardWithCard("review");
-		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
-			const res = mutate(createWorkspaceState(cwd, board));
-			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
 			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
@@ -405,9 +406,9 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a summary with workspacePath of a worktree, when projected, then it mutates the actual workspace repo path and NOT the worktree path", async () => {
 		const board = boardWithCard("in_progress");
-		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
-			const res = mutate(createWorkspaceState(cwd, board));
-			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
 			getWorkspacePathById: vi.fn((id) => (id === "workspace-1" ? "/path/to/workspace" : null)),
@@ -427,8 +428,7 @@ describe("projectSessionSummaryColumn", () => {
 		);
 
 		expect(result).toBe(true);
-		// It should use the registry's workspace path, not the summary's worktree path
-		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("/path/to/workspace", expect.any(Function));
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
 		expect(mockMutateWorkspaceState).not.toHaveBeenCalledWith("/path/to/worktree", expect.any(Function));
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
 	});
@@ -439,6 +439,9 @@ describe("projectSessionSummaryColumn", () => {
 		};
 		const mockBroadcast = vi.fn();
 		const stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		mockMutateWorkspaceState.mockRejectedValueOnce(
+			new Error('Workspace with ID "workspace-unknown" not found in index.'),
+		);
 
 		const result = await projectSessionSummaryColumn(
 			"workspace-unknown",
@@ -448,11 +451,11 @@ describe("projectSessionSummaryColumn", () => {
 		);
 
 		expect(result).toBe(false);
-		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-unknown", expect.any(Function));
 		expect(mockBroadcast).not.toHaveBeenCalled();
 		expect(stderrWriteSpy).toHaveBeenCalledWith(
 			expect.stringContaining(
-				'[kanban] Background projection failed for task "task-1" in workspace "workspace-unknown": workspace path not found in registry.\n',
+				'[kanban] Background projection mutation failed for task "task-1" in workspace "workspace-unknown": Error: Workspace with ID "workspace-unknown" not found in index.\n',
 			),
 		);
 		stderrWriteSpy.mockRestore();
