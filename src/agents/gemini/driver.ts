@@ -2,56 +2,29 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-	getRuntimeAgentBinaryCandidates,
-	RUNTIME_AGENT_CATALOG,
-	type RuntimeAgentCatalogEntry,
-} from "../../core/agent-catalog";
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
-import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
-	SteerPlan,
 	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
-import { hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 	return {
 		id: "gemini",
 		catalog: catalogEntryById("gemini"),
 		launch: {
-			preflight: async () => {
-				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
-				if (testFail) {
-					return unsupported(testFail);
-				}
-				const isTest =
-					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
-				if (!isTest) {
-					const candidates = getRuntimeAgentBinaryCandidates("gemini");
-					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
-					if (!binary) {
-						return unsupported("binary missing: 'gemini' CLI binary not found on PATH");
-					}
-					if (!process.env.GEMINI_API_KEY) {
-						return unsupported("not authenticated: GEMINI_API_KEY is not set in environment");
-					}
-					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-						return unsupported("not trusted: workspace is not trusted");
-					}
-				}
-				return supported({ ok: true as const });
-			},
+			preflight: () => binaryPreflight("gemini"),
 			prepare: async (input) => {
 				const args = [...input.args];
 				const env: Record<string, string | undefined> = {};
@@ -297,11 +270,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 						fact: { type: "turn.started" },
 					} satisfies SessionSignal);
 				}
-				if (
-					normalizedName === "afteragent" ||
-					normalizedName === "stop" ||
-					normalizedName === "to_review"
-				) {
+				if (normalizedName === "afteragent" || normalizedName === "stop" || normalizedName === "to_review") {
 					return supported({
 						...base,
 						fact: { type: "turn.ended", finalMessage },
@@ -325,9 +294,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 				// Write the bracketed paste WITHOUT a trailing Enter. Gemini's TUI/PTY
 				// treats a carriage return fused onto the paste-end marker (… [201~\r)
 				// as buffered text, not a submit — so the steer text lands but never sends.
-				const plan: SteerStep[] = [
-					{ type: "write", data: toBracketedPaste(input.text) },
-				];
+				const plan: SteerStep[] = [{ type: "write", data: toBracketedPaste(input.text) }];
 				if (input.submit) {
 					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
 					// with the paste, the PTY coalesces both into one read, so the TUI still sees
@@ -543,5 +510,3 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
-
-

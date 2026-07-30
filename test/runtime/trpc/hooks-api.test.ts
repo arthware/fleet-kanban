@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-
+import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
-import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
 import { createHooksApi as createRealHooksApi } from "../../../src/trpc/hooks-api";
 
@@ -42,7 +41,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 	};
 }
 
-function createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
+function _createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
 	return {
 		getSummary: vi.fn(() => createSummary({ state: "running" })),
 		transitionToReview: vi.fn(),

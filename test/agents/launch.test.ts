@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClaudeDriver } from "../../src/agents/claude/driver";
 import { createCodexDriver } from "../../src/agents/codex/driver";
@@ -229,6 +232,166 @@ describe("Agent Drivers Launch Port Conformance", () => {
 			if (planResult.supported) {
 				expect(planResult.value.args).toContain("user-gemini");
 				expect(planResult.value.args).not.toContain("gemini-1.5-pro");
+			}
+		});
+	});
+
+	describe("detailed preflight behavior", () => {
+		let originalPath: string | undefined;
+		let tempDir: string;
+
+		beforeEach(() => {
+			originalPath = process.env.PATH;
+			process.env.KANBAN_TEST_PREFLIGHT_REAL = "1";
+			tempDir = mkdtempSync(join(tmpdir(), "kanban-test-path-"));
+		});
+
+		afterEach(() => {
+			process.env.PATH = originalPath;
+			delete process.env.KANBAN_TEST_PREFLIGHT_REAL;
+			try {
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+		});
+
+		it("should succeed for claude when binary is present even without auth env vars", async () => {
+			const binaryName = process.platform === "win32" ? "claude.cmd" : "claude";
+			const fakeBinaryPath = join(tempDir, binaryName);
+			writeFileSync(fakeBinaryPath, process.platform === "win32" ? "@echo off" : "#!/bin/sh\nexit 0");
+			if (process.platform !== "win32") {
+				chmodSync(fakeBinaryPath, 0o755);
+			}
+
+			process.env.PATH = tempDir;
+
+			const savedEnv: Record<string, string | undefined> = {};
+			const authVars = [
+				"ANTHROPIC_API_KEY",
+				"ANTHROPIC_AUTH_TOKEN",
+				"AWS_PROFILE",
+				"AWS_ACCESS_KEY_ID",
+				"GCP_PROJECT",
+				"GOOGLE_APPLICATION_CREDENTIALS",
+			];
+			for (const key of authVars) {
+				savedEnv[key] = process.env[key];
+				delete process.env[key];
+			}
+
+			try {
+				const preflightResult = await claude.launch.preflight();
+				expect(preflightResult.supported).toBe(true);
+			} finally {
+				for (const key of authVars) {
+					if (savedEnv[key] !== undefined) {
+						process.env[key] = savedEnv[key];
+					}
+				}
+			}
+		});
+
+		it("should fail for claude when binary is missing", async () => {
+			process.env.PATH = "";
+
+			const preflightResult = await claude.launch.preflight();
+			expect(preflightResult.supported).toBe(false);
+			if (!preflightResult.supported) {
+				expect(preflightResult.reason).toContain("binary missing: 'claude' CLI binary not found on PATH");
+			}
+		});
+
+		it("should succeed for claude when binary is present and API-key env var is set", async () => {
+			const binaryName = process.platform === "win32" ? "claude.cmd" : "claude";
+			const fakeBinaryPath = join(tempDir, binaryName);
+			writeFileSync(fakeBinaryPath, process.platform === "win32" ? "@echo off" : "#!/bin/sh\nexit 0");
+			if (process.platform !== "win32") {
+				chmodSync(fakeBinaryPath, 0o755);
+			}
+
+			process.env.PATH = tempDir;
+			process.env.ANTHROPIC_API_KEY = "test-key";
+
+			try {
+				const preflightResult = await claude.launch.preflight();
+				expect(preflightResult.supported).toBe(true);
+			} finally {
+				delete process.env.ANTHROPIC_API_KEY;
+			}
+		});
+
+		it("should succeed for gemini when binary is present even without auth env vars", async () => {
+			const binaryName = process.platform === "win32" ? "gemini.cmd" : "gemini";
+			const fakeBinaryPath = join(tempDir, binaryName);
+			writeFileSync(fakeBinaryPath, process.platform === "win32" ? "@echo off" : "#!/bin/sh\nexit 0");
+			if (process.platform !== "win32") {
+				chmodSync(fakeBinaryPath, 0o755);
+			}
+
+			process.env.PATH = tempDir;
+
+			const savedGeminiKey = process.env.GEMINI_API_KEY;
+			delete process.env.GEMINI_API_KEY;
+
+			try {
+				const preflightResult = await gemini.launch.preflight();
+				expect(preflightResult.supported).toBe(true);
+			} finally {
+				if (savedGeminiKey !== undefined) {
+					process.env.GEMINI_API_KEY = savedGeminiKey;
+				}
+			}
+		});
+
+		it("should fail for gemini when binary is missing", async () => {
+			process.env.PATH = "";
+
+			const preflightResult = await gemini.launch.preflight();
+			expect(preflightResult.supported).toBe(false);
+			if (!preflightResult.supported) {
+				expect(preflightResult.reason).toContain("binary missing: 'gemini' CLI binary not found on PATH");
+			}
+		});
+
+		it("should succeed for gemini when binary is present and API-key env var is set", async () => {
+			const binaryName = process.platform === "win32" ? "gemini.cmd" : "gemini";
+			const fakeBinaryPath = join(tempDir, binaryName);
+			writeFileSync(fakeBinaryPath, process.platform === "win32" ? "@echo off" : "#!/bin/sh\nexit 0");
+			if (process.platform !== "win32") {
+				chmodSync(fakeBinaryPath, 0o755);
+			}
+
+			process.env.PATH = tempDir;
+			process.env.GEMINI_API_KEY = "test-key";
+
+			try {
+				const preflightResult = await gemini.launch.preflight();
+				expect(preflightResult.supported).toBe(true);
+			} finally {
+				delete process.env.GEMINI_API_KEY;
+			}
+		});
+
+		it("should succeed for codex when binary is present", async () => {
+			const binaryName = process.platform === "win32" ? "codex.cmd" : "codex";
+			const fakeBinaryPath = join(tempDir, binaryName);
+			writeFileSync(fakeBinaryPath, process.platform === "win32" ? "@echo off" : "#!/bin/sh\nexit 0");
+			if (process.platform !== "win32") {
+				chmodSync(fakeBinaryPath, 0o755);
+			}
+
+			process.env.PATH = tempDir;
+
+			const preflightResult = await codex.launch.preflight();
+			expect(preflightResult.supported).toBe(true);
+		});
+
+		it("should fail for codex when binary is missing", async () => {
+			process.env.PATH = "";
+
+			const preflightResult = await codex.launch.preflight();
+			expect(preflightResult.supported).toBe(false);
+			if (!preflightResult.supported) {
+				expect(preflightResult.reason).toContain("binary missing: 'codex' CLI binary not found on PATH");
 			}
 		});
 	});

@@ -1,8 +1,4 @@
-import {
-	assertOk,
-	createSelfcheckCard,
-	type ScenarioDriver,
-} from "../scenario-api";
+import { assertOk, createSelfcheckCard, type ScenarioDriver } from "../scenario-api";
 
 export async function givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(driver: ScenarioDriver): Promise<void> {
 	// Card 1: steer with submit enabled (true)

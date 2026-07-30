@@ -2,55 +2,31 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-	getRuntimeAgentBinaryCandidates,
-	RUNTIME_AGENT_CATALOG,
-	type RuntimeAgentCatalogEntry,
-} from "../../core/agent-catalog";
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
-import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { toBracketedPaste } from "../../terminal/agent-session-adapters";
-import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
+import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
-	SteerPlan,
 	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
-import { hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { binaryPreflight, hasCliOption } from "../shared/launch";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 	return {
 		id: "codex",
 		catalog: catalogEntryById("codex"),
 		launch: {
-			preflight: async () => {
-				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
-				if (testFail) {
-					return unsupported(testFail);
-				}
-				const isTest =
-					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
-				if (!isTest) {
-					const candidates = getRuntimeAgentBinaryCandidates("codex");
-					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
-					if (!binary) {
-						return unsupported("binary missing: 'codex' CLI binary not found on PATH");
-					}
-					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-						return unsupported("not trusted: workspace is not trusted");
-					}
-				}
-				return supported({ ok: true as const });
-			},
+			preflight: () => binaryPreflight("codex"),
 			prepare: async (input) => {
 				const codexArgs = [...input.args];
 				const env: Record<string, string | undefined> = {};
@@ -308,9 +284,7 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 				// Write the bracketed paste WITHOUT a trailing Enter. Codex's TUI/PTY
 				// treats a carriage return fused onto the paste-end marker (… [201~\r)
 				// as buffered text, not a submit — so the steer text lands but never sends.
-				const plan: SteerStep[] = [
-					{ type: "write", data: toBracketedPaste(input.text) },
-				];
+				const plan: SteerStep[] = [{ type: "write", data: toBracketedPaste(input.text) }];
 				if (input.submit) {
 					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
 					// with the paste, the PTY coalesces both into one read, so the TUI still sees
@@ -610,5 +584,3 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
-
-

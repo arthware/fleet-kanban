@@ -173,8 +173,8 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 				const plan = steerWithSubmit.value;
 				expect(plan.length).toBeGreaterThan(0);
 				expect(plan[0]?.type).toBe("write");
-				expect(plan.some(step => step.type === "wait")).toBe(true);
-				expect(plan.some(step => step.type === "write" && step.data === "\r")).toBe(true);
+				expect(plan.some((step) => step.type === "wait")).toBe(true);
+				expect(plan.some((step) => step.type === "write" && step.data === "\r")).toBe(true);
 			}
 
 			const steerWithoutSubmit = await driver.control.steer({ text, submit: false });
@@ -183,8 +183,8 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 				const plan = steerWithoutSubmit.value;
 				expect(plan.length).toBeGreaterThan(0);
 				expect(plan[0]?.type).toBe("write");
-				expect(plan.some(step => step.type === "wait")).toBe(false);
-				expect(plan.some(step => step.type === "write" && step.data === "\r")).toBe(false);
+				expect(plan.some((step) => step.type === "wait")).toBe(false);
+				expect(plan.some((step) => step.type === "write" && step.data === "\r")).toBe(false);
 			}
 		});
 
@@ -193,7 +193,7 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 			if (interrupt.supported) {
 				const plan = interrupt.value;
 				expect(plan.length).toBeGreaterThan(0);
-				expect(plan.every(step => step.type === "write" || step.type === "wait")).toBe(true);
+				expect(plan.every((step) => step.type === "write" || step.type === "wait")).toBe(true);
 			} else {
 				expect(interrupt.reason.trim().length).toBeGreaterThan(0);
 			}

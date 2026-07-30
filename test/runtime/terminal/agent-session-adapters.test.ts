@@ -7,10 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
-import {
-	prepareAgentLaunch,
-	toBracketedPaste,
-} from "../../../src/terminal/agent-session-adapters";
+import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
 
 const originalHome = process.env.HOME;
 const originalAppData = process.env.APPDATA;
@@ -160,8 +157,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		// then
 		expect(event).toBeNull();
 	});
-
-
 
 	it("configures Codex hooks without legacy notify", async () => {
 		setupTempHome();
@@ -1092,5 +1087,3 @@ describe("prepareAgentLaunch — card gh environment", () => {
 		expect(launch.env.GH_PROMPT_DISABLED).toBeUndefined();
 	});
 });
-
-
