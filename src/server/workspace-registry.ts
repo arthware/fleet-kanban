@@ -150,38 +150,6 @@ export function collectProjectWorktreeTaskIdsForRemoval(board: RuntimeBoardData)
 	return taskIds;
 }
 
-function applyLiveSessionStateToProjectTaskCounts(
-	counts: RuntimeProjectTaskCounts,
-	board: RuntimeBoardData,
-	sessionSummaries: RuntimeWorkspaceStateResponse["sessions"],
-): RuntimeProjectTaskCounts {
-	const taskColumnById = new Map<string, RuntimeBoardColumnId>();
-	for (const column of board.columns) {
-		for (const card of column.cards) {
-			taskColumnById.set(card.id, column.id);
-		}
-	}
-	const next = {
-		...counts,
-	};
-	for (const summary of Object.values(sessionSummaries)) {
-		const columnId = taskColumnById.get(summary.taskId);
-		if (!columnId) {
-			continue;
-		}
-		if (summary.state === "awaiting_review" && columnId === "in_progress") {
-			next.in_progress = Math.max(0, next.in_progress - 1);
-			next.review += 1;
-			continue;
-		}
-		if (summary.state === "interrupted" && columnId !== "trash") {
-			next[columnId] = Math.max(0, next[columnId] - 1);
-			next.trash += 1;
-		}
-	}
-	return next;
-}
-
 function toProjectSummary(project: {
 	workspaceId: string;
 	repoPath: string;
@@ -350,19 +318,8 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		try {
 			const board = await loadWorkspaceBoardById(workspaceId);
 			const persistedCounts = countTasksByColumn(board);
-			const terminalManager = getTerminalManagerForWorkspace(workspaceId);
-			if (!terminalManager) {
-				projectTaskCountsByWorkspaceId.set(workspaceId, persistedCounts);
-				return persistedCounts;
-			}
-			const liveSessionsByTaskId: RuntimeWorkspaceStateResponse["sessions"] = {};
-			for (const summary of terminalManager.listSummaries()) {
-				liveSessionsByTaskId[summary.taskId] =
-					(await terminalManager.refreshAgentSessionLifecycle(summary.taskId)) ?? summary;
-			}
-			const nextCounts = applyLiveSessionStateToProjectTaskCounts(persistedCounts, board, liveSessionsByTaskId);
-			projectTaskCountsByWorkspaceId.set(workspaceId, nextCounts);
-			return nextCounts;
+			projectTaskCountsByWorkspaceId.set(workspaceId, persistedCounts);
+			return persistedCounts;
 		} catch {
 			return projectTaskCountsByWorkspaceId.get(workspaceId) ?? createEmptyProjectTaskCounts();
 		}

@@ -4,6 +4,7 @@
 import type { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type {
+	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeStateStreamErrorMessage,
 	RuntimeStateStreamMessage,
@@ -14,13 +15,74 @@ import type {
 	RuntimeStateStreamTaskSessionsMessage,
 	RuntimeStateStreamWorkspaceMetadataMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
+	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
 import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
+import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { mutateWorkspaceState } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
+
+export function getTargetColumnForSession(summary: {
+	taskId: string;
+	state: RuntimeTaskSessionState;
+}): RuntimeBoardColumnId | null {
+	if (isHomeAgentSessionId(summary.taskId)) {
+		return null;
+	}
+	switch (summary.state) {
+		case "awaiting_review":
+			return "review";
+		case "running":
+			return "in_progress";
+		case "idle":
+		case "failed":
+		case "interrupted":
+			return null;
+		default: {
+			const _exhaustive: never = summary.state;
+			return null;
+		}
+	}
+}
+
+export async function projectSessionSummaryColumn(
+	workspaceId: string,
+	summary: { taskId: string; state: RuntimeTaskSessionState; workspacePath?: string | null },
+	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
+	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
+): Promise<boolean> {
+	const targetColumnId = getTargetColumnForSession(summary);
+	if (!targetColumnId) {
+		return false;
+	}
+	const workspacePath = summary.workspacePath ?? workspaceRegistry.getWorkspacePathById(workspaceId);
+	if (!workspacePath) {
+		return false;
+	}
+	try {
+		const mutation = await mutateWorkspaceState(workspacePath, (state) => {
+			const previousColumnId = getTaskColumnId(state.board, summary.taskId);
+			if (!previousColumnId || previousColumnId === targetColumnId) {
+				return { board: state.board, value: false, save: false };
+			}
+			const moved = moveTaskToColumn(state.board, summary.taskId, targetColumnId, Date.now());
+			return { board: moved.board, value: moved.moved, save: moved.moved };
+		});
+		if (mutation.saved && mutation.value) {
+			await broadcastWorkspaceStateUpdated(workspaceId, workspacePath);
+			return true;
+		}
+	} catch (error) {
+		console.error(
+			`Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}":`,
+			error,
+		);
+	}
+	return false;
+}
 
 const TASK_SESSION_STREAM_BATCH_MS = 150;
 
@@ -72,7 +134,7 @@ export interface DisposeRuntimeStateWorkspaceOptions {
 export interface CreateRuntimeStateHubDependencies {
 	workspaceRegistry: Pick<
 		WorkspaceRegistry,
-		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot"
+		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot" | "getWorkspacePathById"
 	>;
 	heartbeatIntervalMs?: number;
 }
@@ -535,6 +597,14 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 			const unsubscribe = manager.onSummary((summary) => {
 				queueTaskSessionSummaryBroadcast(workspaceId, summary);
+				void projectSessionSummaryColumn(
+					workspaceId,
+					summary,
+					deps.workspaceRegistry,
+					broadcastRuntimeWorkspaceStateUpdated,
+				).catch(() => {
+					// Ignore background projection error
+				});
 			});
 			terminalSummaryUnsubscribeByWorkspaceId.set(workspaceId, unsubscribe);
 		},
