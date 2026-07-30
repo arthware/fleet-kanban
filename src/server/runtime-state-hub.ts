@@ -18,9 +18,9 @@ import type {
 	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
-import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
-import { mutateWorkspaceState } from "../state/workspace-state";
+import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
+import { mutateWorkspaceStateById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
@@ -50,7 +50,7 @@ export function getTargetColumnForSession(summary: {
 
 export async function projectSessionSummaryColumn(
 	workspaceId: string,
-	summary: { taskId: string; state: RuntimeTaskSessionState; workspacePath?: string | null },
+	summary: { taskId: string; state: RuntimeTaskSessionState },
 	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
 	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
 ): Promise<boolean> {
@@ -58,12 +58,8 @@ export async function projectSessionSummaryColumn(
 	if (!targetColumnId) {
 		return false;
 	}
-	const workspacePath = summary.workspacePath ?? workspaceRegistry.getWorkspacePathById(workspaceId);
-	if (!workspacePath) {
-		return false;
-	}
 	try {
-		const mutation = await mutateWorkspaceState(workspacePath, (state) => {
+		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
 			const previousColumnId = getTaskColumnId(state.board, summary.taskId);
 			if (!previousColumnId || previousColumnId === targetColumnId) {
 				return { board: state.board, value: false, save: false };
@@ -72,13 +68,13 @@ export async function projectSessionSummaryColumn(
 			return { board: moved.board, value: moved.moved, save: moved.moved };
 		});
 		if (mutation.saved && mutation.value) {
-			await broadcastWorkspaceStateUpdated(workspaceId, workspacePath);
+			await broadcastWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);
 			return true;
 		}
 	} catch (error) {
-		console.error(
-			`Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}":`,
-			error,
+		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(
+			`[kanban] Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
 		);
 	}
 	return false;
@@ -208,12 +204,12 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		// clients so the card renders its live PR state. `setCardPrUrl` is
 		// idempotent and `mutateWorkspaceState` skips the write when nothing changed.
 		persistCardPr: async ({ workspaceId, workspacePath, taskId, pr }) => {
-			const mutation = await mutateWorkspaceState(workspacePath, (state) => {
+			const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
 				const result = applyPersistedCardPrToBoard(state.board, taskId, pr);
 				return { board: result.board, value: result.updated, save: result.updated };
 			});
 			if (mutation.value) {
-				await broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
+				await broadcastRuntimeWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);
 			}
 		},
 	});

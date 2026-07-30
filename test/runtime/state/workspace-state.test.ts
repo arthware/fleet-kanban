@@ -17,6 +17,7 @@ import {
 	migrateAllWorkspaceAgentSessions,
 	migrateWorkspaceTrashToArchive,
 	mutateWorkspaceState,
+	mutateWorkspaceStateById,
 	resetWorkspaceBoardCacheForTests,
 	restoreArchivedWorkspaceTask,
 	saveWorkspaceState,
@@ -721,5 +722,54 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 		// Size assertion: serialized JSON of the session is way below the original oversized 150+ KB
 		const serializedSize = JSON.stringify(migrated).length;
 		expect(serializedSize).toBeLessThan(5000); // well bounded!
+	});
+});
+
+describe("mutateWorkspaceStateById", () => {
+	it("successfully mutates the correct workspace by ID and resists any path or cwd mismatches", async () => {
+		const context1 = await loadWorkspaceContext(repoPath);
+
+		const repoPath2 = join(tempRoot, "repo2");
+		await mkdir(repoPath2, { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], {
+			cwd: repoPath2,
+			env: createGitProcessEnv(),
+			stdio: "ignore",
+		});
+		const context2 = await loadWorkspaceContext(repoPath2);
+
+		await writeBoardJson(context1.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
+		await writeBoardJson(context2.workspaceId, createBoard({ backlog: [createCard("task-2")] }));
+
+		const result = await mutateWorkspaceStateById(context1.workspaceId, (state) => ({
+			board: {
+				...state.board,
+				columns: state.board.columns.map((col) =>
+					col.id === "backlog" ? { ...col, cards: [...col.cards, createCard("task-new")] } : col,
+				),
+			},
+			value: "mutated-1",
+		}));
+
+		expect(result.value).toBe("mutated-1");
+
+		const board1 = (await readJson(
+			join(tempRoot, "home", "kanban", "workspaces", context1.workspaceId, "board.json"),
+		)) as any;
+		const board2 = (await readJson(
+			join(tempRoot, "home", "kanban", "workspaces", context2.workspaceId, "board.json"),
+		)) as any;
+
+		const backlogCards1 = board1.columns.find((col: any) => col.id === "backlog").cards.map((c: any) => c.id);
+		const backlogCards2 = board2.columns.find((col: any) => col.id === "backlog").cards.map((c: any) => c.id);
+
+		expect(backlogCards1).toEqual(["task-1", "task-new"]);
+		expect(backlogCards2).toEqual(["task-2"]);
+	});
+
+	it("throws an error if workspace ID is not found in the index", async () => {
+		await expect(
+			mutateWorkspaceStateById("workspace-unknown", (state) => ({ board: state.board, value: null })),
+		).rejects.toThrow('Workspace with ID "workspace-unknown" not found in index.');
 	});
 });

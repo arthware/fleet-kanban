@@ -1096,11 +1096,10 @@ export interface RuntimeWorkspaceAtomicMutationResponse<T> {
 	saved: boolean;
 }
 
-export async function mutateWorkspaceState<T>(
-	cwd: string,
+async function mutateWorkspaceStateWithContext<T>(
+	context: RuntimeWorkspaceContext,
 	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
 ): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
-	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const currentBoard = await getCachedWorkspaceBoard(context.workspaceId);
 		const currentSessions = await reconcileWorkspaceAgentSessionsLocked(context.workspaceId);
@@ -1142,6 +1141,25 @@ export async function mutateWorkspaceState<T>(
 			saved: true,
 		};
 	});
+}
+
+export async function mutateWorkspaceState<T>(
+	cwd: string,
+	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
+): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
+	const context = await loadWorkspaceContext(cwd);
+	return await mutateWorkspaceStateWithContext(context, mutate);
+}
+
+export async function mutateWorkspaceStateById<T>(
+	workspaceId: string,
+	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
+): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
+	const context = await loadWorkspaceContextById(workspaceId);
+	if (!context) {
+		throw new Error(`Workspace with ID "${workspaceId}" not found in index.`);
+	}
+	return await mutateWorkspaceStateWithContext(context, mutate);
 }
 
 export async function restoreArchivedWorkspaceTask(

@@ -131,37 +131,47 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			if (!card.agentId) {
 				throw new Error(`createCard failed: card ${card.id} is missing agentId.`);
 			}
-			const current = await loadState(context);
-			const nextBoard = placeCard(current.board, card, column);
-			const response = await requestJson<RuntimeWorkspaceStateResponse>({
-				baseUrl: context.baseUrl,
-				procedure: "workspace.saveState",
-				type: "mutation",
-				workspaceId: context.workspaceId,
-				payload: {
-					board: nextBoard,
-					sessions: {
-						...current.sessions,
-						[card.id]: {
-							taskId: card.id,
-							state: "idle",
-							agentId: card.agentId,
-							workspacePath: null,
-							pid: null,
-							startedAt: null,
-							updatedAt: Date.now(),
-							lastOutputAt: null,
-							reviewReason: null,
-							exitCode: null,
-							agentSessionId: null,
-							lastHookAt: null,
-							latestHookActivity: null,
+			let attempts = 3;
+			while (attempts > 0) {
+				const current = await loadState(context);
+				const nextBoard = placeCard(current.board, card, column);
+				const response = await requestJson<RuntimeWorkspaceStateResponse>({
+					baseUrl: context.baseUrl,
+					procedure: "workspace.saveState",
+					type: "mutation",
+					workspaceId: context.workspaceId,
+					payload: {
+						board: nextBoard,
+						sessions: {
+							...current.sessions,
+							[card.id]: {
+								taskId: card.id,
+								state: "idle",
+								agentId: card.agentId,
+								workspacePath: null,
+								pid: null,
+								startedAt: null,
+								updatedAt: Date.now(),
+								lastOutputAt: null,
+								reviewReason: null,
+								exitCode: null,
+								agentSessionId: null,
+								lastHookAt: null,
+								latestHookActivity: null,
+							},
 						},
+						expectedRevision: current.revision,
 					},
-					expectedRevision: current.revision,
-				},
-			});
-			assertOk(response.status === 200 && response.payload.board, `createCard failed for ${card.id}`);
+				});
+				if (response.status === 200 && response.payload.board) {
+					return;
+				}
+				attempts -= 1;
+				if (attempts === 0) {
+					assertOk(false, `createCard failed for ${card.id} after 3 attempts due to revision conflicts.`);
+				}
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
 		},
 		startCard: async (taskId) => {
 			const state = await loadState(context);
@@ -346,28 +356,30 @@ export async function loadState(context: SelfcheckContext): Promise<RuntimeWorks
 	return response.payload;
 }
 
-async function saveBoard(
-	context: SelfcheckContext,
-	state: RuntimeWorkspaceStateResponse,
-	board: RuntimeBoardData,
-): Promise<RuntimeWorkspaceStateResponse> {
-	const response = await requestJson<RuntimeWorkspaceStateResponse>({
-		baseUrl: context.baseUrl,
-		procedure: "workspace.saveState",
-		type: "mutation",
-		workspaceId: context.workspaceId,
-		payload: { board, sessions: state.sessions, expectedRevision: state.revision },
-	});
-	assertOk(response.status === 200, "Could not save workspace state.");
-	return response.payload;
-}
-
 export async function mutateBoard(
 	context: SelfcheckContext,
 	mutate: (board: RuntimeBoardData) => RuntimeBoardData,
 ): Promise<RuntimeWorkspaceStateResponse> {
-	const state = await loadState(context);
-	return await saveBoard(context, state, mutate(state.board));
+	let attempts = 3;
+	while (attempts > 0) {
+		const state = await loadState(context);
+		const response = await requestJson<RuntimeWorkspaceStateResponse>({
+			baseUrl: context.baseUrl,
+			procedure: "workspace.saveState",
+			type: "mutation",
+			workspaceId: context.workspaceId,
+			payload: { board: mutate(state.board), sessions: state.sessions, expectedRevision: state.revision },
+		});
+		if (response.status === 200 && response.payload) {
+			return response.payload;
+		}
+		attempts -= 1;
+		if (attempts === 0) {
+			assertOk(false, "mutateBoard failed after 3 attempts due to revision conflicts.");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	throw new Error("unreachable");
 }
 
 function placeCard(board: RuntimeBoardData, card: RuntimeBoardCard, columnId: RuntimeBoardColumnId): RuntimeBoardData {
@@ -397,6 +409,9 @@ function findCard(board: RuntimeBoardData, taskId: string): RuntimeBoardCard {
 }
 
 export function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoardColumnId): RuntimeBoardData {
+	if (getTaskColumnId(board, taskId) === columnId) {
+		return board;
+	}
 	const moved = moveTaskToColumn(board, taskId, columnId);
 	if (!moved.moved) {
 		throw new ScenarioAssertionError(`Task ${taskId} did not move to ${columnId}.`);
