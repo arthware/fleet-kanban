@@ -98,7 +98,7 @@ describe("Live Conformance Suite", () => {
 	});
 
 	describeLiveDriverTck(createGeminiDriver(), {
-		args: () => ["--yolo", "-i", "reply with OK"],
+		args: () => ["-p", "reply with OK"],
 		discoverSessionId: findLatestGeminiSession,
 	});
 });

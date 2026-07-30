@@ -34,19 +34,35 @@ afterAll(() => {
 	}
 });
 
-// Check if binary is missing or unauthenticated
+// Strip ANSI escape codes from a string
+function stripAnsi(str: string): string {
+	return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
+}
+
+// Check if binary is missing, unauthenticated, or in interactive first-run onboarding
 function isUnauthenticatedText(out: string): boolean {
-	const outLower = out.toLowerCase();
+	const outLower = out.toLowerCase().replace(/\s+/g, "");
 	return (
 		outLower.includes("login") ||
 		outLower.includes("unauthenticated") ||
 		outLower.includes("authenticate") ||
 		outLower.includes("sign-in") ||
+		outLower.includes("signin") ||
 		outLower.includes("credentials") ||
-		outLower.includes("api key") ||
+		outLower.includes("apikey") ||
 		outLower.includes("api-key") ||
-		outLower.includes("not logged in") ||
-		outLower.includes("unauthorized")
+		outLower.includes("notloggedin") ||
+		outLower.includes("unauthorized") ||
+		outLower.includes("pleasesignin") ||
+		outLower.includes("openthebrowser") ||
+		outLower.includes("pressenter") ||
+		outLower.includes("oauth") ||
+		outLower.includes("choosethetextstyle") ||
+		outLower.includes("textstylethatlooksbest") ||
+		outLower.includes("selectastyle") ||
+		outLower.includes("welcometoclaude") ||
+		outLower.includes("welcometogemini") ||
+		outLower.includes("welcometocodex")
 	);
 }
 
@@ -67,7 +83,8 @@ async function captureTerminalOutput(
 	const controlWs = new WebSocket(controlUrl);
 
 	ioWs.on("message", (data) => {
-		terminalOutput += data.toString("utf8");
+		const txt = data.toString("utf8");
+		terminalOutput += txt;
 	});
 
 	controlWs.on("open", () => {
@@ -79,6 +96,8 @@ async function captureTerminalOutput(
 		close: () => {
 			ioWs.close();
 			controlWs.close();
+			ioWs.terminate();
+			controlWs.terminate();
 		},
 	};
 }
@@ -92,6 +111,7 @@ describe("Live Selfcheck Integration Tests", () => {
 			return;
 		}
 
+		console.log(`[test] Starting live test for ${agentId} using binary ${executablePath}...`);
 		const context = await createSelfcheckContext({ live: true });
 		let capture: any;
 		try {
@@ -110,21 +130,27 @@ describe("Live Selfcheck Integration Tests", () => {
 				card,
 			});
 
-			await driver.startCard(taskId);
-
-			// Start capturing PTY output immediately
+			const startPromise = driver.startCard(taskId);
+			// Start capturing PTY output in parallel to avoid missing initial chunks
 			capture = await captureTerminalOutput(context.instance.port, context.workspaceId, taskId);
+			await startPromise;
 
-			// Wait for card to park or fail
-			const resultState = await waitFor(
+			// Wait for card to park or fail, or check for unauthenticated text proactively
+			const result = await waitFor(
 				async () => {
+					const termOut = capture ? capture.getOutput() : "";
+					const cleanTermOut = stripAnsi(termOut);
+					if (isUnauthenticatedText(cleanTermOut)) {
+						return { unauthenticated: true, termOut: cleanTermOut };
+					}
+
 					const state = await loadState(context);
 					const session = state.sessions[taskId];
 					if (!session) return null;
 
 					// If it reached awaiting_review or exited, check state
 					if (session.state === "awaiting_review" || session.exitCode !== null) {
-						return state;
+						return { unauthenticated: false, state, session, termOut: cleanTermOut };
 					}
 					return null;
 				},
@@ -132,8 +158,15 @@ describe("Live Selfcheck Integration Tests", () => {
 				120000,
 			); // 120s timeout
 
-			const session = resultState.sessions[taskId];
-			const termOut = capture.getOutput();
+			if (result.unauthenticated) {
+				const cleanOut = result.termOut.replace(/\s+/g, " ").trim().substring(0, 300);
+				const detailedReason = `Not authenticated/configured: "${cleanOut || "<empty>"}"`;
+				selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: detailedReason };
+				ctx.skip();
+				return;
+			}
+
+			const { state: resultState, session, termOut } = result;
 
 			if (session.exitCode !== 0 || session.reviewReason === "error" || isUnauthenticatedText(termOut)) {
 				// Check if the output indicates lack of authentication
@@ -156,6 +189,9 @@ describe("Live Selfcheck Integration Tests", () => {
 
 			selfcheckLiveSummary[agentId] = { executed: true, skipped: false, reason: "" };
 		} catch (error: any) {
+			if (selfcheckLiveSummary[agentId].skipped) {
+				throw error; // Vitest abort skip signal
+			}
 			selfcheckLiveSummary[agentId] = { executed: false, skipped: false, reason: `failed: ${error.message}` };
 			throw error;
 		} finally {
