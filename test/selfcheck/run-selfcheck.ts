@@ -8,6 +8,7 @@ import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./sc
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
 import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
 import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
+import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
 import { givenRunningCardWhenSteeredThenAgentReceivesSubmittedText } from "./scenarios/givenRunningCardWhenSteeredThenAgentReceivesSubmittedText";
@@ -54,14 +55,9 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
-	await runScenario(
-		results,
-		"steer a Review card -> moves to In Progress",
-		async () => {
-			await runBrowserScenario("review-steering");
-		},
-		{ knownFailureIssue: "#180" },
-	);
+	await runScenario(results, "steer a Review card -> moves to In Progress", async () => {
+		await runBrowserScenario("review-steering");
+	});
 	await runScenario(results, "review ping reaches the overseer session", async () => {
 		const context = await createSelfcheckContext();
 		try {
@@ -77,6 +73,16 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
+	});
+	await runScenario(results, "a gemini notification parks the card, a steer wakes it", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "a card's model override reaches the CLI", async () => {
 		const context = await createSelfcheckContext();

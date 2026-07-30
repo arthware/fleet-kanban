@@ -5,11 +5,13 @@ import type {
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
+	RuntimeHookEvent,
 	RuntimeHookIngestResponse,
 	RuntimeProjectsResponse,
 	RuntimeShellSessionStartResponse,
 	RuntimeStateStreamSnapshotMessage,
 	RuntimeStateStreamTaskReadyForReviewMessage,
+	RuntimeTaskHookActivity,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartResponse,
 	RuntimeWorkspaceStateResponse,
@@ -44,6 +46,8 @@ export interface ScenarioDriver {
 	expectAgentRunning(taskId: string): Promise<number>;
 	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
 	readAgentStdin(taskId: string): Promise<string>;
+	ingestNativeHook(taskId: string, input: { event: RuntimeHookEvent; metadata?: Partial<RuntimeTaskHookActivity> }): Promise<void>;
+	expectReviewReason(taskId: string, reason: string | null): Promise<void>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -118,7 +122,40 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	let stream: RuntimeStreamClient | null = null;
 	return {
 		createCard: async ({ card, column }) => {
-			await mutateBoard(context, (board) => placeCard(board, card, column));
+			if (!card.agentId) {
+				throw new Error(`createCard failed: card ${card.id} is missing agentId.`);
+			}
+			const current = await loadState(context);
+			const nextBoard = placeCard(current.board, card, column);
+			const response = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "workspace.saveState",
+				type: "mutation",
+				workspaceId: context.workspaceId,
+				payload: {
+					board: nextBoard,
+					sessions: {
+						...current.sessions,
+						[card.id]: {
+							taskId: card.id,
+							state: "idle",
+							agentId: card.agentId,
+							workspacePath: null,
+							pid: null,
+							startedAt: null,
+							updatedAt: Date.now(),
+							lastOutputAt: null,
+							reviewReason: null,
+							exitCode: null,
+							agentSessionId: null,
+							lastHookAt: null,
+							latestHookActivity: null,
+						},
+					},
+					expectedRevision: current.revision,
+				},
+			});
+			assertOk(response.status === 200 && response.payload.board, `createCard failed for ${card.id}`);
 		},
 		startCard: async (taskId) => {
 			const state = await loadState(context);
@@ -238,6 +275,30 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				return null;
 			}, `launched stdin file to exist at ${stdinPath}`);
 			return content;
+		},
+		ingestNativeHook: async (taskId, input) => {
+			const hook = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId: context.workspaceId,
+					event: input.event,
+					metadata: input.metadata,
+				},
+			});
+			assertOk(
+				hook.status === 200 && hook.payload.ok,
+				`ingestNativeHook failed for ${taskId}: ${hook.payload.error}`,
+			);
+		},
+		expectReviewReason: async (taskId, reason) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				return summary && summary.reviewReason === reason ? true : null;
+			}, `card ${taskId} to have reviewReason ${reason}`);
 		},
 	};
 }

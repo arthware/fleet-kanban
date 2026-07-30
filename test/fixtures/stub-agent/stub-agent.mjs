@@ -71,7 +71,7 @@ if (runtimeHome) {
 appendFileSync(markerPath, `stub commit for ${taskId}\n`, "utf8");
 run("git", ["add", "stub-agent-output.txt"], { cwd });
 run("git", ["commit", "-qm", `stub agent commit for ${taskId}`], { cwd });
-const sleepMs = (taskId === "selfcheck-restart-after-gone" || taskId.includes("steer")) ? 60000 : 100;
+const sleepMs = (taskId === "selfcheck-restart-after-gone" || taskId.includes("steer") || taskId.startsWith("gemini-test")) ? 60000 : 100;
 await new Promise((resolve) => setTimeout(resolve, sleepMs));
 await notifyReview();
 process.stdout.write("stub-agent: committed deterministic work\n");

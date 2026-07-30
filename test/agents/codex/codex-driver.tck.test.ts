@@ -37,8 +37,10 @@ const driver = createCodexDriver({ sessionId, homePath });
 
 describeDriverTck(driver, {
 	nativeSignals: [
-		{ name: "codex.progress", payload: {}, expectedFactType: "progress" },
-		{ name: "codex.stop", payload: {}, expectedFactType: "turn.ended" },
+		{ name: "task_started", payload: {}, expectedFactType: "turn.started" },
+		{ name: "task_complete", payload: {}, expectedFactType: "turn.ended" },
+		{ name: "approval_request", payload: {}, expectedFactType: "attention.required" },
+		{ name: "exec_command_begin", payload: {}, expectedFactType: "progress" },
 	],
 	observation: {
 		expectedMessages: [
