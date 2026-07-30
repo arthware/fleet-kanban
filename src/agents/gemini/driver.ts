@@ -8,7 +8,7 @@ import {
 	type RuntimeAgentCatalogEntry,
 } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import { buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
+import { buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
@@ -18,6 +18,8 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
+	SteerPlan,
+	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption, withPrompt } from "../launch-utils";
@@ -319,8 +321,26 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 			attentionSupport: () => supported(true),
 		},
 		control: {
-			steer: async () => unsupported("gemini control is not bound yet"),
-			interrupt: async () => unsupported("gemini control is not bound yet"),
+			steer: async (input) => {
+				// Write the bracketed paste WITHOUT a trailing Enter. Gemini's TUI/PTY
+				// treats a carriage return fused onto the paste-end marker (… [201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
+				const plan: SteerStep[] = [
+					{ type: "write", data: toBracketedPaste(input.text) },
+				];
+				if (input.submit) {
+					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
+					// with the paste, the PTY coalesces both into one read, so the TUI still sees
+					// the Enter fused onto the paste-end marker and swallows it.
+					// For Gemini, a 300ms gap is required because Gemini's internal input processor
+					// and PTY event loop are slower and need more time to process the paste-end
+					// boundary before receiving the carriage return submit keypress.
+					plan.push({ type: "wait", delayMs: 300 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => unsupported("Gemini CLI does not support interactive interruption"),
 		},
 	};
 }

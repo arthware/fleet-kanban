@@ -27,6 +27,7 @@ export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer
 		const card = createSelfcheckCard({
 			id: taskId,
 			title: "Selfcheck archive ledger task",
+			agentId: "claude",
 		});
 
 		// Connect to runtime stream to trigger starting/reconnecting the home agent session

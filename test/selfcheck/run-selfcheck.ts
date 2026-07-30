@@ -11,6 +11,7 @@ import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./sc
 import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
+import { givenRunningCardWhenSteeredThenAgentReceivesSubmittedText } from "./scenarios/givenRunningCardWhenSteeredThenAgentReceivesSubmittedText";
 import { givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts } from "./scenarios/givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts";
 
 interface ScenarioResult {
@@ -87,6 +88,16 @@ async function main(): Promise<void> {
 		const context = await createSelfcheckContext();
 		try {
 			await givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "steering a card delivers the text and submits it", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(
 				attachContext(createTrpcScenarioDriver(context), context),
 			);
 		} finally {

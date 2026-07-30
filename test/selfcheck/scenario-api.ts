@@ -5,11 +5,13 @@ import type {
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
+	RuntimeHookEvent,
 	RuntimeHookIngestResponse,
 	RuntimeProjectsResponse,
 	RuntimeShellSessionStartResponse,
 	RuntimeStateStreamSnapshotMessage,
 	RuntimeStateStreamTaskReadyForReviewMessage,
+	RuntimeTaskHookActivity,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartResponse,
 	RuntimeWorkspaceStateResponse,
@@ -36,14 +38,15 @@ export interface SelfcheckContext {
 export interface ScenarioDriver {
 	createCard(input: { card: RuntimeBoardCard; column: RuntimeBoardColumnId }): Promise<void>;
 	startCard(taskId: string): Promise<void>;
-	steerCard(taskId: string, text: string): Promise<void>;
+	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
 	killAgentProcess(taskId: string): Promise<void>;
 	expectSessionGone(taskId: string): Promise<void>;
 	expectAgentRunning(taskId: string): Promise<number>;
 	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
-	ingestNativeHook(taskId: string, input: { event: string; metadata?: any }): Promise<void>;
+	readAgentStdin(taskId: string): Promise<string>;
+	ingestNativeHook(taskId: string, input: { event: RuntimeHookEvent; metadata?: Partial<RuntimeTaskHookActivity> }): Promise<void>;
 	expectReviewReason(taskId: string, reason: string | null): Promise<void>;
 }
 
@@ -59,9 +62,12 @@ export function createSelfcheckCard(input: {
 	title: string;
 	prompt?: string;
 	baseRef?: string;
-	agentId?: RuntimeBoardCard["agentId"];
+	agentId: RuntimeBoardCard["agentId"];
 	agentModel?: string;
 }): RuntimeBoardCard {
+	if (!input.agentId) {
+		throw new Error(`createSelfcheckCard failed: card ${input.id} is missing agentId.`);
+	}
 	const now = Date.now();
 	return {
 		id: input.id,
@@ -69,7 +75,7 @@ export function createSelfcheckCard(input: {
 		prompt: input.prompt ?? input.title,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		agentId: input.agentId ?? "claude",
+		agentId: input.agentId,
 		baseRef: input.baseRef ?? "main",
 		createdAt: now,
 		updatedAt: now,
@@ -119,6 +125,9 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	let stream: RuntimeStreamClient | null = null;
 	return {
 		createCard: async ({ card, column }) => {
+			if (!card.agentId) {
+				throw new Error(`createCard failed: card ${card.id} is missing agentId.`);
+			}
 			const current = await loadState(context);
 			const nextBoard = placeCard(current.board, card, column);
 			const response = await requestJson<RuntimeWorkspaceStateResponse>({
@@ -133,7 +142,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 						[card.id]: {
 							taskId: card.id,
 							state: "idle",
-							agentId: card.agentId ?? "claude",
+							agentId: card.agentId,
 							workspacePath: null,
 							pid: null,
 							startedAt: null,
@@ -149,9 +158,6 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 					expectedRevision: current.revision,
 				},
 			});
-			if (response.status !== 200 || !response.payload.board) {
-				console.error("saveWorkspaceState failed detail:", response.status, JSON.stringify(response.payload, null, 2));
-			}
 			assertOk(response.status === 200 && response.payload.board, `createCard failed for ${card.id}`);
 		},
 		startCard: async (taskId) => {
@@ -175,13 +181,13 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}
 			await startTaskSession(context, card);
 		},
-		steerCard: async (taskId, text) => {
+		steerCard: async (taskId, text, submit = true) => {
 			const response = await requestJson<RuntimeTaskSessionInputResponse>({
 				baseUrl: context.baseUrl,
 				procedure: "runtime.sendTaskSessionInput",
 				type: "mutation",
 				workspaceId: context.workspaceId,
-				payload: { taskId, text, bracketedPaste: true, submit: true },
+				payload: { taskId, text, bracketedPaste: true, submit },
 			});
 			assertOk(
 				response.status === 200 && response.payload.ok,
@@ -256,6 +262,23 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}, `launched argv file to exist at ${argvPath}`);
 			return JSON.parse(content) as readonly string[];
 		},
+		readAgentStdin: async (taskId) => {
+			const runtimeHome = context.instance.homeDir;
+			const stdinPath = join(runtimeHome, ".kanban", `launched-stdin-${taskId}.txt`);
+			let content = "";
+			await waitFor(async () => {
+				if (existsSync(stdinPath)) {
+					try {
+						content = readFileSync(stdinPath, "utf8");
+						return true;
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			}, `launched stdin file to exist at ${stdinPath}`);
+			return content;
+		},
 		ingestNativeHook: async (taskId, input) => {
 			const hook = await requestJson<RuntimeHookIngestResponse>({
 				baseUrl: context.baseUrl,
@@ -264,7 +287,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				payload: {
 					taskId,
 					workspaceId: context.workspaceId,
-					event: input.event as any,
+					event: input.event,
 					metadata: input.metadata,
 				},
 			});

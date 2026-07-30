@@ -8,9 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
 import {
-	getAgentSubmitEnterDelayMs,
 	prepareAgentLaunch,
-	SUBMIT_ENTER_DELAY_MS,
 	toBracketedPaste,
 } from "../../../src/terminal/agent-session-adapters";
 
@@ -163,10 +161,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(event).toBeNull();
 	});
 
-	it("given per-harness submit timing is requested, when the agent is Gemini, then it returns the Gemini 300 ms delay", () => {
-		expect(getAgentSubmitEnterDelayMs("gemini")).toBe(300);
-		expect(getAgentSubmitEnterDelayMs("codex")).toBe(SUBMIT_ENTER_DELAY_MS);
-	});
+
 
 	it("configures Codex hooks without legacy notify", async () => {
 		setupTempHome();
@@ -1098,21 +1093,4 @@ describe("prepareAgentLaunch — card gh environment", () => {
 	});
 });
 
-describe("getAgentSubmitEnterDelayMs", () => {
-	it("given claude as the agentId, when fetching delay, then it returns the default 50ms", () => {
-		expect(getAgentSubmitEnterDelayMs("claude")).toBe(50);
-	});
 
-	it("given codex as the agentId, when fetching delay, then it returns the default 50ms", () => {
-		expect(getAgentSubmitEnterDelayMs("codex")).toBe(50);
-	});
-
-	it("given gemini as the agentId, when fetching delay, then it returns the custom 300ms", () => {
-		expect(getAgentSubmitEnterDelayMs("gemini")).toBe(300);
-	});
-
-	it("given null or undefined agentId, when fetching delay, then it returns the default 50ms", () => {
-		expect(getAgentSubmitEnterDelayMs(null)).toBe(50);
-		expect(getAgentSubmitEnterDelayMs(undefined)).toBe(50);
-	});
-});

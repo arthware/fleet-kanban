@@ -3,6 +3,8 @@ import type {
 	AgentObservationMessage,
 	LaunchIdentityPlan,
 	NativeSignalInput,
+	SteerPlan,
+	SteerStep,
 } from "../../../src/agents/driver";
 import { supported, unsupported } from "../../../src/agents/driver";
 import type { SessionSignal } from "../../../src/agents/session-signal";
@@ -89,8 +91,18 @@ export function createFakeAgentDriver(): AgentDriver {
 			attentionSupport: () => supported(true),
 		},
 		control: {
-			steer: async () => supported(undefined),
-			interrupt: async () => supported(undefined),
+			steer: async (input) => {
+				const plan: SteerStep[] = [{ type: "write", data: input.text }];
+				if (input.submit) {
+					plan.push({ type: "wait", delayMs: 50 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => {
+				const plan: SteerPlan = [{ type: "write", data: "\x03" }];
+				return supported(plan);
+			},
 		},
 	};
 }

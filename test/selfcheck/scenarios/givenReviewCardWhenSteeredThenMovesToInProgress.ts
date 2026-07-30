@@ -7,6 +7,7 @@ export async function givenReviewCardWhenSteeredThenMovesToInProgress(driver: Sc
 		card: createSelfcheckCard({
 			id: taskId,
 			title: "Selfcheck steer review",
+			agentId: "claude",
 			prompt: "Wait for steering input.",
 		}),
 	});

@@ -10,6 +10,7 @@ import {
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
+import { toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
@@ -19,6 +20,8 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
+	SteerPlan,
+	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption } from "../launch-utils";
@@ -301,8 +304,25 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 			attentionSupport: () => supported(true),
 		},
 		control: {
-			steer: async () => unsupported("codex control is not bound yet"),
-			interrupt: async () => unsupported("codex control is not bound yet"),
+			steer: async (input) => {
+				// Write the bracketed paste WITHOUT a trailing Enter. Codex's TUI/PTY
+				// treats a carriage return fused onto the paste-end marker (… [201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
+				const plan: SteerStep[] = [
+					{ type: "write", data: toBracketedPaste(input.text) },
+				];
+				if (input.submit) {
+					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
+					// with the paste, the PTY coalesces both into one read, so the TUI still sees
+					// the Enter fused onto the paste-end marker and swallows it.
+					// For Codex, a 50ms gap is per-harness specific: it lets the paste flush and
+					// paste-mode close first, so the Enter registers as a submit keypress.
+					plan.push({ type: "wait", delayMs: 50 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => unsupported("Codex CLI does not support interactive interruption"),
 		},
 	};
 }
