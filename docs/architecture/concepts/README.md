@@ -50,13 +50,13 @@ numbers. The architect reconciles the map on merge.
 | [Task card](task-card.md) | a board item with prompt, base ref, agent + review settings | `src/core/api-contract.ts`, `src/core/task-board-mutations.ts` |
 | [Card lifecycle / columns](card-lifecycle.md) | backlog→in_progress→review→done (+trash=archive) | `src/core/task-lifecycle.ts`, `src/core/api-contract.ts` |
 | [Worktree](worktree.md) | per-card git worktree with a deterministic branch | `src/workspace/task-worktree.ts` |
-| [Task session](task-session.md) | the live runtime on a card — PTY process or native Cline session | `src/terminal/session-manager.ts`, `src/cline-sdk/cline-task-session-service.ts` |
-| [Runtime summary](runtime-summary.md) | small state object: idle/running/awaiting_review/failed/interrupted | `src/core/api-contract.ts`, `src/cline-sdk/cline-session-state.ts` |
+| [Task session](task-session.md) | the live runtime on a card — PTY process managed by an agent driver | `src/terminal/session-manager.ts`, `src/agents/` |
+| [Runtime summary](runtime-summary.md) | small state object: idle/running/awaiting_review/failed/interrupted | `src/core/api-contract.ts`, `src/terminal/session-manager.ts` |
 | [tRPC contract & runtime-api](trpc-contract.md) | the typed spine + the coordinator that routes every request | `src/core/api-contract.ts`, `src/trpc/runtime-api.ts` |
 | [Runtime state fanout](runtime-state-fanout.md) | the hub that streams board/session deltas to the browser | `src/server/runtime-state-hub.ts` |
-| [Cline SDK boundary](cline-sdk-boundary.md) | maps task semantics onto the SDK; keeps SDK internals contained | `src/cline-sdk/` |
-| [Agent catalog](agent-catalog.md) | registry of supported agents (Cline-native vs CLI/PTY) | `src/core/agent-catalog.ts`, `src/terminal/agent-session-adapters.ts` |
+| [Agent catalog](agent-catalog.md) | registry of supported agents (CLI/PTY harnesses) | `src/core/agent-catalog.ts`, `src/terminal/agent-session-adapters.ts` |
 | [Agent driver](agent-driver.md) | capability port for launch, identity, observation, signals, and control per harness | `src/agents/driver.ts`, `src/agents/session-signal.ts` |
+| [Session ledger](session-ledger.md) | durable per-card record of session history and metrics, off the hot path | `src/core/session-ledger.ts` |
 | [Card type / skill pipeline](card-types.md) | data-defined pipeline phases mapping to lanes, skills, and prompts | `src/core/card-type.ts`, `fleet/card-types/` |
 
 ### Secondary
@@ -69,5 +69,5 @@ numbers. The architect reconciles the map on merge.
 | [Persistence / CLINE_HOME](persistence-cline-home.md) | on-disk board/session JSON + worktrees, atomic + optimistic-concurrency | `src/state/workspace-state.ts`, `src/fs/locked-file-system.ts` |
 | [External-issue correlation](external-issue.md) | optional link from a card to its Linear/GitHub source issue | `src/core/external-issue.ts`, `src/core/api-contract.ts` |
 | [Dependency links](dependency-links.md) | directed prerequisite edges between cards | `src/core/api-contract.ts`, `src/core/task-board-mutations.ts` |
-| [Runtime modes](runtime-modes.md) | native Cline chat vs CLI task terminal vs workspace shell | `src/terminal/`, `src/cline-sdk/` |
+| [Runtime modes](runtime-modes.md) | CLI task terminal vs workspace shell | `src/terminal/` |
 | [Architect workspace classification](architect-workspace.md) | which opened repo is the architect + its context preamble | `src/server/architect-workspace.ts`, `src/prompts/append-system-prompt.ts` |
