@@ -97,6 +97,7 @@ function isUnauthenticated(runResult: { error?: any; status: number | null; stdo
 		outLower.includes("login") ||
 		outLower.includes("unauthenticated") ||
 		outLower.includes("authenticate") ||
+		outLower.includes("auth") ||
 		outLower.includes("sign-in") ||
 		outLower.includes("credentials") ||
 		outLower.includes("api key") ||
