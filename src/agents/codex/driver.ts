@@ -9,11 +9,10 @@ import {
 } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
-import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { toBracketedPaste } from "../../terminal/agent-session-adapters";
+import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
@@ -26,6 +25,7 @@ import type {
 import { supported, unsupported } from "../driver";
 import { hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 	return {
@@ -38,7 +38,8 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 					return unsupported(testFail);
 				}
 				const isTest =
-					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
+					(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY) ||
+					typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
 				if (!isTest) {
 					const candidates = getRuntimeAgentBinaryCandidates("codex");
 					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
@@ -308,9 +309,7 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 				// Write the bracketed paste WITHOUT a trailing Enter. Codex's TUI/PTY
 				// treats a carriage return fused onto the paste-end marker (… [201~\r)
 				// as buffered text, not a submit — so the steer text lands but never sends.
-				const plan: SteerStep[] = [
-					{ type: "write", data: toBracketedPaste(input.text) },
-				];
+				const plan: SteerStep[] = [{ type: "write", data: toBracketedPaste(input.text) }];
 				if (input.submit) {
 					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
 					// with the paste, the PTY coalesces both into one read, so the TUI still sees
@@ -610,5 +609,3 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
-
-

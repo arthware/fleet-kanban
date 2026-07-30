@@ -46,7 +46,10 @@ export interface ScenarioDriver {
 	expectAgentRunning(taskId: string): Promise<number>;
 	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
 	readAgentStdin(taskId: string): Promise<string>;
-	ingestNativeHook(taskId: string, input: { event: RuntimeHookEvent; metadata?: Partial<RuntimeTaskHookActivity> }): Promise<void>;
+	ingestNativeHook(
+		taskId: string,
+		input: { event: RuntimeHookEvent; metadata?: Partial<RuntimeTaskHookActivity> },
+	): Promise<void>;
 	expectReviewReason(taskId: string, reason: string | null): Promise<void>;
 }
 

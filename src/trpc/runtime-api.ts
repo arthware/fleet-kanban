@@ -6,6 +6,7 @@
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { TRPCError } from "@trpc/server";
+import { DRIVERS } from "../agents/driver";
 import type { RuntimeConfigState } from "../config/runtime-config";
 import { getRuntimeDebugResetPaths, updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtime-config";
 import type {
@@ -57,7 +58,6 @@ import {
 	mutateWorkspaceState,
 } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
-import { DRIVERS } from "../agents/driver";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";

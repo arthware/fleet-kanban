@@ -11,7 +11,12 @@ import {
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
-import { buildHookCommand, buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
+import {
+	buildHookCommand,
+	buildHooksCommand,
+	getHookAgentDirectory,
+	toBracketedPaste,
+} from "../../terminal/agent-session-adapters";
 import {
 	isClaudeCloudProviderBackend,
 	resolveClaudePermissionStrategy,
@@ -19,7 +24,6 @@ import {
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { deriveHomeAgentClaudeSessionId } from "../../terminal/home-agent-session-id";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
@@ -32,6 +36,7 @@ import type {
 import { supported, unsupported } from "../driver";
 import { hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 	return {
@@ -44,23 +49,13 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 					return unsupported(testFail);
 				}
 				const isTest =
-					typeof process.env.VITEST !== "undefined" || typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
+					(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY) ||
+					typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
 				if (!isTest) {
 					const candidates = getRuntimeAgentBinaryCandidates("claude");
 					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
 					if (!binary) {
 						return unsupported("binary missing: 'claude' CLI binary not found on PATH");
-					}
-					const hasAuth =
-						process.env.ANTHROPIC_API_KEY ||
-						process.env.AWS_PROFILE ||
-						process.env.AWS_ACCESS_KEY_ID ||
-						process.env.GCP_PROJECT ||
-						process.env.GOOGLE_APPLICATION_CREDENTIALS;
-					if (!hasAuth) {
-						return unsupported(
-							"not authenticated: ANTHROPIC_API_KEY or cloud provider credentials are not set in environment",
-						);
 					}
 					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
 						return unsupported("not trusted: workspace is not trusted");
@@ -396,11 +391,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 						fact: { type: "turn.started" },
 					} satisfies SessionSignal);
 				}
-				if (
-					normalizedName === "stop" ||
-					normalizedName === "afteragent" ||
-					normalizedName === "to_review"
-				) {
+				if (normalizedName === "stop" || normalizedName === "afteragent" || normalizedName === "to_review") {
 					return supported({
 						...base,
 						fact: { type: "turn.ended", finalMessage },
@@ -424,9 +415,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 				// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
 				// treats a carriage return fused onto the paste-end marker (… [201~\r)
 				// as buffered text, not a submit — so the steer text lands but never sends.
-				const plan: SteerStep[] = [
-					{ type: "write", data: toBracketedPaste(input.text) },
-				];
+				const plan: SteerStep[] = [{ type: "write", data: toBracketedPaste(input.text) }];
 				if (input.submit) {
 					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
 					// with the paste, the PTY coalesces both into one read, so the TUI still sees
@@ -439,9 +428,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 				return supported(plan);
 			},
 			interrupt: async () => {
-				const plan: SteerPlan = [
-					{ type: "write", data: "\x03" },
-				];
+				const plan: SteerPlan = [{ type: "write", data: "\x03" }];
 				return supported(plan);
 			},
 		},
@@ -742,5 +729,3 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
-
-

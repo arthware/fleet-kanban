@@ -135,7 +135,10 @@ async function ensureWorktree(
 		board: {
 			columns: DEFAULT_COLUMNS.map((column) => ({
 				...column,
-				cards: column.id === "backlog" ? [createSelfcheckCard({ id: taskId, title: taskId, baseRef, agentId: "claude" })] : [],
+				cards:
+					column.id === "backlog"
+						? [createSelfcheckCard({ id: taskId, title: taskId, baseRef, agentId: "claude" })]
+						: [],
 			})),
 			dependencies: [],
 		},
