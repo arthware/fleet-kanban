@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, copyFileSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 
 import type {
 	RuntimeBoardCard,
@@ -87,21 +88,50 @@ export function createSelfcheckCard(input: {
 	};
 }
 
-export async function createSelfcheckContext(): Promise<SelfcheckContext> {
-	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
-	const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
-	if (!existsSync(stubAgentPath)) {
-		fixture.cleanup();
-		throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+function getRealHome(): string {
+	if (process.platform === "win32") {
+		return process.env.USERPROFILE || `C:\\Users\\${process.env.USERNAME || "Default"}`;
 	}
+	if (process.platform === "darwin") {
+		const user = process.env.USER || process.env.LOGNAME || "arthur";
+		return `/Users/${user}`;
+	}
+	const user = process.env.USER || process.env.LOGNAME || "root";
+	return `/home/${user}`;
+}
+
+export async function createSelfcheckContext(opts?: { live?: boolean }): Promise<SelfcheckContext> {
+	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
 	let instance: any;
 	try {
-		instance = await startIsolatedKanbanInstance({
-			cwd: fixture.path,
-			env: {
-				KANBAN_TEST_AGENT_BINARY: stubAgentPath,
-			},
-		});
+		if (opts?.live) {
+			const realHome = getRealHome();
+			const env: Record<string, string> = {
+				KANBAN_TEST_PREFLIGHT_REAL: "1",
+				HOME: realHome,
+				USERPROFILE: realHome,
+			};
+			const asdfPath = join(realHome, ".asdf");
+			if (existsSync(asdfPath)) {
+				env.ASDF_DATA_DIR = asdfPath;
+			}
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env,
+			});
+		} else {
+			const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
+			if (!existsSync(stubAgentPath)) {
+				fixture.cleanup();
+				throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+			}
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env: {
+					KANBAN_TEST_AGENT_BINARY: stubAgentPath,
+				},
+			});
+		}
 	} catch (error) {
 		fixture.cleanup();
 		throw error;

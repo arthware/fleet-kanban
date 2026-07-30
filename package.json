@@ -64,6 +64,7 @@
     "test": "vitest run",
     "test:fast": "vitest run test/runtime test/utilities test/agents --exclude \"**/*.live.test.ts\"",
     "tck:live": "vitest run test/agents/tck/live-conformance.live.test.ts",
+    "test:live": "vitest run live.test",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "selfcheck": "tsx test/selfcheck/run-selfcheck.ts",
     "kanban:scratch": "node scripts/scratch-instance.mjs",

@@ -5,7 +5,11 @@ import { describe, expect } from "vitest";
 import { createClaudeDriver } from "../../../src/agents/claude/driver";
 import { createCodexDriver } from "../../../src/agents/codex/driver";
 import { createGeminiDriver } from "../../../src/agents/gemini/driver";
+import { captureCodexSessionId } from "../../../src/terminal/codex-session-capture";
 import { describeLiveDriverTck, registerLiveSummaryHandler } from "./live-tck";
+
+/** How far back a just-spawned Codex rollout file may be stamped and still count as this run's. */
+const CODEX_SESSION_LOOKBACK_MS = 5 * 60 * 1000;
 
 // 1. Session Discovery Helpers
 
@@ -45,32 +49,20 @@ function findLatestGeminiSession(home: string): { sessionId: string } | null {
 	return null;
 }
 
-function findLatestCodexSession(home: string): { sessionId: string } | null {
-	const tmpRoot = join(home, ".codex", "sessions");
-	let latestMtime = 0;
-	let latestFile = "";
-	try {
-		const files = readdirSync(tmpRoot);
-		for (const f of files) {
-			if (f.startsWith("rollout-") && f.endsWith(".jsonl")) {
-				const fp = join(tmpRoot, f);
-				const mtime = statSync(fp).mtimeMs;
-				if (mtime > latestMtime) {
-					latestMtime = mtime;
-					latestFile = fp;
-				}
-			}
-		}
-	} catch {}
-
-	if (!latestFile) return null;
-	const match = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/.exec(
-		latestFile,
-	);
-	if (match) {
-		return { sessionId: match[1] };
-	}
-	return null;
+/**
+ * Codex nests its rollout files under `sessions/YYYY/MM/DD/` and names each one after
+ * the session it belongs to. The runtime already knows how to find the rollout that
+ * matches a given working directory, so the test asks it rather than keeping a second,
+ * subtly different copy of that knowledge — a flat directory scan here silently found
+ * nothing and reported it as a missing session.
+ */
+async function findLatestCodexSession(home: string): Promise<{ sessionId: string } | null> {
+	const sessionId = await captureCodexSessionId({
+		cwd: process.cwd(),
+		startedAtMs: Date.now() - CODEX_SESSION_LOOKBACK_MS,
+		sessionsRoot: join(home, ".codex", "sessions"),
+	});
+	return sessionId ? { sessionId } : null;
 }
 
 // 2. Register Summary and Exit Safety Handler
@@ -98,8 +90,7 @@ describe("Live Conformance Suite", () => {
 	});
 
 	describeLiveDriverTck(createGeminiDriver(), {
-		args: () => ["--yolo", "-i", "reply with OK"],
+		args: () => ["-p", "reply with OK"],
 		discoverSessionId: findLatestGeminiSession,
-		requiredEnv: ["GEMINI_API_KEY"],
 	});
 });
