@@ -625,6 +625,29 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				}
 				const responseSummary = applyFleetToolsWarning(nextSummary);
 				await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
+
+				const driver = DRIVERS[resolved.agentId];
+				const identityResult = driver?.identity.resolve({
+					ref: isHome
+						? { kind: "overseer", taskId: body.taskId, workspaceId: workspaceScope.workspaceId }
+						: { kind: "card", taskId: body.taskId },
+					stored: previousSummary?.agentSessionId ?? null,
+					lifecycle: previousSummary?.agentSessionLifecycle ?? "gone",
+					generation: 0,
+				});
+				const discoverAfterSpawn = identityResult?.supported ? identityResult.value.discoverAfterSpawn : false;
+
+				if (discoverAfterSpawn) {
+					const unsubscribe = terminalManager.onSummary((updatedSummary) => {
+						if (updatedSummary.taskId === body.taskId && updatedSummary.agentSessionId) {
+							unsubscribe();
+							void persistTaskSessionSummary(workspaceScope.workspacePath, updatedSummary).catch(() => {
+								// Best effort background writeback
+							});
+						}
+					});
+				}
+
 				return {
 					ok: true,
 					summary: responseSummary,
