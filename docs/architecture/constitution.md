@@ -77,7 +77,7 @@ No "done / fixed / passing" claim without **fresh command output in the same tur
 
 ## Article 6 — Capability over identity
 
-Prefer capability-oriented reasoning over `selectedAgentId === "cline"` branching. Keep the SDK isolated behind `src/cline-sdk/`; only boundary modules may import `@clinebot/*`.
+Prefer capability-oriented reasoning over harness-specific branching. Keep harness-specific implementation isolated behind their respective driver modules.
 
 ## Article 7 — Clean replacement over compatibility scaffolding
 
