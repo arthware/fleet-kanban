@@ -2,8 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
+import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
-import { createHooksApi } from "../../../src/trpc/hooks-api";
+import { createHooksApi as createRealHooksApi } from "../../../src/trpc/hooks-api";
+
+function createHooksApi(deps: any) {
+	const origEnsure = deps.ensureTerminalManagerForWorkspace;
+	deps.ensureTerminalManagerForWorkspace = async (...args: any[]) => {
+		const manager = await origEnsure(...args);
+		if (manager) {
+			if (!manager.getLastProcessedSeq) {
+				manager.getLastProcessedSeq = vi.fn(() => 0);
+			}
+			if (!manager.setLastProcessedSeq) {
+				manager.setLastProcessedSeq = vi.fn();
+			}
+		}
+		return manager;
+	};
+	return createRealHooksApi(deps);
+}
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -22,6 +40,19 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 		latestHookActivity: null,
 		...overrides,
 	};
+}
+
+function createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
+	return {
+		getSummary: vi.fn(() => createSummary({ state: "running" })),
+		transitionToReview: vi.fn(),
+		transitionToRunning: vi.fn(),
+		applyHookActivity: vi.fn(),
+		applyTurnCheckpoint: vi.fn(),
+		getLastProcessedSeq: vi.fn(() => 0),
+		setLastProcessedSeq: vi.fn(),
+		...overrides,
+	} as unknown as TerminalSessionManager;
 }
 
 describe("createHooksApi", () => {
@@ -218,6 +249,73 @@ describe("createHooksApi", () => {
 
 		expect(response).toEqual({ ok: true });
 		expect(manager.transitionToRunning).toHaveBeenCalledTimes(1);
+	});
+
+	it("drops stale/duplicate signals with lower or equal sequence numbers", async () => {
+		const taskId = "task-stale";
+		SIGNAL_SEQUENCE_TRACKER.evictSession(taskId);
+
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ taskId, state: "running" })),
+			transitionToReview: vi.fn(() => createSummary({ taskId, state: "awaiting_review", reviewReason: "hook" })),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+			getLastProcessedSeq: vi.fn(() => 5),
+			setLastProcessedSeq: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		const response = await api.ingest({
+			taskId,
+			workspaceId: "workspace-1",
+			event: "to_review",
+			metadata: { source: "claude", hookEventName: "Stop" },
+		});
+
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToReview).not.toHaveBeenCalled();
+		expect(manager.setLastProcessedSeq).not.toHaveBeenCalled();
+	});
+
+	it("parks a gemini card when it receives a native gemini Notification hook", async () => {
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ agentId: "gemini", state: "running" })),
+			transitionToReview: vi.fn(() =>
+				createSummary({ agentId: "gemini", state: "awaiting_review", reviewReason: "needs_input" }),
+			),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "activity",
+			metadata: {
+				source: "gemini",
+				hookEventName: "Notification",
+				notificationType: "permission_prompt",
+				activityText: "Waiting for approval",
+			},
+		});
+
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToReview).toHaveBeenCalledWith("task-1", "needs_input");
 	});
 
 	it("given a completed Review card, when an explicit to_in_progress hook arrives, then it resumes running", async () => {

@@ -11,6 +11,7 @@ import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/a
 import { buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
@@ -239,25 +240,83 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 		},
 		signals: {
 			mapNativeSignal: (input) => {
-				if (input.name === "gemini.progress") {
+				const payloadRecord = asRecord(input.payload) || {};
+				const sessionId = (payloadRecord.sessionId as string) || "default-session";
+				const metadata = asRecord(payloadRecord.metadata) || payloadRecord;
+
+				const hookEventName = String(metadata.hookEventName || metadata.hook_event_name || input.name).trim();
+				const notificationType = String(metadata.notificationType || metadata.notification_type || "")
+					.trim()
+					.toLowerCase();
+				const finalMessage = metadata.finalMessage ? String(metadata.finalMessage) : null;
+
+				const seq = SIGNAL_SEQUENCE_TRACKER.getSequence(sessionId, input.name, input.payload, input.observedAt);
+				const base = {
+					seq,
+					at: input.observedAt,
+					activity: {
+						activityText: metadata.activityText ? String(metadata.activityText) : null,
+						toolName: metadata.toolName ? String(metadata.toolName) : null,
+						toolInputSummary: metadata.toolInputSummary ? String(metadata.toolInputSummary) : null,
+						finalMessage: metadata.finalMessage ? String(metadata.finalMessage) : null,
+						hookEventName: metadata.hookEventName ? String(metadata.hookEventName) : null,
+						notificationType: metadata.notificationType ? String(metadata.notificationType) : null,
+						source: "gemini",
+					},
+				};
+
+				const normalizedName = hookEventName.toLowerCase();
+				if (
+					normalizedName === "permissionrequest" ||
+					notificationType === "permission_prompt" ||
+					notificationType === "permission.asked" ||
+					notificationType === "user_attention"
+				) {
 					return supported({
-						seq: 1,
-						at: input.observedAt,
-						activity: null,
+						...base,
+						fact: { type: "attention.required", cause: "permission" },
+					} satisfies SessionSignal);
+				}
+				if (notificationType === "request_user_input") {
+					return supported({
+						...base,
+						fact: { type: "attention.required", cause: "question" },
+					} satisfies SessionSignal);
+				}
+				if (
+					normalizedName === "beforeagent" ||
+					normalizedName === "start" ||
+					normalizedName === "userpromptsubmit" ||
+					normalizedName === "task_started" ||
+					normalizedName === "to_in_progress"
+				) {
+					return supported({
+						...base,
+						fact: { type: "turn.started" },
+					} satisfies SessionSignal);
+				}
+				if (
+					normalizedName === "afteragent" ||
+					normalizedName === "stop" ||
+					normalizedName === "to_review"
+				) {
+					return supported({
+						...base,
+						fact: { type: "turn.ended", finalMessage },
+					} satisfies SessionSignal);
+				}
+				if (normalizedName === "activity") {
+					return supported({
+						...base,
 						fact: { type: "progress" },
 					} satisfies SessionSignal);
 				}
-				if (input.name === "gemini.stop") {
-					return supported({
-						seq: 2,
-						at: input.observedAt,
-						activity: null,
-						fact: { type: "turn.ended", finalMessage: "complete" },
-					} satisfies SessionSignal);
-				}
-				return unsupported(`Gemini driver does not map ${input.name}`);
+				return supported({
+					...base,
+					fact: { type: "progress" },
+				} satisfies SessionSignal);
 			},
-			attentionSupport: () => unsupported("attention is not bound yet"),
+			attentionSupport: () => supported(true),
 		},
 		control: {
 			steer: async () => unsupported("gemini control is not bound yet"),
@@ -464,3 +523,5 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
+
+

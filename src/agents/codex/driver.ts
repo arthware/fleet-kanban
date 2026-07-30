@@ -12,6 +12,7 @@ import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-
 import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
@@ -217,25 +218,87 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 		},
 		signals: {
 			mapNativeSignal: (input) => {
-				if (input.name === "codex.progress") {
+				const payloadRecord = asRecord(input.payload) || {};
+				const sessionId = (payloadRecord.sessionId as string) || "default-session";
+				const metadata = asRecord(payloadRecord.metadata) || payloadRecord;
+
+				const hookEventName = String(metadata.hookEventName || metadata.hook_event_name || input.name).trim();
+				const notificationType = String(metadata.notificationType || metadata.notification_type || "")
+					.trim()
+					.toLowerCase();
+				const finalMessage = metadata.finalMessage ? String(metadata.finalMessage) : null;
+
+				const seq = SIGNAL_SEQUENCE_TRACKER.getSequence(sessionId, input.name, input.payload, input.observedAt);
+				const base = {
+					seq,
+					at: input.observedAt,
+					activity: {
+						activityText: metadata.activityText ? String(metadata.activityText) : null,
+						toolName: metadata.toolName ? String(metadata.toolName) : null,
+						toolInputSummary: metadata.toolInputSummary ? String(metadata.toolInputSummary) : null,
+						finalMessage: metadata.finalMessage ? String(metadata.finalMessage) : null,
+						hookEventName: metadata.hookEventName ? String(metadata.hookEventName) : null,
+						notificationType: metadata.notificationType ? String(metadata.notificationType) : null,
+						source: "codex",
+					},
+				};
+
+				const normalizedName = hookEventName.toLowerCase();
+				if (
+					normalizedName === "approval_request" ||
+					normalizedName === "permission_request" ||
+					normalizedName === "approval_requested" ||
+					normalizedName === "permissionrequest" ||
+					normalizedName.endsWith("_approval_request") ||
+					notificationType === "permission_prompt" ||
+					notificationType === "permission.asked"
+				) {
 					return supported({
-						seq: 1,
-						at: input.observedAt,
-						activity: null,
+						...base,
+						fact: { type: "attention.required", cause: "permission" },
+					} satisfies SessionSignal);
+				}
+				if (notificationType === "request_user_input") {
+					return supported({
+						...base,
+						fact: { type: "attention.required", cause: "question" },
+					} satisfies SessionSignal);
+				}
+				if (
+					normalizedName === "task_started" ||
+					normalizedName === "userpromptsubmit" ||
+					normalizedName === "beforeagent" ||
+					normalizedName === "start" ||
+					normalizedName === "to_in_progress"
+				) {
+					return supported({
+						...base,
+						fact: { type: "turn.started" },
+					} satisfies SessionSignal);
+				}
+				if (
+					normalizedName === "task_complete" ||
+					normalizedName === "stop" ||
+					normalizedName === "afteragent" ||
+					normalizedName === "to_review"
+				) {
+					return supported({
+						...base,
+						fact: { type: "turn.ended", finalMessage },
+					} satisfies SessionSignal);
+				}
+				if (normalizedName === "activity") {
+					return supported({
+						...base,
 						fact: { type: "progress" },
 					} satisfies SessionSignal);
 				}
-				if (input.name === "codex.stop") {
-					return supported({
-						seq: 2,
-						at: input.observedAt,
-						activity: null,
-						fact: { type: "turn.ended", finalMessage: "complete" },
-					} satisfies SessionSignal);
-				}
-				return unsupported(`Codex driver does not map ${input.name}`);
+				return supported({
+					...base,
+					fact: { type: "progress" },
+				} satisfies SessionSignal);
 			},
-			attentionSupport: () => unsupported("attention is not bound yet"),
+			attentionSupport: () => supported(true),
 		},
 		control: {
 			steer: async () => unsupported("codex control is not bound yet"),
@@ -527,3 +590,5 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
+
+

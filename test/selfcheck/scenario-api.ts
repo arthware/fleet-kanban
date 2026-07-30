@@ -43,6 +43,8 @@ export interface ScenarioDriver {
 	expectSessionGone(taskId: string): Promise<void>;
 	expectAgentRunning(taskId: string): Promise<number>;
 	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
+	ingestNativeHook(taskId: string, input: { event: string; metadata?: any }): Promise<void>;
+	expectReviewReason(taskId: string, reason: string | null): Promise<void>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -117,7 +119,40 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	let stream: RuntimeStreamClient | null = null;
 	return {
 		createCard: async ({ card, column }) => {
-			await mutateBoard(context, (board) => placeCard(board, card, column));
+			const current = await loadState(context);
+			const nextBoard = placeCard(current.board, card, column);
+			const response = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "workspace.saveState",
+				type: "mutation",
+				workspaceId: context.workspaceId,
+				payload: {
+					board: nextBoard,
+					sessions: {
+						...current.sessions,
+						[card.id]: {
+							taskId: card.id,
+							state: "idle",
+							agentId: card.agentId ?? "claude",
+							workspacePath: null,
+							pid: null,
+							startedAt: null,
+							updatedAt: Date.now(),
+							lastOutputAt: null,
+							reviewReason: null,
+							exitCode: null,
+							agentSessionId: null,
+							lastHookAt: null,
+							latestHookActivity: null,
+						},
+					},
+					expectedRevision: current.revision,
+				},
+			});
+			if (response.status !== 200 || !response.payload.board) {
+				console.error("saveWorkspaceState failed detail:", response.status, JSON.stringify(response.payload, null, 2));
+			}
+			assertOk(response.status === 200 && response.payload.board, `createCard failed for ${card.id}`);
 		},
 		startCard: async (taskId) => {
 			const state = await loadState(context);
@@ -143,7 +178,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 		steerCard: async (taskId, text) => {
 			const response = await requestJson<RuntimeTaskSessionInputResponse>({
 				baseUrl: context.baseUrl,
-				procedure: "runtime.sendTaskInput",
+				procedure: "runtime.sendTaskSessionInput",
 				type: "mutation",
 				workspaceId: context.workspaceId,
 				payload: { taskId, text, bracketedPaste: true, submit: true },
@@ -220,6 +255,30 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				return null;
 			}, `launched argv file to exist at ${argvPath}`);
 			return JSON.parse(content) as readonly string[];
+		},
+		ingestNativeHook: async (taskId, input) => {
+			const hook = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId: context.workspaceId,
+					event: input.event as any,
+					metadata: input.metadata,
+				},
+			});
+			assertOk(
+				hook.status === 200 && hook.payload.ok,
+				`ingestNativeHook failed for ${taskId}: ${hook.payload.error}`,
+			);
+		},
+		expectReviewReason: async (taskId, reason) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				return summary && summary.reviewReason === reason ? true : null;
+			}, `card ${taskId} to have reviewReason ${reason}`);
 		},
 	};
 }

@@ -29,8 +29,14 @@ const driver = createGeminiDriver({ sessionId, homePath });
 
 describeDriverTck(driver, {
 	nativeSignals: [
-		{ name: "gemini.progress", payload: {}, expectedFactType: "progress" },
-		{ name: "gemini.stop", payload: {}, expectedFactType: "turn.ended" },
+		{ name: "BeforeAgent", payload: {}, expectedFactType: "turn.started" },
+		{ name: "AfterAgent", payload: {}, expectedFactType: "turn.ended" },
+		{
+			name: "Notification",
+			payload: { notificationType: "permission_prompt" },
+			expectedFactType: "attention.required",
+		},
+		{ name: "BeforeTool", payload: {}, expectedFactType: "progress" },
 	],
 	observation: {
 		expectedMessages: [

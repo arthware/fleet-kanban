@@ -32,8 +32,15 @@ const driver = createClaudeDriver({ sessionId, homePath });
 
 describeDriverTck(driver, {
 	nativeSignals: [
-		{ name: "claude.progress", payload: {}, expectedFactType: "progress" },
-		{ name: "claude.stop", payload: {}, expectedFactType: "turn.ended" },
+		{ name: "Start", payload: {}, expectedFactType: "turn.started" },
+		{ name: "Stop", payload: {}, expectedFactType: "turn.ended" },
+		{ name: "PermissionRequest", payload: {}, expectedFactType: "attention.required" },
+		{
+			name: "Notification",
+			payload: { notificationType: "permission_prompt" },
+			expectedFactType: "attention.required",
+		},
+		{ name: "PreToolUse", payload: {}, expectedFactType: "progress" },
 	],
 	observation: {
 		expectedMessages: [

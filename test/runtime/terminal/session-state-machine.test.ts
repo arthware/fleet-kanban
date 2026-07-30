@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
-import { isNeedsInputReviewHook, reduceSessionTransition } from "../../../src/terminal/session-state-machine";
+import { reduceSessionTransition } from "../../../src/terminal/session-state-machine";
 
 function createRunningSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -126,37 +126,6 @@ describe("reduceSessionTransition", () => {
 			expect(result.changed).toBe(true);
 			expect(result.patch.state).toBe("running");
 			expect(result.patch.reviewReason).toBeNull();
-		});
-	});
-
-	describe("isNeedsInputReviewHook", () => {
-		it("flags a permission-prompt notification as needs-input", () => {
-			expect(isNeedsInputReviewHook({ source: "claude", notificationType: "permission_prompt" })).toBe(true);
-		});
-
-		it("flags a PermissionRequest hook as needs-input (case-insensitive)", () => {
-			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "PermissionRequest" })).toBe(true);
-		});
-
-		it("flags a Codex request_user_input tool call as needs-input", () => {
-			expect(
-				isNeedsInputReviewHook({
-					source: "codex",
-					hookEventName: "raw_response_item",
-					notificationType: "request_user_input",
-					toolName: "request_user_input",
-				}),
-			).toBe(true);
-		});
-
-		it("does NOT flag an end-of-turn Stop hook", () => {
-			expect(isNeedsInputReviewHook({ source: "claude", hookEventName: "Stop" })).toBe(false);
-		});
-
-		it("does NOT flag empty or missing metadata", () => {
-			expect(isNeedsInputReviewHook(null)).toBe(false);
-			expect(isNeedsInputReviewHook(undefined)).toBe(false);
-			expect(isNeedsInputReviewHook({})).toBe(false);
 		});
 	});
 

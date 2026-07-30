@@ -1,13 +1,15 @@
-import type {
-	RuntimeHookEvent,
-	RuntimeHookIngestResponse,
-	RuntimeTaskSessionSummary,
-	RuntimeTaskTurnCheckpoint,
+import { DRIVERS } from "../agents/driver";
+import { SIGNAL_SEQUENCE_TRACKER } from "../agents/signal-sequence";
+import {
+	type RuntimeHookIngestResponse,
+	type RuntimeTaskSessionSummary,
+	type RuntimeTaskTurnCheckpoint,
+	runtimeAgentIdSchema,
 } from "../core/api-contract";
 import { parseHookIngestRequest } from "../core/api-validation";
+import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
 import { loadWorkspaceContextById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
-import { isNeedsInputReviewHook } from "../terminal/session-state-machine";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
 
@@ -28,16 +30,6 @@ export interface CreateHooksApiDependencies {
 	// Fired fire-and-forget on `to_review`; a no-op for non-auto-PR cards and the home
 	// agent. Optional so lightweight test contexts can omit or stub it.
 	ensureAutoReviewPrForTask?: (input: { workspaceId: string; taskId: string; cwd: string }) => Promise<unknown>;
-}
-
-function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event: RuntimeHookEvent): boolean {
-	if (event === "activity") {
-		return false;
-	}
-	if (event === "to_review") {
-		return summary.state === "running";
-	}
-	return summary.state === "awaiting_review";
 }
 
 export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcContext["hooksApi"] {
@@ -70,34 +62,117 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					} satisfies RuntimeHookIngestResponse;
 				}
 
-				if (!canTransitionTaskForHookEvent(summary, event)) {
+				let agentId = summary.agentId;
+				if (!agentId && isHomeAgentSessionId(taskId)) {
+					const parsed = parseHomeAgentSessionId(taskId);
+					if (parsed && parsed.agentId) {
+						const validation = runtimeAgentIdSchema.safeParse(parsed.agentId);
+						if (validation.success) {
+							agentId = validation.data;
+						}
+					}
+				}
+
+				if (!agentId) {
 					if (body.metadata) {
 						manager.applyHookActivity(taskId, body.metadata);
 					}
-					return {
-						ok: true,
-					} satisfies RuntimeHookIngestResponse;
+					return { ok: true } satisfies RuntimeHookIngestResponse;
 				}
 
-				// A permission prompt ("blocked — answer me") arrives as the same
-				// `to_review` event as an end-of-turn stop ("done — review me"); the
-				// hook metadata is what tells them apart, so lift the former reason.
-				const reviewReason = isNeedsInputReviewHook(body.metadata) ? "needs_input" : "hook";
-				const transitionedSummary =
-					event === "to_review"
-						? manager.transitionToReview(taskId, reviewReason)
-						: manager.transitionToRunning(taskId);
-				if (!transitionedSummary) {
+				const driver = DRIVERS[agentId];
+				if (!driver) {
 					return {
 						ok: false,
-						error: `Task "${taskId}" transition failed`,
+						error: `Driver not found for agent "${agentId}"`,
 					} satisfies RuntimeHookIngestResponse;
 				}
 
-				if (event === "to_review") {
+				const mappedSignalResult = driver.signals.mapNativeSignal({
+					name: body.metadata?.hookEventName ?? event,
+					payload: {
+						sessionId: summary.agentSessionId || taskId,
+						metadata: body.metadata,
+					},
+					observedAt: Date.now(),
+				});
+
+				if (!mappedSignalResult.supported) {
+					if (body.metadata) {
+						manager.applyHookActivity(taskId, body.metadata);
+					}
+					return { ok: true } satisfies RuntimeHookIngestResponse;
+				}
+
+				const signal = mappedSignalResult.value;
+
+				// Check monotonic sequence tracking
+				const lastSeq = manager.getLastProcessedSeq(taskId);
+				if (signal.seq <= lastSeq) {
+					// Drop stale/duplicate signal
+					return { ok: true } satisfies RuntimeHookIngestResponse;
+				}
+				manager.setLastProcessedSeq(taskId, signal.seq);
+
+				let transitionedSummary: RuntimeTaskSessionSummary | null = null;
+
+				switch (signal.fact.type) {
+					case "turn.started": {
+						if (summary.state === "awaiting_review") {
+							transitionedSummary = manager.transitionToRunning(taskId);
+						}
+						break;
+					}
+					case "turn.ended": {
+						if (summary.state === "running") {
+							transitionedSummary = manager.transitionToReview(taskId, "hook");
+						}
+						break;
+					}
+					case "attention.required": {
+						if (summary.state === "running") {
+							transitionedSummary = manager.transitionToReview(taskId, "needs_input");
+						}
+						break;
+					}
+					case "progress": {
+						break;
+					}
+					case "session.ended": {
+						SIGNAL_SEQUENCE_TRACKER.evictSession(summary.agentSessionId || taskId);
+						if (summary.state === "running") {
+							const reason = signal.fact.outcome === "completed" ? "exit" : "error";
+							transitionedSummary = manager.transitionToReview(taskId, reason);
+						}
+						break;
+					}
+					default: {
+						const _exhaustiveCheck: never = signal.fact;
+						break;
+					}
+				}
+
+				if (
+					!transitionedSummary ||
+					(transitionedSummary.state === summary.state &&
+						transitionedSummary.reviewReason === summary.reviewReason)
+				) {
+					if (body.metadata) {
+						manager.applyHookActivity(taskId, body.metadata);
+					}
+					return { ok: true } satisfies RuntimeHookIngestResponse;
+				}
+
+				const isTransitionToReview =
+					signal.fact.type === "turn.ended" ||
+					signal.fact.type === "attention.required" ||
+					signal.fact.type === "session.ended";
+
+				if (isTransitionToReview) {
 					const nextTurn = (transitionedSummary.latestTurnCheckpoint?.turn ?? 0) + 1;
 					const checkpointCwd = transitionedSummary.workspacePath ?? workspacePath;
 					const staleRef = transitionedSummary.previousTurnCheckpoint?.ref ?? null;
+
 					// Fire-and-forget: the review transition already happened above, so the
 					// hook ACK must not block on this. `checkpointCapture` runs `git add -A`
 					// over the whole worktree, which can exceed the hook client's 3s timeout
@@ -143,7 +218,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				}
 
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
-				if (event === "to_review") {
+				if (isTransitionToReview) {
 					deps.broadcastTaskReadyForReview(workspaceId, taskId);
 					void deps
 						.notifyTaskReadyForReview?.({
@@ -152,7 +227,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 							taskId,
 						})
 						.catch(() => {
-							// Best effort only: a missing/stopped architect session is a clean no-op.
+							// Fire-and-forget only: a missing/stopped architect session is a clean no-op.
 						});
 				}
 
