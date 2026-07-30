@@ -132,7 +132,12 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 							? [
 									{
 										matcher: "Bash",
-										hooks: [{ type: "command" as const, command: buildHooksCommand(["guard", "--source", "claude"]) }],
+										hooks: [
+											{
+												type: "command" as const,
+												command: buildHooksCommand(["guard", "--source", "claude"]),
+											},
+										],
 									},
 								]
 							: []),
