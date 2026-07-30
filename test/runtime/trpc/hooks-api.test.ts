@@ -220,6 +220,70 @@ describe("createHooksApi", () => {
 		expect(manager.transitionToRunning).toHaveBeenCalledTimes(1);
 	});
 
+	it("drops stale/duplicate signals with lower or equal sequence numbers", async () => {
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ state: "running" })),
+			transitionToReview: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+			getLastProcessedSeq: vi.fn(() => 5),
+			setLastProcessedSeq: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "to_review",
+			metadata: { source: "claude", hookEventName: "Stop" },
+		});
+
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToReview).not.toHaveBeenCalled();
+		expect(manager.setLastProcessedSeq).not.toHaveBeenCalled();
+	});
+
+	it("parks a gemini card when it receives a native gemini Notification hook", async () => {
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ agentId: "gemini", state: "running" })),
+			transitionToReview: vi.fn(() =>
+				createSummary({ agentId: "gemini", state: "awaiting_review", reviewReason: "needs_input" }),
+			),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview: vi.fn(),
+		});
+
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "activity",
+			metadata: {
+				source: "gemini",
+				hookEventName: "Notification",
+				notificationType: "permission_prompt",
+				activityText: "Waiting for approval",
+			},
+		});
+
+		expect(response).toEqual({ ok: true });
+		expect(manager.transitionToReview).toHaveBeenCalledWith("task-1", "needs_input");
+	});
+
 	it("given a completed Review card, when an explicit to_in_progress hook arrives, then it resumes running", async () => {
 		// given
 		const notifyTaskReadyForReview = vi.fn(async () => undefined);

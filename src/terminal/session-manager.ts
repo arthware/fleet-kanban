@@ -81,6 +81,7 @@ interface SessionEntry {
 	suppressAutoRestartOnExit: boolean;
 	autoRestartTimestamps: number[];
 	pendingAutoRestart: Promise<void> | null;
+	lastProcessedSeq?: number;
 }
 
 export interface StartTaskSessionRequest {
@@ -1110,6 +1111,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 			this.emitSummary(summary);
 		}
 		return cloneSummary(summary);
+	}
+
+	getLastProcessedSeq(taskId: string): number {
+		const entry = this.entries.get(taskId);
+		return entry?.lastProcessedSeq ?? 0;
+	}
+
+	setLastProcessedSeq(taskId: string, seq: number): void {
+		const entry = this.entries.get(taskId);
+		if (entry) {
+			entry.lastProcessedSeq = seq;
+		}
 	}
 
 	resumeFromHumanInput(taskId: string): RuntimeTaskSessionSummary | null {
