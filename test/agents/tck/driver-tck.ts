@@ -164,6 +164,40 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 				expect(overseerPlan.reason.trim().length).toBeGreaterThan(0);
 			}
 		});
+
+		it("supports control steer with submit enabled and disabled", async () => {
+			const text = "PING-42";
+			const steerWithSubmit = await driver.control.steer({ text, submit: true });
+			expect(steerWithSubmit.supported).toBe(true);
+			if (steerWithSubmit.supported) {
+				const plan = steerWithSubmit.value;
+				expect(plan.length).toBeGreaterThan(0);
+				expect(plan[0]?.type).toBe("write");
+				expect(plan.some(step => step.type === "wait")).toBe(true);
+				expect(plan.some(step => step.type === "write" && step.data === "\r")).toBe(true);
+			}
+
+			const steerWithoutSubmit = await driver.control.steer({ text, submit: false });
+			expect(steerWithoutSubmit.supported).toBe(true);
+			if (steerWithoutSubmit.supported) {
+				const plan = steerWithoutSubmit.value;
+				expect(plan.length).toBeGreaterThan(0);
+				expect(plan[0]?.type).toBe("write");
+				expect(plan.some(step => step.type === "wait")).toBe(false);
+				expect(plan.some(step => step.type === "write" && step.data === "\r")).toBe(false);
+			}
+		});
+
+		it("either performs interrupt or fails with a non-empty reason", async () => {
+			const interrupt = await driver.control.interrupt();
+			if (interrupt.supported) {
+				const plan = interrupt.value;
+				expect(plan.length).toBeGreaterThan(0);
+				expect(plan.every(step => step.type === "write" || step.type === "wait")).toBe(true);
+			} else {
+				expect(interrupt.reason.trim().length).toBeGreaterThan(0);
+			}
+		});
 	});
 }
 

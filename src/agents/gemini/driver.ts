@@ -8,7 +8,7 @@ import {
 	type RuntimeAgentCatalogEntry,
 } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import { buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
+import { buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
@@ -17,6 +17,7 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
+	SteerPlan,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption, withPrompt } from "../launch-utils";
@@ -260,8 +261,17 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 			attentionSupport: () => unsupported("attention is not bound yet"),
 		},
 		control: {
-			steer: async () => unsupported("gemini control is not bound yet"),
-			interrupt: async () => unsupported("gemini control is not bound yet"),
+			steer: async (input) => {
+				const plan: SteerPlan = [
+					{ type: "write", data: toBracketedPaste(input.text) },
+				];
+				if (input.submit) {
+					plan.push({ type: "wait", delayMs: 300 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => unsupported("Gemini CLI does not support interactive interruption"),
 		},
 	};
 }

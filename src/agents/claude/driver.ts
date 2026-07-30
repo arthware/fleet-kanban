@@ -11,7 +11,7 @@ import {
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
-import { buildHookCommand, buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
+import { buildHookCommand, buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import {
 	isClaudeCloudProviderBackend,
 	resolveClaudePermissionStrategy,
@@ -25,6 +25,7 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
+	SteerPlan,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption, withPrompt } from "../launch-utils";
@@ -360,8 +361,22 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 			attentionSupport: () => unsupported("attention is not bound yet"),
 		},
 		control: {
-			steer: async () => unsupported("claude control is not bound yet"),
-			interrupt: async () => unsupported("claude control is not bound yet"),
+			steer: async (input) => {
+				const plan: SteerPlan = [
+					{ type: "write", data: toBracketedPaste(input.text) },
+				];
+				if (input.submit) {
+					plan.push({ type: "wait", delayMs: 50 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => {
+				const plan: SteerPlan = [
+					{ type: "write", data: "\x03" },
+				];
+				return supported(plan);
+			},
 		},
 	};
 }

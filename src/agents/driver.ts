@@ -115,14 +115,20 @@ export interface SignalPort {
 	attentionSupport(): Capability<true>;
 }
 
+export type SteerStep =
+	| { readonly type: "write"; readonly data: string }
+	| { readonly type: "wait"; readonly delayMs: number };
+
+export type SteerPlan = readonly SteerStep[];
+
 export interface ControlRequest {
 	readonly text: string;
 	readonly submit: boolean;
 }
 
 export interface ControlPort {
-	steer(input: ControlRequest): Promise<Capability<void>>;
-	interrupt(): Promise<Capability<void>>;
+	steer(input: ControlRequest): Promise<Capability<SteerPlan>>;
+	interrupt(): Promise<Capability<SteerPlan>>;
 }
 
 export interface AgentDriver {

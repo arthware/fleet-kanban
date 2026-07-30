@@ -10,6 +10,7 @@ import {
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
+import { toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
@@ -18,6 +19,7 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
+	SteerPlan,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption } from "../launch-utils";
@@ -238,8 +240,17 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 			attentionSupport: () => unsupported("attention is not bound yet"),
 		},
 		control: {
-			steer: async () => unsupported("codex control is not bound yet"),
-			interrupt: async () => unsupported("codex control is not bound yet"),
+			steer: async (input) => {
+				const plan: SteerPlan = [
+					{ type: "write", data: toBracketedPaste(input.text) },
+				];
+				if (input.submit) {
+					plan.push({ type: "wait", delayMs: 50 });
+					plan.push({ type: "write", data: "\r" });
+				}
+				return supported(plan);
+			},
+			interrupt: async () => unsupported("Codex CLI does not support interactive interruption"),
 		},
 	};
 }
