@@ -278,12 +278,31 @@ describe("prepareAgentLaunch hook strategies", () => {
 
 		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "claude", "settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
-			hooks?: Record<string, unknown>;
+			hooks?: Record<string, unknown[]>;
 		};
+		expect(settings.hooks).toBeDefined();
 		expect(settings.hooks?.PermissionRequest).toBeDefined();
 		expect(settings.hooks?.PreToolUse).toBeDefined();
 		expect(settings.hooks?.PostToolUse).toBeDefined();
 		expect(settings.hooks?.PostToolUseFailure).toBeDefined();
+
+		// Structural validation: every event array entry must be an object with a `hooks` array
+		// where each element has type "command" and a string command.
+		for (const [_, entries] of Object.entries(settings.hooks ?? {})) {
+			expect(Array.isArray(entries)).toBe(true);
+			for (const entry of entries) {
+				expect(entry).toBeTypeOf("object");
+				expect(entry).not.toBeNull();
+				expect(entry).toHaveProperty("hooks");
+				expect(Array.isArray((entry as any).hooks)).toBe(true);
+				for (const hook of (entry as any).hooks) {
+					expect(hook).toBeTypeOf("object");
+					expect(hook).not.toBeNull();
+					expect(hook.type).toBe("command");
+					expect(typeof hook.command).toBe("string");
+				}
+			}
+		}
 	});
 
 	it("given a card selects Gemini CLI, when preparing launch with a prompt and hooks, then Gemini runs non-interactively with hook state forwarding", async () => {

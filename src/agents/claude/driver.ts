@@ -97,21 +97,48 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 				const hasWorkspaceId = input.workspaceId?.trim();
 				if (hasWorkspaceId) {
 					const settingsPath = join(getHookAgentDirectory("claude"), "settings.json");
-					const preToolUseHooks = [
+
+					type ClaudeHookEvent =
+						| "Stop"
+						| "SubagentStop"
+						| "PreToolUse"
+						| "PermissionRequest"
+						| "PostToolUse"
+						| "PostToolUseFailure"
+						| "Notification"
+						| "UserPromptSubmit";
+
+					interface ClaudeHookCommand {
+						type: "command";
+						command: string;
+						timeout?: number;
+					}
+
+					interface ClaudeHookMatcher {
+						matcher?: string;
+						hooks: ClaudeHookCommand[];
+					}
+
+					interface ClaudeHooksSettings {
+						hooks: Record<ClaudeHookEvent, ClaudeHookMatcher[]>;
+					}
+
+					const preToolUseHooks: ClaudeHookMatcher[] = [
 						{
 							matcher: "*",
-							hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
+							hooks: [{ type: "command" as const, command: buildHookCommand("activity", { source: "claude" }) }],
 						},
 						...(bashGuardEnabled
 							? [
 									{
 										matcher: "Bash",
-										hooks: [{ type: "command", command: buildHooksCommand(["guard", "--source", "claude"]) }],
+										hooks: [{ type: "command" as const, command: buildHooksCommand(["guard", "--source", "claude"]) }],
 									},
 								]
 							: []),
 					];
-					const hooksSettings = {
+
+					const hooksSettings: ClaudeHooksSettings = {
 						hooks: {
 							Stop: [
 								{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] },
@@ -122,11 +149,16 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 							PreToolUse: preToolUseHooks,
 							PermissionRequest: [
 								{
-									type: "command",
-									command: buildHookCommand("to_review", {
-										source: "claude",
-										notificationType: "permission_prompt",
-									}),
+									matcher: "*",
+									hooks: [
+										{
+											type: "command",
+											command: buildHookCommand("to_review", {
+												source: "claude",
+												notificationType: "permission_prompt",
+											}),
+										},
+									],
 								},
 							],
 							PostToolUse: [
