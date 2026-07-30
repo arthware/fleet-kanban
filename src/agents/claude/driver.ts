@@ -421,10 +421,18 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 		},
 		control: {
 			steer: async (input) => {
+				// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
+				// treats a carriage return fused onto the paste-end marker (… [201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
 				const plan: SteerStep[] = [
 					{ type: "write", data: toBracketedPaste(input.text) },
 				];
 				if (input.submit) {
+					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
+					// with the paste, the PTY coalesces both into one read, so the TUI still sees
+					// the Enter fused onto the paste-end marker and swallows it.
+					// For Claude, a 50ms gap is per-harness specific: it lets the paste flush and
+					// paste-mode close first, so the Enter registers as a submit keypress.
 					plan.push({ type: "wait", delayMs: 50 });
 					plan.push({ type: "write", data: "\r" });
 				}

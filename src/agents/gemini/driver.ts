@@ -322,10 +322,19 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 		},
 		control: {
 			steer: async (input) => {
+				// Write the bracketed paste WITHOUT a trailing Enter. Gemini's TUI/PTY
+				// treats a carriage return fused onto the paste-end marker (… [201~\r)
+				// as buffered text, not a submit — so the steer text lands but never sends.
 				const plan: SteerStep[] = [
 					{ type: "write", data: toBracketedPaste(input.text) },
 				];
 				if (input.submit) {
+					// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
+					// with the paste, the PTY coalesces both into one read, so the TUI still sees
+					// the Enter fused onto the paste-end marker and swallows it.
+					// For Gemini, a 300ms gap is required because Gemini's internal input processor
+					// and PTY event loop are slower and need more time to process the paste-end
+					// boundary before receiving the carriage return submit keypress.
 					plan.push({ type: "wait", delayMs: 300 });
 					plan.push({ type: "write", data: "\r" });
 				}

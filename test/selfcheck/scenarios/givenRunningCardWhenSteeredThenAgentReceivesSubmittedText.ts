@@ -12,6 +12,7 @@ export async function givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(
 		card: createSelfcheckCard({
 			id: taskId1,
 			title: "Card 1 steer with submit",
+			agentId: "claude",
 		}),
 	});
 	await driver.startCard(taskId1);
@@ -35,6 +36,7 @@ export async function givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(
 		card: createSelfcheckCard({
 			id: taskId2,
 			title: "Card 2 steer without submit",
+			agentId: "claude",
 		}),
 	});
 	await driver.startCard(taskId2);

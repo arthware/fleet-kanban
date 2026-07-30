@@ -62,9 +62,12 @@ export function createSelfcheckCard(input: {
 	title: string;
 	prompt?: string;
 	baseRef?: string;
-	agentId?: RuntimeBoardCard["agentId"];
+	agentId: RuntimeBoardCard["agentId"];
 	agentModel?: string;
 }): RuntimeBoardCard {
+	if (!input.agentId) {
+		throw new Error(`createSelfcheckCard failed: card ${input.id} is missing agentId.`);
+	}
 	const now = Date.now();
 	return {
 		id: input.id,
@@ -72,7 +75,7 @@ export function createSelfcheckCard(input: {
 		prompt: input.prompt ?? input.title,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		agentId: input.agentId ?? "claude",
+		agentId: input.agentId,
 		baseRef: input.baseRef ?? "main",
 		createdAt: now,
 		updatedAt: now,

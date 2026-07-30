@@ -23,6 +23,7 @@ export async function givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
 		card: createSelfcheckCard({
 			id: taskIdA,
 			title: "Card A override model",
+			agentId: "claude",
 			agentModel: "sonnet-3-5",
 		}),
 	});
@@ -43,6 +44,7 @@ export async function givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
 		card: createSelfcheckCard({
 			id: taskIdC,
 			title: "Card C no override",
+			agentId: "claude",
 		}),
 	});
 	await driver.startCard(taskIdC);
@@ -79,6 +81,7 @@ export async function givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
 			card: createSelfcheckCard({
 				id: taskIdB,
 				title: "Card B user supplied model",
+				agentId: "claude",
 				agentModel: "should-be-overridden",
 			}),
 		});

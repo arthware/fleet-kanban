@@ -7,6 +7,7 @@ export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: 
 		card: createSelfcheckCard({
 			id: taskId,
 			title: "Selfcheck review ping",
+			agentId: "claude",
 		}),
 	});
 	await driver.startCard(taskId);
