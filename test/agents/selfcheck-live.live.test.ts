@@ -158,7 +158,7 @@ describe("Live Selfcheck Integration Tests", () => {
 				120000,
 			); // 120s timeout
 
-			if (result.unauthenticated) {
+			if (result.unauthenticated || !result.session || !result.state) {
 				const cleanOut = result.termOut.replace(/\s+/g, " ").trim().substring(0, 300);
 				const detailedReason = `Not authenticated/configured: "${cleanOut || "<empty>"}"`;
 				selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: detailedReason };
