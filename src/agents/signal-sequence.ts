@@ -29,7 +29,8 @@ export class SignalSequenceTracker {
 		this.sequences.set(sessionId, seq);
 
 		seen.set(fingerprint, seq);
-		// Keep sliding window of size 10 to limit memory growth
+		// Keep sliding window of size 10 to limit memory growth.
+		// Consequence: A replay arriving more than 10 events later gets a fresh seq, which the state guards make a harmless no-op.
 		if (seen.size > 10) {
 			const firstKey = seen.keys().next().value;
 			if (firstKey !== undefined) {

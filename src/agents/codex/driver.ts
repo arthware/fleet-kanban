@@ -268,17 +268,29 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 					normalizedName === "task_started" ||
 					normalizedName === "userpromptsubmit" ||
 					normalizedName === "beforeagent" ||
-					normalizedName === "start"
+					normalizedName === "start" ||
+					normalizedName === "to_in_progress"
 				) {
 					return supported({
 						...base,
 						fact: { type: "turn.started" },
 					} satisfies SessionSignal);
 				}
-				if (normalizedName === "task_complete" || normalizedName === "stop" || normalizedName === "afteragent") {
+				if (
+					normalizedName === "task_complete" ||
+					normalizedName === "stop" ||
+					normalizedName === "afteragent" ||
+					normalizedName === "to_review"
+				) {
 					return supported({
 						...base,
 						fact: { type: "turn.ended", finalMessage },
+					} satisfies SessionSignal);
+				}
+				if (normalizedName === "activity") {
+					return supported({
+						...base,
+						fact: { type: "progress" },
 					} satisfies SessionSignal);
 				}
 				return supported({

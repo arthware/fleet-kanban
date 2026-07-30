@@ -4,7 +4,24 @@ import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
-import { createHooksApi } from "../../../src/trpc/hooks-api";
+import { createHooksApi as createRealHooksApi } from "../../../src/trpc/hooks-api";
+
+function createHooksApi(deps: any) {
+	const origEnsure = deps.ensureTerminalManagerForWorkspace;
+	deps.ensureTerminalManagerForWorkspace = async (...args: any[]) => {
+		const manager = await origEnsure(...args);
+		if (manager) {
+			if (!manager.getLastProcessedSeq) {
+				manager.getLastProcessedSeq = vi.fn(() => 0);
+			}
+			if (!manager.setLastProcessedSeq) {
+				manager.setLastProcessedSeq = vi.fn();
+			}
+		}
+		return manager;
+	};
+	return createRealHooksApi(deps);
+}
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -23,6 +40,19 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 		latestHookActivity: null,
 		...overrides,
 	};
+}
+
+function createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
+	return {
+		getSummary: vi.fn(() => createSummary({ state: "running" })),
+		transitionToReview: vi.fn(),
+		transitionToRunning: vi.fn(),
+		applyHookActivity: vi.fn(),
+		applyTurnCheckpoint: vi.fn(),
+		getLastProcessedSeq: vi.fn(() => 0),
+		setLastProcessedSeq: vi.fn(),
+		...overrides,
+	} as unknown as TerminalSessionManager;
 }
 
 describe("createHooksApi", () => {

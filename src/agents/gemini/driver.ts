@@ -287,17 +287,28 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 					normalizedName === "beforeagent" ||
 					normalizedName === "start" ||
 					normalizedName === "userpromptsubmit" ||
-					normalizedName === "task_started"
+					normalizedName === "task_started" ||
+					normalizedName === "to_in_progress"
 				) {
 					return supported({
 						...base,
 						fact: { type: "turn.started" },
 					} satisfies SessionSignal);
 				}
-				if (normalizedName === "afteragent" || normalizedName === "stop") {
+				if (
+					normalizedName === "afteragent" ||
+					normalizedName === "stop" ||
+					normalizedName === "to_review"
+				) {
 					return supported({
 						...base,
 						fact: { type: "turn.ended", finalMessage },
+					} satisfies SessionSignal);
+				}
+				if (normalizedName === "activity") {
+					return supported({
+						...base,
+						fact: { type: "progress" },
 					} satisfies SessionSignal);
 				}
 				return supported({

@@ -1204,6 +1204,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry.terminalStateMirror?.dispose();
 		entry.terminalStateMirror = null;
 		entry.restartRequest = null;
+		const parsed = parseHomeAgentSessionId(taskId);
+		const agentId = parsed ? parsed.agentId : null;
+
 		const currentGen = entry.summary.homeAgentSessionGeneration ?? 0;
 		const summary = updateSummary(entry, {
 			state: "idle",
@@ -1212,6 +1215,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			exitCode: null,
 			agentSessionId: null,
 			agentSessionLifecycle: "gone",
+			agentId: agentId as any,
 			homeAgentSessionGeneration: currentGen + 1,
 		});
 		this.emitSummary(summary);
