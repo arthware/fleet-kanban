@@ -161,84 +161,92 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 
 	describe(`${driver.id} Live Conformance`, () => {
 		it("runs a live turn and parses observation results", async (ctx) => {
-			const binaryName = driver.catalog.binary;
-			const executablePath = resolveBinaryExecutable(binaryName);
-			if (!executablePath) {
-				summary[driver.id] = { executed: false, skipped: true, reason: `${binaryName} binary not found` };
-				ctx.skip();
-				return;
-			}
-
-			if (options.requiredEnv) {
-				for (const key of options.requiredEnv) {
-					if (!process.env[key]) {
-						summary[driver.id] = { executed: false, skipped: true, reason: `${key} env var missing` };
-						ctx.skip();
-						return;
-					}
-				}
-			}
-
-			const sessionId = randomUUID();
-			const home = process.env.HOME || homedir();
-			copyCredentialsToIsolatedHome(home);
-
-			const runEnv = {
-				...getCleanSystemEnv(),
-				...options.env,
-			};
-
-			const runResult = spawnSync(executablePath, options.args(sessionId), {
-				env: runEnv,
-				timeout: 30000,
-			});
-
-			if (runResult.error || runResult.status !== 0) {
-				if (isUnauthenticated(runResult)) {
-					const code = runResult.status !== null ? `Exit code ${runResult.status}` : "Error";
-					const out = (runResult.stdout?.toString() || "") + (runResult.stderr?.toString() || "");
-					const cleanOut = out.replace(/\s+/g, " ").trim().substring(0, 300);
-					const detailedReason = `Not authenticated (${code}: "${cleanOut}")`;
-
-					summary[driver.id] = { executed: false, skipped: true, reason: detailedReason };
+			try {
+				const binaryName = driver.catalog.binary;
+				const executablePath = resolveBinaryExecutable(binaryName);
+				if (!executablePath) {
+					summary[driver.id] = { executed: false, skipped: true, reason: `${binaryName} binary not found` };
 					ctx.skip();
 					return;
-				} else {
-					const errMsg =
-						runResult.error?.message || runResult.stderr?.toString() || `Exit code ${runResult.status}`;
-					throw new Error(`${driver.id.toUpperCase()} CLI execution failed: ${errMsg}`);
 				}
-			}
 
-			const targetSessionId = options.discoverSessionId ? options.discoverSessionId(home)?.sessionId : sessionId;
-			if (!targetSessionId) {
-				throw new Error(`Failed to discover session ID for ${driver.id}`);
-			}
-
-			const presentResult = await driver.observe.artifactPresent({ sessionId: targetSessionId, homePath: home });
-			expect(presentResult.supported).toBe(true);
-			if (presentResult.supported) {
-				expect(presentResult.value).toBe(true);
-			}
-
-			const messagesResult = await driver.observe.messages({ sessionId: targetSessionId, homePath: home });
-			expect(messagesResult.supported).toBe(true);
-			if (messagesResult.supported) {
-				expect(messagesResult.value.length).toBeGreaterThan(0);
-				if (options.expectations?.assertMessages) {
-					options.expectations.assertMessages(messagesResult.value);
+				if (options.requiredEnv) {
+					for (const key of options.requiredEnv) {
+						if (!process.env[key]) {
+							summary[driver.id] = { executed: false, skipped: true, reason: `${key} env var missing` };
+							ctx.skip();
+							return;
+						}
+					}
 				}
-			}
 
-			const usageResult = await driver.observe.usage({ sessionId: targetSessionId, homePath: home });
-			expect(usageResult.supported).toBe(true);
-			if (usageResult.supported) {
-				if (options.expectations?.assertUsage) {
-					options.expectations.assertUsage(usageResult.value);
+				const sessionId = randomUUID();
+				const home = process.env.HOME || homedir();
+				copyCredentialsToIsolatedHome(home);
+
+				const runEnv = {
+					...getCleanSystemEnv(),
+					...options.env,
+				};
+
+				const runResult = spawnSync(executablePath, options.args(sessionId), {
+					env: runEnv,
+					timeout: 30000,
+				});
+
+				if (runResult.error || runResult.status !== 0) {
+					if (isUnauthenticated(runResult)) {
+						const code = runResult.status !== null ? `Exit code ${runResult.status}` : "Error";
+						const out = (runResult.stdout?.toString() || "") + (runResult.stderr?.toString() || "");
+						const cleanOut = out.replace(/\s+/g, " ").trim().substring(0, 300);
+						const detailedReason = `Not authenticated (${code}: "${cleanOut}")`;
+
+						summary[driver.id] = { executed: false, skipped: true, reason: detailedReason };
+						ctx.skip();
+						return;
+					} else {
+						const errMsg =
+							runResult.error?.message || runResult.stderr?.toString() || `Exit code ${runResult.status}`;
+						throw new Error(`${driver.id.toUpperCase()} CLI execution failed: ${errMsg}`);
+					}
 				}
-			}
 
-			summary[driver.id] = { executed: true, skipped: false, reason: "" };
+				const targetSessionId = options.discoverSessionId ? options.discoverSessionId(home)?.sessionId : sessionId;
+				if (!targetSessionId) {
+					throw new Error(`Failed to discover session ID for ${driver.id}`);
+				}
+
+				const presentResult = await driver.observe.artifactPresent({ sessionId: targetSessionId, homePath: home });
+				expect(presentResult.supported).toBe(true);
+				if (presentResult.supported) {
+					expect(presentResult.value).toBe(true);
+				}
+
+				const messagesResult = await driver.observe.messages({ sessionId: targetSessionId, homePath: home });
+				expect(messagesResult.supported).toBe(true);
+				if (messagesResult.supported) {
+					expect(messagesResult.value.length).toBeGreaterThan(0);
+					if (options.expectations?.assertMessages) {
+						options.expectations.assertMessages(messagesResult.value);
+					}
+				}
+
+				const usageResult = await driver.observe.usage({ sessionId: targetSessionId, homePath: home });
+				expect(usageResult.supported).toBe(true);
+				if (usageResult.supported) {
+					if (options.expectations?.assertUsage) {
+						options.expectations.assertUsage(usageResult.value);
+					}
+				}
+
+				summary[driver.id] = { executed: true, skipped: false, reason: "" };
+			} catch (error: any) {
+				if (summary[driver.id].skipped) {
+					throw error;
+				}
+				summary[driver.id] = { executed: false, skipped: false, reason: `failed: ${error.message}` };
+				throw error;
+			}
 		});
 	});
 }

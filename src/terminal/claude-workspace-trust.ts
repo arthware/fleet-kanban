@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import type { RuntimeAgentId } from "../core/api-contract";
 import { getTaskWorktreesHomePath } from "../state/workspace-state";
 
@@ -62,12 +63,21 @@ export function hasClaudeWorkspaceTrustPrompt(text: string): boolean {
 }
 
 function isTaskWorktreePath(path: string): boolean {
-	const worktreesRoot = `${getTaskWorktreesHomePath().replace(/\\/gu, "/").replace(/\/+$/u, "")}/`;
-	const normalizedPath = `${path.replace(/\\/gu, "/").replace(/\/+$/u, "")}/`;
+	let worktreesRoot = getTaskWorktreesHomePath();
+	try {
+		worktreesRoot = realpathSync(worktreesRoot);
+	} catch {}
+	let realPath = path;
+	try {
+		realPath = realpathSync(path);
+	} catch {}
+
+	const worktreesRootNormalized = `${worktreesRoot.replace(/\\/gu, "/").replace(/\/+$/u, "")}/`;
+	const normalizedPath = `${realPath.replace(/\\/gu, "/").replace(/\/+$/u, "")}/`;
 	if (process.platform === "win32") {
-		return normalizedPath.toLowerCase().startsWith(worktreesRoot.toLowerCase());
+		return normalizedPath.toLowerCase().startsWith(worktreesRootNormalized.toLowerCase());
 	}
-	return normalizedPath.startsWith(worktreesRoot);
+	return normalizedPath.startsWith(worktreesRootNormalized);
 }
 
 export function shouldAutoConfirmClaudeWorkspaceTrust(agentId: RuntimeAgentId, cwd: string): boolean {

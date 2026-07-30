@@ -39,33 +39,27 @@ function stripAnsi(str: string): string {
 	return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
 }
 
-// Check if binary is missing, unauthenticated, or in interactive first-run onboarding
-function isUnauthenticatedText(out: string): boolean {
+// Classify skip reasons with precise categories or return null if it should continue executing
+function classifyLiveSkipReason(out: string): string | null {
 	const outLower = out.toLowerCase().replace(/\s+/g, "");
-	const matchers = [
-		"login",
-		"unauthenticated",
-		"notloggedin",
-		"unauthorized",
-		"pleasesignin",
-		"openthebrowser",
-		"choosethetextstyle",
-		"textstylethatlooksbest",
-		"selectastyle",
-		"quicksafetycheck",
-		"mustspecifythegemini_api_key",
-		"noauthenticationmethodselected",
-		"pleasesetanauthmethod",
-		"notauthenticated",
-		"entergeminiapikey",
-	];
-	for (const m of matchers) {
-		if (outLower.includes(m)) {
-			console.log(`[match-debug] MATCHED: "${m}" in "${outLower.substring(0, 300)}"`);
-			return true;
-		}
+	if (outLower.includes("choosethetextstyle") || outLower.includes("textstylethatlooksbest") || outLower.includes("selectastyle")) {
+		return "Interactive onboarding prompt not answered (Claude theme selection)";
 	}
-	return false;
+	if (outLower.includes("entergeminiapikey") || outLower.includes("pleaseenteryourgeminiapikey")) {
+		return "Not authenticated (Gemini CLI prompting for API Key)";
+	}
+	if (outLower.includes("mustspecifythegemini_api_key") || outLower.includes("noauthenticationmethodselected") || outLower.includes("pleasesetanauthmethod")) {
+		return "Not authenticated (Gemini CLI auth method missing)";
+	}
+	if (outLower.includes("login") || outLower.includes("notloggedin") || outLower.includes("pleasesignin") || outLower.includes("openthebrowser")) {
+		return "Not authenticated (Claude Code not logged in)";
+	}
+	return null;
+}
+
+// Backward compatibility check for isUnauthenticatedText
+function isUnauthenticatedText(out: string): boolean {
+	return classifyLiveSkipReason(out) !== null;
 }
 
 async function captureTerminalOutput(
@@ -142,8 +136,9 @@ describe("Live Selfcheck Integration Tests", () => {
 				async () => {
 					const termOut = capture ? capture.getOutput() : "";
 					const cleanTermOut = stripAnsi(termOut);
-					if (isUnauthenticatedText(cleanTermOut)) {
-						return { unauthenticated: true, termOut: cleanTermOut };
+					const skipReason = classifyLiveSkipReason(cleanTermOut);
+					if (skipReason) {
+						return { unauthenticated: true, skipReason, termOut: cleanTermOut };
 					}
 
 					const state = await loadState(context);
@@ -161,8 +156,9 @@ describe("Live Selfcheck Integration Tests", () => {
 			); // 120s timeout
 
 			if (result.unauthenticated || !("session" in result) || !("state" in result) || !result.session || !result.state) {
+				const skipReason = ("skipReason" in result) ? result.skipReason : "Agent started but never parked";
 				const cleanOut = result.termOut.replace(/\s+/g, " ").trim().substring(0, 300);
-				const detailedReason = `Not authenticated/configured: "${cleanOut || "<empty>"}"`;
+				const detailedReason = `${skipReason} (Output: "${cleanOut || "<empty>"}")`;
 				selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: detailedReason };
 				ctx.skip();
 				return;
@@ -172,9 +168,10 @@ describe("Live Selfcheck Integration Tests", () => {
 
 			if (session.exitCode !== 0 || session.reviewReason === "error" || isUnauthenticatedText(termOut)) {
 				// Check if the output indicates lack of authentication
-				if (isUnauthenticatedText(termOut) || termOut.toLowerCase().includes("auth") || session.exitCode !== 0) {
+				const skipReason = classifyLiveSkipReason(termOut);
+				if (skipReason || session.exitCode !== 0) {
 					const cleanOut = termOut.replace(/\s+/g, " ").trim().substring(0, 300);
-					const detailedReason = `Not authenticated (Exit code ${session.exitCode}: "${cleanOut || "<empty>"}")`;
+					const detailedReason = `${skipReason || "Binary execution failed"} (Exit code ${session.exitCode}: "${cleanOut || "<empty>"}")`;
 					selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: detailedReason };
 					ctx.skip();
 					return;
