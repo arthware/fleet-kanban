@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
+import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
 import { createHooksApi } from "../../../src/trpc/hooks-api";
 
@@ -221,9 +222,12 @@ describe("createHooksApi", () => {
 	});
 
 	it("drops stale/duplicate signals with lower or equal sequence numbers", async () => {
+		const taskId = "task-stale";
+		SIGNAL_SEQUENCE_TRACKER.evictSession(taskId);
+
 		const manager = {
-			getSummary: vi.fn(() => createSummary({ state: "running" })),
-			transitionToReview: vi.fn(() => createSummary({ state: "awaiting_review", reviewReason: "hook" })),
+			getSummary: vi.fn(() => createSummary({ taskId, state: "running" })),
+			transitionToReview: vi.fn(() => createSummary({ taskId, state: "awaiting_review", reviewReason: "hook" })),
 			transitionToRunning: vi.fn(),
 			applyHookActivity: vi.fn(),
 			applyTurnCheckpoint: vi.fn(),
@@ -239,7 +243,7 @@ describe("createHooksApi", () => {
 		});
 
 		const response = await api.ingest({
-			taskId: "task-1",
+			taskId,
 			workspaceId: "workspace-1",
 			event: "to_review",
 			metadata: { source: "claude", hookEventName: "Stop" },

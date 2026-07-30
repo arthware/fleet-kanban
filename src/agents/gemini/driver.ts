@@ -11,6 +11,7 @@ import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/a
 import { buildHooksCommand, getHookAgentDirectory } from "../../terminal/agent-session-adapters";
 import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
+import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
@@ -249,7 +250,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 					.toLowerCase();
 				const finalMessage = metadata.finalMessage ? String(metadata.finalMessage) : null;
 
-				const seq = getSequenceForSignal(sessionId, input.name, input.payload);
+				const seq = SIGNAL_SEQUENCE_TRACKER.getSequence(sessionId, input.name, input.payload, input.observedAt);
 				const base = {
 					seq,
 					at: input.observedAt,
@@ -512,29 +513,4 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-const sessionSequences = new Map<string, number>();
-const sessionSeenSignals = new Map<string, Map<string, number>>();
 
-function getSequenceForSignal(sessionId: string, name: string, payload: unknown): number {
-	let seen = sessionSeenSignals.get(sessionId);
-	if (!seen) {
-		seen = new Map();
-		sessionSeenSignals.set(sessionId, seen);
-	}
-	let payloadStr = "";
-	try {
-		payloadStr = JSON.stringify(payload);
-	} catch {
-		payloadStr = String(payload);
-	}
-	const fingerprint = `${name}:${payloadStr}`;
-	const existingSeq = seen.get(fingerprint);
-	if (existingSeq !== undefined) {
-		return existingSeq;
-	}
-	let seq = sessionSequences.get(sessionId) ?? 0;
-	seq += 1;
-	sessionSequences.set(sessionId, seq);
-	seen.set(fingerprint, seq);
-	return seq;
-}

@@ -1,4 +1,5 @@
 import { DRIVERS } from "../agents/driver";
+import { SIGNAL_SEQUENCE_TRACKER } from "../agents/signal-sequence";
 import type {
 	RuntimeHookIngestResponse,
 	RuntimeTaskSessionSummary,
@@ -128,6 +129,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 								break;
 							}
 							case "session.ended": {
+								SIGNAL_SEQUENCE_TRACKER.evictSession(summary.agentSessionId || taskId);
 								if (summary.state === "running") {
 									const reason = signal.fact.outcome === "completed" ? "exit" : "error";
 									transitionedSummary = manager.transitionToReview(taskId, reason);
