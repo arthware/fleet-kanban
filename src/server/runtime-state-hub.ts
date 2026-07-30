@@ -15,6 +15,7 @@ import type {
 	RuntimeStateStreamTaskSessionsMessage,
 	RuntimeStateStreamWorkspaceMetadataMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
+	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
 import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
@@ -24,30 +25,24 @@ import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
 
-export type SessionKind = "card" | "overseer";
-
-export function getSessionKind(taskId: string): SessionKind {
-	return isHomeAgentSessionId(taskId) ? "overseer" : "card";
-}
-
-export function getTargetColumnForSession(summary: { taskId: string; state: string }): RuntimeBoardColumnId | null {
-	const kind = getSessionKind(summary.taskId);
-	switch (kind) {
-		case "card":
-			if (summary.state === "awaiting_review") {
-				return "review";
-			}
-			if (summary.state === "running") {
-				return "in_progress";
-			}
-			if (summary.state === "interrupted") {
-				return "trash";
-			}
-			return null;
-		case "overseer":
+export function getTargetColumnForSession(summary: {
+	taskId: string;
+	state: RuntimeTaskSessionState;
+}): RuntimeBoardColumnId | null {
+	if (isHomeAgentSessionId(summary.taskId)) {
+		return null;
+	}
+	switch (summary.state) {
+		case "awaiting_review":
+			return "review";
+		case "running":
+			return "in_progress";
+		case "idle":
+		case "failed":
+		case "interrupted":
 			return null;
 		default: {
-			const _exhaustive: never = kind;
+			const _exhaustive: never = summary.state;
 			return null;
 		}
 	}
@@ -55,7 +50,7 @@ export function getTargetColumnForSession(summary: { taskId: string; state: stri
 
 export async function projectSessionSummaryColumn(
 	workspaceId: string,
-	summary: { taskId: string; state: string; workspacePath?: string | null },
+	summary: { taskId: string; state: RuntimeTaskSessionState; workspacePath?: string | null },
 	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
 	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
 ): Promise<boolean> {
@@ -80,8 +75,11 @@ export async function projectSessionSummaryColumn(
 			await broadcastWorkspaceStateUpdated(workspaceId, workspacePath);
 			return true;
 		}
-	} catch {
-		// Ignore background projection mutation errors.
+	} catch (error) {
+		console.error(
+			`Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}":`,
+			error,
+		);
 	}
 	return false;
 }

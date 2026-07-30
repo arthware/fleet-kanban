@@ -20,7 +20,6 @@ import {
 	SnapshotAssemblyTimeoutError,
 	withSnapshotTimeout,
 	getTargetColumnForSession,
-	getSessionKind,
 	projectSessionSummaryColumn,
 } from "../../../src/server/runtime-state-hub";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
@@ -299,16 +298,11 @@ describe("applyPersistedCardPrToBoard", () => {
 	});
 });
 
-describe("getSessionKind and getTargetColumnForSession", () => {
-	it("should classify taskId kind correctly", () => {
-		expect(getSessionKind("task-1")).toBe("card");
-		expect(getSessionKind("__home_agent__:workspace-1")).toBe("overseer");
-	});
-
+describe("getTargetColumnForSession", () => {
 	it("should map card states to target columns", () => {
 		expect(getTargetColumnForSession({ taskId: "task-1", state: "awaiting_review" })).toBe("review");
 		expect(getTargetColumnForSession({ taskId: "task-1", state: "running" })).toBe("in_progress");
-		expect(getTargetColumnForSession({ taskId: "task-1", state: "interrupted" })).toBe("trash");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "interrupted" })).toBeNull();
 		expect(getTargetColumnForSession({ taskId: "task-1", state: "idle" })).toBeNull();
 	});
 
