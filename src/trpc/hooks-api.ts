@@ -1,13 +1,14 @@
 import { DRIVERS } from "../agents/driver";
 import { SIGNAL_SEQUENCE_TRACKER } from "../agents/signal-sequence";
-import type {
-	RuntimeHookIngestResponse,
-	RuntimeTaskSessionSummary,
-	RuntimeTaskTurnCheckpoint,
+import {
+	type RuntimeHookIngestResponse,
+	type RuntimeTaskSessionSummary,
+	type RuntimeTaskTurnCheckpoint,
+	runtimeAgentIdSchema,
 } from "../core/api-contract";
 import { parseHookIngestRequest } from "../core/api-validation";
 import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
-import { loadWorkspaceContextById, loadWorkspaceState } from "../state/workspace-state";
+import { loadWorkspaceContextById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
@@ -64,20 +65,11 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				let agentId = summary.agentId;
 				if (!agentId && isHomeAgentSessionId(taskId)) {
 					const parsed = parseHomeAgentSessionId(taskId);
-					agentId = parsed ? (parsed.agentId as any) : null;
-				}
-
-				if (!agentId) {
-					try {
-						const state = await loadWorkspaceState(workspacePath);
-						const card = state.board.columns
-							.flatMap((col) => col.cards)
-							.find((c) => c.id === taskId);
-						if (card) {
-							agentId = card.agentId ?? null;
+					if (parsed && parsed.agentId) {
+						const validation = runtimeAgentIdSchema.safeParse(parsed.agentId);
+						if (validation.success) {
+							agentId = validation.data;
 						}
-					} catch {
-						// Ignore board load errors
 					}
 				}
 

@@ -496,6 +496,7 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					input.sessions[summary.taskId] = summary;
 				}
 				const response = await saveWorkspaceState(workspaceScope.workspacePath, input);
+				terminalManager.hydrateFromRecord(response.sessions);
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
 				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
 				return response;

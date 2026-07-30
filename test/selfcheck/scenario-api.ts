@@ -119,7 +119,40 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	let stream: RuntimeStreamClient | null = null;
 	return {
 		createCard: async ({ card, column }) => {
-			await mutateBoard(context, (board) => placeCard(board, card, column));
+			const current = await loadState(context);
+			const nextBoard = placeCard(current.board, card, column);
+			const response = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "workspace.saveState",
+				type: "mutation",
+				workspaceId: context.workspaceId,
+				payload: {
+					board: nextBoard,
+					sessions: {
+						...current.sessions,
+						[card.id]: {
+							taskId: card.id,
+							state: "idle",
+							agentId: card.agentId ?? "claude",
+							workspacePath: null,
+							pid: null,
+							startedAt: null,
+							updatedAt: Date.now(),
+							lastOutputAt: null,
+							reviewReason: null,
+							exitCode: null,
+							agentSessionId: null,
+							lastHookAt: null,
+							latestHookActivity: null,
+						},
+					},
+					expectedRevision: current.revision,
+				},
+			});
+			if (response.status !== 200 || !response.payload.board) {
+				console.error("saveWorkspaceState failed detail:", response.status, JSON.stringify(response.payload, null, 2));
+			}
+			assertOk(response.status === 200 && response.payload.board, `createCard failed for ${card.id}`);
 		},
 		startCard: async (taskId) => {
 			const state = await loadState(context);

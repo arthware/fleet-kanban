@@ -272,16 +272,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 	hydrateFromRecord(record: Record<string, RuntimeTaskSessionSummary>): void {
 		for (const [taskId, summary] of Object.entries(record)) {
+			const existing = this.entries.get(taskId);
 			this.entries.set(taskId, {
 				summary: cloneSummary(summary),
-				active: null,
-				terminalStateMirror: null,
-				listenerIdCounter: 1,
-				listeners: new Map(),
-				restartRequest: null,
-				suppressAutoRestartOnExit: false,
-				autoRestartTimestamps: [],
-				pendingAutoRestart: null,
+				active: existing ? existing.active : null,
+				terminalStateMirror: existing ? existing.terminalStateMirror : null,
+				listenerIdCounter: existing ? existing.listenerIdCounter : 1,
+				listeners: existing ? existing.listeners : new Map(),
+				restartRequest: existing ? existing.restartRequest : null,
+				suppressAutoRestartOnExit: existing ? existing.suppressAutoRestartOnExit : false,
+				autoRestartTimestamps: existing ? existing.autoRestartTimestamps : [],
+				pendingAutoRestart: existing ? existing.pendingAutoRestart : null,
+				lastProcessedSeq: existing ? existing.lastProcessedSeq : undefined,
 			});
 		}
 	}
@@ -875,7 +877,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 		updateSummary(entry, {
 			state: "running",
-			agentId: null,
+			agentId: entry.summary.agentId || null,
 			workspacePath: request.cwd,
 			pid: session.pid,
 			startedAt: now(),
@@ -1020,6 +1022,14 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 		if (reason !== "hook" && reason !== "needs_input") {
 			return cloneSummary(entry.summary);
+		}
+		if (isHomeAgentSessionId(taskId) && entry.summary.state === "idle") {
+			const summary = updateSummary(entry, {
+				state: "awaiting_review",
+				reviewReason: reason,
+			});
+			this.emitSummary(summary);
+			return cloneSummary(summary);
 		}
 		const before = entry.summary;
 		const summary = this.applySessionEvent(entry, {
