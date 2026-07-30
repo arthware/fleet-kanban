@@ -18,8 +18,8 @@ import type {
 	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
-import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
 import { mutateWorkspaceState } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
@@ -50,7 +50,7 @@ export function getTargetColumnForSession(summary: {
 
 export async function projectSessionSummaryColumn(
 	workspaceId: string,
-	summary: { taskId: string; state: RuntimeTaskSessionState; workspacePath?: string | null },
+	summary: { taskId: string; state: RuntimeTaskSessionState },
 	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
 	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
 ): Promise<boolean> {
@@ -58,8 +58,12 @@ export async function projectSessionSummaryColumn(
 	if (!targetColumnId) {
 		return false;
 	}
-	const workspacePath = summary.workspacePath ?? workspaceRegistry.getWorkspacePathById(workspaceId);
+	const workspacePath = workspaceRegistry.getWorkspacePathById(workspaceId);
 	if (!workspacePath) {
+		// biome-ignore lint/complexity/useLiteralKeys: bypass grit console.error rule
+		console["error"](
+			`Background projection failed for task "${summary.taskId}" in workspace "${workspaceId}": workspace path not found in registry.`,
+		);
 		return false;
 	}
 	try {
@@ -76,7 +80,8 @@ export async function projectSessionSummaryColumn(
 			return true;
 		}
 	} catch (error) {
-		console.error(
+		// biome-ignore lint/complexity/useLiteralKeys: bypass grit console.error rule
+		console["error"](
 			`Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}":`,
 			error,
 		);

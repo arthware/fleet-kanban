@@ -17,10 +17,10 @@ import { addTaskToColumn, moveTaskToColumn } from "../../../src/core/task-board-
 import {
 	applyPersistedCardPrToBoard,
 	createRuntimeStateHub,
-	SnapshotAssemblyTimeoutError,
-	withSnapshotTimeout,
 	getTargetColumnForSession,
 	projectSessionSummaryColumn,
+	SnapshotAssemblyTimeoutError,
+	withSnapshotTimeout,
 } from "../../../src/server/runtime-state-hub";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 import type { CardPrRef } from "../../../src/workspace/card-pr-url";
@@ -401,6 +401,61 @@ describe("projectSessionSummaryColumn", () => {
 		expect(result).toBe(false);
 		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
 		expect(mockBroadcast).not.toHaveBeenCalled();
+	});
+
+	it("given a summary with workspacePath of a worktree, when projected, then it mutates the actual workspace repo path and NOT the worktree path", async () => {
+		const board = boardWithCard("in_progress");
+		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
+			const res = mutate(createWorkspaceState(cwd, board));
+			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn((id) => (id === "workspace-1" ? "/path/to/workspace" : null)),
+		};
+		const mockBroadcast = vi.fn();
+
+		const summaryWithWorktree = {
+			taskId: "task-1",
+			state: "awaiting_review" as const,
+			workspacePath: "/path/to/worktree",
+		};
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			summaryWithWorktree,
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		// It should use the registry's workspace path, not the summary's worktree path
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("/path/to/workspace", expect.any(Function));
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalledWith("/path/to/worktree", expect.any(Function));
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a workspace ID not found in the registry, when projected, then it logs an error and returns false", async () => {
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => null),
+		};
+		const mockBroadcast = vi.fn();
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-unknown",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+		expect(mockBroadcast).not.toHaveBeenCalled();
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'Background projection failed for task "task-1" in workspace "workspace-unknown": workspace path not found in registry.',
+			),
+		);
+		consoleErrorSpy.mockRestore();
 	});
 });
 
