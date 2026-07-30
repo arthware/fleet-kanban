@@ -1,6 +1,6 @@
 # Auto-review / PR mode
 
-**Importance:** medium  ·  **Lives in:** `src/prompts/pr-card-directive.ts`, `src/core/api-contract.ts`, `src/server/workspace-metadata-monitor.ts`
+**Importance:** medium  ·  **Lives in:** `src/prompts/compose-card-directive.ts`, `src/core/api-contract.ts`, `src/server/workspace-metadata-monitor.ts`
 
 A per-card mode where the agent commits, opens one idempotent PR against the card's base, and leaves
 the card in Review.

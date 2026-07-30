@@ -10,8 +10,7 @@ Identified by a minted synthetic id `__home_agent__:<workspaceId>` (deterministi
 reconnect; legacy `:<agentId>` ids still parse). No task card, no worktree, no implement/PR directive.
 Terminal-backed home agents also carry a persisted session generation; within a generation the agent
 CLI session id stays deterministic/resumable, and "Start fresh Session" bumps the generation so the
-next launch starts a new conversation while old transcripts remain on disk. Cline agent → native chat;
-other agents → terminal panel. The raw prefix must not be duplicated in app code (lint-enforced).
+next launch starts a new conversation while old transcripts remain on disk. All supported harnesses run as terminal-backed sessions, rendered in the terminal panel. The raw prefix must not be duplicated in app code (lint-enforced).
 
 ## Reuse / do-not-duplicate
 - Relates to [Workspace](workspace.md), [Task session](task-session.md),
