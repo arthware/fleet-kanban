@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ClaudeHooksSettings } from "../../../src/agents/claude/hook-settings";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createGitProcessEnv } from "../../../src/core/git-process-env";
 import { prepareAgentLaunch, toBracketedPaste } from "../../../src/terminal/agent-session-adapters";
@@ -277,9 +278,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		});
 
 		const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "claude", "settings.json");
-		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
-			hooks?: Record<string, unknown[]>;
-		};
+		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as ClaudeHooksSettings;
 		expect(settings.hooks).toBeDefined();
 		expect(settings.hooks?.PermissionRequest).toBeDefined();
 		expect(settings.hooks?.PreToolUse).toBeDefined();
@@ -294,8 +293,8 @@ describe("prepareAgentLaunch hook strategies", () => {
 				expect(entry).toBeTypeOf("object");
 				expect(entry).not.toBeNull();
 				expect(entry).toHaveProperty("hooks");
-				expect(Array.isArray((entry as any).hooks)).toBe(true);
-				for (const hook of (entry as any).hooks) {
+				expect(Array.isArray(entry.hooks)).toBe(true);
+				for (const hook of entry.hooks) {
 					expect(hook).toBeTypeOf("object");
 					expect(hook).not.toBeNull();
 					expect(hook.type).toBe("command");
@@ -875,19 +874,13 @@ describe("per-card agent model", () => {
 	});
 });
 
-interface ClaudeHookSettings {
-	hooks?: {
-		PreToolUse?: Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>;
-	};
-}
-
-function readClaudeSettings(): ClaudeHookSettings {
+function readClaudeSettings(): Partial<ClaudeHooksSettings> {
 	const settingsPath = join(homedir(), ".cline", "kanban", "hooks", "claude", "settings.json");
-	return JSON.parse(readFileSync(settingsPath, "utf8")) as ClaudeHookSettings;
+	return JSON.parse(readFileSync(settingsPath, "utf8")) as Partial<ClaudeHooksSettings>;
 }
 
 function findBashGuardHook(
-	settings: ClaudeHookSettings,
+	settings: Partial<ClaudeHooksSettings>,
 ): { matcher?: string; hooks?: Array<{ command?: string }> } | undefined {
 	return (settings.hooks?.PreToolUse ?? []).find(
 		(entry) =>

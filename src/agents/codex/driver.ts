@@ -19,7 +19,7 @@ import type {
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption } from "../shared/launch";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
+import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 	return {

@@ -17,7 +17,7 @@ import type {
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
-import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
+import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 
 export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 	return {
