@@ -57,11 +57,7 @@ import {
 	mutateWorkspaceState,
 } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
-import {
-	getAgentSubmitEnterDelayMs,
-	SUBMIT_ENTER_DELAY_MS,
-	toBracketedPaste,
-} from "../terminal/agent-session-adapters";
+import { DRIVERS } from "../agents/driver";
 import { readAgentTranscript } from "../terminal/agent-transcript-reader";
 import { readAgentUsage } from "../terminal/agent-usage-reader";
 import type { TerminalSessionManager } from "../terminal/session-manager";
@@ -89,7 +85,7 @@ export interface CreateRuntimeApiDependencies {
 	getFleetUpdateInProgressCount: () => Promise<number>;
 	/**
 	 * Waits `ms` before the bracketed-paste submit Enter is written, so the paste
-	 * settles into its own PTY read first (see {@link SUBMIT_ENTER_DELAY_MS}).
+	 * settles into its own PTY read first.
 	 * Defaults to a real timer; injected so tests drive the deferral deterministically.
 	 */
 	delay?: (ms: number) => Promise<void>;
@@ -189,19 +185,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					summary: resumedSummary,
 				};
 			}
-			// PTY path: `fleet task say` wraps steering in a bracketed paste so a
-			// mid-turn agent buffers it cleanly; `submit` decides whether it's sent.
-			const wantsSubmit = body.submit ?? true;
-			// Write the bracketed paste WITHOUT a trailing Enter. Claude's Ink TUI
-			// treats a carriage return fused onto the paste-end marker (…[201~\r)
-			// as buffered text, not a submit — so the steer text lands but never sends.
-			const ptyPayload = body.bracketedPaste
-				? toBracketedPaste(body.text)
-				: body.appendNewline
-					? `${body.text}\n`
-					: body.text;
+
 			const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
-			let summary = terminalManager.writeInput(body.taskId, Buffer.from(ptyPayload, "utf8"));
+			let summary = terminalManager.getSummary(body.taskId);
 			if (!summary) {
 				return {
 					ok: false,
@@ -209,17 +195,63 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					error: "Task session is not running.",
 				};
 			}
-			// Submit the Enter as a SEPARATE write on a LATER tick. Written back-to-back
-			// with the paste, the PTY coalesces both into one read, so the TUI still sees
-			// the Enter fused onto the paste-end marker and swallows it (the bug this path
-			// had). The delay lets the paste flush and paste-mode close first, so the Enter
-			// registers as a submit keypress. `--no-submit` skips it, staging the text.
-			if (body.bracketedPaste && wantsSubmit) {
-				const submitEnterDelayMs = getAgentSubmitEnterDelayMs(summary.agentId);
-				await delay(submitEnterDelayMs);
-				const afterSubmit = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
-				if (afterSubmit) {
-					summary = afterSubmit;
+
+			if (body.bracketedPaste) {
+				const agentId = summary.agentId;
+				if (!agentId) {
+					return {
+						ok: false,
+						summary,
+						error: "No agent is assigned to this task session.",
+					};
+				}
+				const driver = DRIVERS[agentId];
+				if (!driver) {
+					return {
+						ok: false,
+						summary,
+						error: `Unknown driver for agent: ${agentId}`,
+					};
+				}
+				const controlResult = await driver.control.steer({
+					text: body.text,
+					submit: body.submit ?? true,
+				});
+				if (!controlResult.supported) {
+					return {
+						ok: false,
+						summary,
+						error: controlResult.reason,
+					};
+				}
+				const plan = controlResult.value;
+				for (const step of plan) {
+					if (step.type === "write") {
+						const afterWrite = terminalManager.writeInput(body.taskId, Buffer.from(step.data, "utf8"));
+						if (afterWrite) {
+							summary = afterWrite;
+						} else {
+							return {
+								ok: false,
+								summary,
+								error: "Task session is not running.",
+							};
+						}
+					} else if (step.type === "wait") {
+						await delay(step.delayMs);
+					}
+				}
+			} else {
+				const payload = body.appendNewline ? `${body.text}\n` : body.text;
+				const afterWrite = terminalManager.writeInput(body.taskId, Buffer.from(payload, "utf8"));
+				if (afterWrite) {
+					summary = afterWrite;
+				} else {
+					return {
+						ok: false,
+						summary: null,
+						error: "Task session is not running.",
+					};
 				}
 			}
 			if (summary.state === "awaiting_review") {

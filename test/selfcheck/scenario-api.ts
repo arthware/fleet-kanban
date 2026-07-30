@@ -36,13 +36,14 @@ export interface SelfcheckContext {
 export interface ScenarioDriver {
 	createCard(input: { card: RuntimeBoardCard; column: RuntimeBoardColumnId }): Promise<void>;
 	startCard(taskId: string): Promise<void>;
-	steerCard(taskId: string, text: string): Promise<void>;
+	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
 	killAgentProcess(taskId: string): Promise<void>;
 	expectSessionGone(taskId: string): Promise<void>;
 	expectAgentRunning(taskId: string): Promise<number>;
 	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
+	readAgentStdin(taskId: string): Promise<string>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -140,13 +141,13 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}
 			await startTaskSession(context, card);
 		},
-		steerCard: async (taskId, text) => {
+		steerCard: async (taskId, text, submit = true) => {
 			const response = await requestJson<RuntimeTaskSessionInputResponse>({
 				baseUrl: context.baseUrl,
-				procedure: "runtime.sendTaskInput",
+				procedure: "runtime.sendTaskSessionInput",
 				type: "mutation",
 				workspaceId: context.workspaceId,
-				payload: { taskId, text, bracketedPaste: true, submit: true },
+				payload: { taskId, text, bracketedPaste: true, submit },
 			});
 			assertOk(
 				response.status === 200 && response.payload.ok,
@@ -220,6 +221,23 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				return null;
 			}, `launched argv file to exist at ${argvPath}`);
 			return JSON.parse(content) as readonly string[];
+		},
+		readAgentStdin: async (taskId) => {
+			const runtimeHome = context.instance.homeDir;
+			const stdinPath = join(runtimeHome, ".kanban", `launched-stdin-${taskId}.txt`);
+			let content = "";
+			await waitFor(async () => {
+				if (existsSync(stdinPath)) {
+					try {
+						content = readFileSync(stdinPath, "utf8");
+						return true;
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			}, `launched stdin file to exist at ${stdinPath}`);
+			return content;
 		},
 	};
 }

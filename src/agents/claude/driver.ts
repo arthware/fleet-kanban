@@ -26,6 +26,7 @@ import type {
 	LaunchPlan,
 	ObservationRequest,
 	SteerPlan,
+	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
 import { hasCliOption, withPrompt } from "../launch-utils";
@@ -362,7 +363,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 		},
 		control: {
 			steer: async (input) => {
-				const plan: SteerPlan = [
+				const plan: SteerStep[] = [
 					{ type: "write", data: toBracketedPaste(input.text) },
 				];
 				if (input.submit) {

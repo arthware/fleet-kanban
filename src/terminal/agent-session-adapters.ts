@@ -113,24 +113,6 @@ export function toBracketedPaste(command: string): string {
 	return `\u001b[200~${command}\u001b[201~`;
 }
 
-/**
- * Delay between writing a bracketed paste and writing the submit Enter. It lets the
- * paste flush and be processed by the agent TUI (paste mode closed) so the Enter
- * arrives in a distinct PTY read and registers as a submit keystroke rather than
- * being coalesced into the paste. Applies to every PTY agent (claude, codex, ...).
- */
-export const SUBMIT_ENTER_DELAY_MS = 50;
-
-/**
- * Gets the submit Enter delay for a given agent ID.
- */
-export function getAgentSubmitEnterDelayMs(agentId: string | null | undefined): number {
-	if (agentId === "gemini") {
-		return 300;
-	}
-	return SUBMIT_ENTER_DELAY_MS;
-}
-
 const CARD_GH_REMOTE_TIMEOUT_MS = 5_000;
 
 // gh goes interactive ("Where should we push the '<branch>' branch?") whenever it can't tell which
