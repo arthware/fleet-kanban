@@ -438,7 +438,7 @@ describe("projectSessionSummaryColumn", () => {
 			getWorkspacePathById: vi.fn(() => null),
 		};
 		const mockBroadcast = vi.fn();
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
 		const result = await projectSessionSummaryColumn(
 			"workspace-unknown",
@@ -450,12 +450,12 @@ describe("projectSessionSummaryColumn", () => {
 		expect(result).toBe(false);
 		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
 		expect(mockBroadcast).not.toHaveBeenCalled();
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
+		expect(stderrWriteSpy).toHaveBeenCalledWith(
 			expect.stringContaining(
-				'Background projection failed for task "task-1" in workspace "workspace-unknown": workspace path not found in registry.',
+				'[kanban] Background projection failed for task "task-1" in workspace "workspace-unknown": workspace path not found in registry.\n',
 			),
 		);
-		consoleErrorSpy.mockRestore();
+		stderrWriteSpy.mockRestore();
 	});
 });
 

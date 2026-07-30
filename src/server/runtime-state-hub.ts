@@ -60,9 +60,8 @@ export async function projectSessionSummaryColumn(
 	}
 	const workspacePath = workspaceRegistry.getWorkspacePathById(workspaceId);
 	if (!workspacePath) {
-		// biome-ignore lint/complexity/useLiteralKeys: bypass grit console.error rule
-		console["error"](
-			`Background projection failed for task "${summary.taskId}" in workspace "${workspaceId}": workspace path not found in registry.`,
+		process.stderr.write(
+			`[kanban] Background projection failed for task "${summary.taskId}" in workspace "${workspaceId}": workspace path not found in registry.\n`,
 		);
 		return false;
 	}
@@ -80,10 +79,9 @@ export async function projectSessionSummaryColumn(
 			return true;
 		}
 	} catch (error) {
-		// biome-ignore lint/complexity/useLiteralKeys: bypass grit console.error rule
-		console["error"](
-			`Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}":`,
-			error,
+		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(
+			`[kanban] Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
 		);
 	}
 	return false;
