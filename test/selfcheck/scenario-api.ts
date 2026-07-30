@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, copyFileSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 
 import type {
 	RuntimeBoardCard,
@@ -87,21 +88,62 @@ export function createSelfcheckCard(input: {
 	};
 }
 
-export async function createSelfcheckContext(): Promise<SelfcheckContext> {
-	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
-	const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
-	if (!existsSync(stubAgentPath)) {
-		fixture.cleanup();
-		throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+function copyRecursiveSync(src: string, dest: string) {
+	const exists = existsSync(src);
+	if (!exists) return;
+	const stats = lstatSync(src);
+	if (stats.isDirectory()) {
+		mkdirSync(dest, { recursive: true });
+		for (const child of readdirSync(src)) {
+			copyRecursiveSync(join(src, child), join(dest, child));
+		}
+	} else if (stats.isFile()) {
+		const parent = join(dest, "..");
+		mkdirSync(parent, { recursive: true });
+		copyFileSync(src, dest);
 	}
+}
+
+export function copyCredentialsToIsolatedHome(isolatedHome: string) {
+	const realHome = homedir();
+	const targets = [
+		".claude.json",
+		".claude",
+		join(".gemini", "google_accounts.json"),
+		join(".codex", "auth.json"),
+	];
+	for (const rel of targets) {
+		const srcPath = join(realHome, rel);
+		const destPath = join(isolatedHome, rel);
+		copyRecursiveSync(srcPath, destPath);
+	}
+}
+
+export async function createSelfcheckContext(opts?: { live?: boolean }): Promise<SelfcheckContext> {
+	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
 	let instance: any;
 	try {
-		instance = await startIsolatedKanbanInstance({
-			cwd: fixture.path,
-			env: {
-				KANBAN_TEST_AGENT_BINARY: stubAgentPath,
-			},
-		});
+		if (opts?.live) {
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env: {
+					KANBAN_TEST_PREFLIGHT_REAL: "1",
+				},
+			});
+			copyCredentialsToIsolatedHome(instance.homeDir);
+		} else {
+			const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
+			if (!existsSync(stubAgentPath)) {
+				fixture.cleanup();
+				throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+			}
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env: {
+					KANBAN_TEST_AGENT_BINARY: stubAgentPath,
+				},
+			});
+		}
 	} catch (error) {
 		fixture.cleanup();
 		throw error;
