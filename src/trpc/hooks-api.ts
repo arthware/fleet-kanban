@@ -1,5 +1,5 @@
 import { DRIVERS } from "../agents/driver";
-import { SIGNAL_SEQUENCE_TRACKER } from "../agents/signal-sequence";
+import { SIGNAL_SEQUENCE_TRACKER } from "../agents/shared/signals";
 import {
 	type RuntimeHookIngestResponse,
 	type RuntimeTaskSessionSummary,

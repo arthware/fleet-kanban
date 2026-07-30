@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SignalSequenceTracker } from "../../../src/agents/signal-sequence";
+import { SignalSequenceTracker } from "../../../src/agents/shared/signals";
 
 describe("SignalSequenceTracker", () => {
 	it("should assign distinct monotonic sequences for consecutive identical payloads with different observedAt times", () => {

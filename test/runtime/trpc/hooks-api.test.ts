@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/signal-sequence";
+import { SIGNAL_SEQUENCE_TRACKER } from "../../../src/agents/shared/signals";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import type { TerminalSessionManager } from "../../../src/terminal/session-manager";
