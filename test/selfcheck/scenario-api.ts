@@ -1,5 +1,4 @@
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type {
