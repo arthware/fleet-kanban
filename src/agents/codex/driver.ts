@@ -17,8 +17,8 @@ import type {
 	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
-import { binaryPreflight, hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { binaryPreflight, hasCliOption } from "../shared/launch";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {

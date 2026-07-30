@@ -29,8 +29,8 @@ import type {
 	SteerStep,
 } from "../driver";
 import { supported } from "../driver";
-import { binaryPreflight, hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
+import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {

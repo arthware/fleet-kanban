@@ -1,6 +1,6 @@
-import { getRuntimeAgentBinaryCandidates } from "../core/agent-catalog";
-import type { RuntimeAgentId } from "../core/api-contract";
-import { isBinaryAvailableOnPath } from "../terminal/command-discovery";
+import { getRuntimeAgentBinaryCandidates } from "../../core/agent-catalog";
+import type { RuntimeAgentId } from "../../core/api-contract";
+import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 
 export function hasCliOption(args: readonly string[], optionName: string): boolean {
 	for (let i = 0; i < args.length; i += 1) {
