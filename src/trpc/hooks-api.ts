@@ -65,7 +65,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				let agentId = summary.agentId;
 				if (!agentId && isHomeAgentSessionId(taskId)) {
 					const parsed = parseHomeAgentSessionId(taskId);
-					if (parsed && parsed.agentId) {
+					if (parsed?.agentId) {
 						const validation = runtimeAgentIdSchema.safeParse(parsed.agentId);
 						if (validation.success) {
 							agentId = validation.data;

@@ -41,7 +41,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 	};
 }
 
-function createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
+function _createMockManager(overrides: Record<string, any> = {}): TerminalSessionManager {
 	return {
 		getSummary: vi.fn(() => createSummary({ state: "running" })),
 		transitionToReview: vi.fn(),

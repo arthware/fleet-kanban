@@ -3,11 +3,7 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-	getRuntimeAgentBinaryCandidates,
-	RUNTIME_AGENT_CATALOG,
-	type RuntimeAgentCatalogEntry,
-} from "../../core/agent-catalog";
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
@@ -21,7 +17,6 @@ import {
 	isClaudeCloudProviderBackend,
 	resolveClaudePermissionStrategy,
 } from "../../terminal/claude-permission-strategy";
-import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { deriveHomeAgentClaudeSessionId } from "../../terminal/home-agent-session-id";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
@@ -33,8 +28,8 @@ import type {
 	SteerPlan,
 	SteerStep,
 } from "../driver";
-import { supported, unsupported } from "../driver";
-import { hasCliOption, withPrompt } from "../launch-utils";
+import { supported } from "../driver";
+import { binaryPreflight, hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
@@ -43,26 +38,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 		id: "claude",
 		catalog: catalogEntryById("claude"),
 		launch: {
-			preflight: async () => {
-				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
-				if (testFail) {
-					return unsupported(testFail);
-				}
-				const isTest =
-					(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY) ||
-					typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
-				if (!isTest) {
-					const candidates = getRuntimeAgentBinaryCandidates("claude");
-					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
-					if (!binary) {
-						return unsupported("binary missing: 'claude' CLI binary not found on PATH");
-					}
-					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-						return unsupported("not trusted: workspace is not trusted");
-					}
-				}
-				return supported({ ok: true as const });
-			},
+			preflight: () => binaryPreflight("claude"),
 			prepare: async (input) => {
 				const args = [...input.args];
 				const env: Record<string, string | undefined> = {

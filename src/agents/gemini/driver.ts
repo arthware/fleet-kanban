@@ -2,14 +2,9 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-	getRuntimeAgentBinaryCandidates,
-	RUNTIME_AGENT_CATALOG,
-	type RuntimeAgentCatalogEntry,
-} from "../../core/agent-catalog";
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
-import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
@@ -17,11 +12,10 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
-	SteerPlan,
 	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
-import { hasCliOption, withPrompt } from "../launch-utils";
+import { binaryPreflight, hasCliOption, withPrompt } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
@@ -30,26 +24,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 		id: "gemini",
 		catalog: catalogEntryById("gemini"),
 		launch: {
-			preflight: async () => {
-				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
-				if (testFail) {
-					return unsupported(testFail);
-				}
-				const isTest =
-					(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY) ||
-					typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
-				if (!isTest) {
-					const candidates = getRuntimeAgentBinaryCandidates("gemini");
-					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
-					if (!binary) {
-						return unsupported("binary missing: 'gemini' CLI binary not found on PATH");
-					}
-					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-						return unsupported("not trusted: workspace is not trusted");
-					}
-				}
-				return supported({ ok: true as const });
-			},
+			preflight: () => binaryPreflight("gemini"),
 			prepare: async (input) => {
 				const args = [...input.args];
 				const env: Record<string, string | undefined> = {};

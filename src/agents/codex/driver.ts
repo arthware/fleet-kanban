@@ -2,16 +2,11 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-	getRuntimeAgentBinaryCandidates,
-	RUNTIME_AGENT_CATALOG,
-	type RuntimeAgentCatalogEntry,
-} from "../../core/agent-catalog";
+import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { configureCodexHooks, hasCodexConfigOverride } from "../../terminal/codex-hook-config";
-import { isBinaryAvailableOnPath } from "../../terminal/command-discovery";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
@@ -19,11 +14,10 @@ import type {
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
-	SteerPlan,
 	SteerStep,
 } from "../driver";
 import { supported, unsupported } from "../driver";
-import { hasCliOption } from "../launch-utils";
+import { binaryPreflight, hasCliOption } from "../launch-utils";
 import type { SessionSignal } from "../session-signal";
 import { SIGNAL_SEQUENCE_TRACKER } from "../signal-sequence";
 
@@ -32,26 +26,7 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 		id: "codex",
 		catalog: catalogEntryById("codex"),
 		launch: {
-			preflight: async () => {
-				const testFail = process.env.KANBAN_TEST_PREFLIGHT_FAIL;
-				if (testFail) {
-					return unsupported(testFail);
-				}
-				const isTest =
-					(typeof process.env.VITEST !== "undefined" && !process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY) ||
-					typeof process.env.KANBAN_TEST_AGENT_BINARY !== "undefined";
-				if (!isTest) {
-					const candidates = getRuntimeAgentBinaryCandidates("codex");
-					const binary = candidates.find((candidate) => isBinaryAvailableOnPath(candidate));
-					if (!binary) {
-						return unsupported("binary missing: 'codex' CLI binary not found on PATH");
-					}
-					if (process.env.KANBAN_WORKSPACE_TRUST === "untrusted") {
-						return unsupported("not trusted: workspace is not trusted");
-					}
-				}
-				return supported({ ok: true as const });
-			},
+			preflight: () => binaryPreflight("codex"),
 			prepare: async (input) => {
 				const codexArgs = [...input.args];
 				const env: Record<string, string | undefined> = {};

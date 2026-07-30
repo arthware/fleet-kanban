@@ -242,13 +242,13 @@ describe("Agent Drivers Launch Port Conformance", () => {
 
 		beforeEach(() => {
 			originalPath = process.env.PATH;
-			process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY = "1";
+			process.env.KANBAN_TEST_PREFLIGHT_REAL = "1";
 			tempDir = mkdtempSync(join(tmpdir(), "kanban-test-path-"));
 		});
 
 		afterEach(() => {
 			process.env.PATH = originalPath;
-			delete process.env.KANBAN_TEST_PREFLIGHT_RUN_REALLY;
+			delete process.env.KANBAN_TEST_PREFLIGHT_REAL;
 			try {
 				rmSync(tempDir, { recursive: true, force: true });
 			} catch {}
