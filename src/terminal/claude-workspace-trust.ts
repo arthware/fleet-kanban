@@ -59,7 +59,12 @@ function stripAnsiAndControl(input: string): string {
 
 export function hasClaudeWorkspaceTrustPrompt(text: string): boolean {
 	const normalized = normalizeTerminalText(stripAnsiAndControl(text));
-	return /yes,?\s*i\s*trust\s*this\s*folder/u.test(normalized) || /trust\s+this\s+folder/u.test(normalized);
+	return (
+		/yes,?\s*i\s*trust\s*this\s*folder/u.test(normalized) ||
+		/trust\s+this\s+folder/u.test(normalized) ||
+		/quick\s+safety\s+check/u.test(normalized) ||
+		/one\s+you\s+trust/u.test(normalized)
+	);
 }
 
 function isTaskWorktreePath(path: string): boolean {

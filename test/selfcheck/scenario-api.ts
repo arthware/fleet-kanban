@@ -100,41 +100,6 @@ function getRealHome(): string {
 	return `/home/${user}`;
 }
 
-function copyRecursiveSync(src: string, dest: string) {
-	const exists = existsSync(src);
-	if (!exists) return;
-	const stats = lstatSync(src);
-	if (stats.isDirectory()) {
-		mkdirSync(dest, { recursive: true });
-		for (const child of readdirSync(src)) {
-			copyRecursiveSync(join(src, child), join(dest, child));
-		}
-	} else if (stats.isFile()) {
-		const parent = join(dest, "..");
-		mkdirSync(parent, { recursive: true });
-		copyFileSync(src, dest);
-	}
-}
-
-export function copyCredentialsToIsolatedHome(isolatedHome: string) {
-	const realHome = getRealHome();
-	const targets = [
-		".claude.json",
-		join(".claude", "settings.json"),
-		join(".claude", ".claude.json"),
-		join(".gemini", "google_accounts.json"),
-		join(".gemini", "settings.json"),
-		join(".codex", "auth.json"),
-		".tool-versions",
-		".asdfrc",
-	];
-	for (const rel of targets) {
-		const srcPath = join(realHome, rel);
-		const destPath = join(isolatedHome, rel);
-		copyRecursiveSync(srcPath, destPath);
-	}
-}
-
 export async function createSelfcheckContext(opts?: { live?: boolean }): Promise<SelfcheckContext> {
 	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
 	let instance: any;
@@ -143,6 +108,8 @@ export async function createSelfcheckContext(opts?: { live?: boolean }): Promise
 			const realHome = getRealHome();
 			const env: Record<string, string> = {
 				KANBAN_TEST_PREFLIGHT_REAL: "1",
+				HOME: realHome,
+				USERPROFILE: realHome,
 			};
 			const asdfPath = join(realHome, ".asdf");
 			if (existsSync(asdfPath)) {
@@ -152,7 +119,6 @@ export async function createSelfcheckContext(opts?: { live?: boolean }): Promise
 				cwd: fixture.path,
 				env,
 			});
-			copyCredentialsToIsolatedHome(instance.homeDir);
 		} else {
 			const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
 			if (!existsSync(stubAgentPath)) {

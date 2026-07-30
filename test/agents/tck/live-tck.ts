@@ -1,11 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdirSync, statSync, existsSync, copyFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { AgentDriver, AgentObservationMessage, AgentUsage } from "../../../src/agents/driver";
-import { copyCredentialsToIsolatedHome } from "../../selfcheck/scenario-api";
 
 export interface LiveTckExpectations {
 	assertMessages?: (messages: readonly AgentObservationMessage[]) => void;
@@ -16,7 +15,7 @@ export interface LiveTckOptions {
 	args: (sessionId: string) => string[];
 	env?: Record<string, string>;
 	requiredEnv?: readonly string[];
-	discoverSessionId?: (home: string) => { sessionId: string } | null;
+	discoverSessionId?: (home: string) => { sessionId: string } | null | Promise<{ sessionId: string } | null>;
 	expectations?: LiveTckExpectations;
 }
 
@@ -27,6 +26,56 @@ interface TestSummary {
 }
 
 const summary: Record<string, TestSummary> = {};
+
+/**
+ * Build the launch environment the way the runtime does, by asking the driver for it.
+ *
+ * A CLI needs more than a binary and arguments to run in a directory nobody has
+ * interactively approved — Gemini, for one, refuses to start in a folder it does not
+ * trust, and the driver answers that by writing a settings file and pointing the CLI at
+ * it. A test that hand-rolls the spawn skips all of that, so it fails for reasons the
+ * product does not have, and proves nothing about the driver it is named after.
+ *
+ * The plan's files land under a throwaway CLINE_HOME so a test run never writes into the
+ * operator's real runtime home. Card-session concerns (hooks, prompts, resume) stay out:
+ * `workspaceId: null` asks the driver for the plain launch environment, which is all a
+ * one-shot conformance turn needs.
+ */
+async function prepareDriverEnvironment(driver: AgentDriver): Promise<Record<string, string | undefined>> {
+	const throwawayRuntimeHome = mkdtempSync(join(tmpdir(), `tck-${driver.id}-home-`));
+	const previousClineHome = process.env.CLINE_HOME;
+	process.env.CLINE_HOME = throwawayRuntimeHome;
+	try {
+		const plan = await driver.launch.prepare({
+			taskId: `tck-${driver.id}`,
+			prompt: "",
+			cwd: process.cwd(),
+			env: {},
+			args: [],
+			autonomousModeEnabled: false,
+			agentSessionId: null,
+			resumeSession: false,
+			resumeFromTrash: false,
+			agentModel: null,
+			workspaceId: null,
+			architectContextPreamble: null,
+		});
+		if (!plan.supported) {
+			return {};
+		}
+		for (const file of plan.value.filesToWrite ?? []) {
+			mkdirSync(dirname(file.path), { recursive: true });
+			writeFileSync(file.path, file.content, "utf8");
+		}
+		return plan.value.env;
+	} finally {
+		if (previousClineHome === undefined) {
+			delete process.env.CLINE_HOME;
+		} else {
+			process.env.CLINE_HOME = previousClineHome;
+		}
+	}
+}
 
 function getRealHome(): string {
 	if (process.platform === "win32") {
@@ -181,11 +230,14 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 				}
 
 				const sessionId = randomUUID();
-				const home = process.env.HOME || homedir();
-				copyCredentialsToIsolatedHome(home);
+				const home = getRealHome();
+				const driverEnvironment = await prepareDriverEnvironment(driver);
 
 				const runEnv = {
 					...getCleanSystemEnv(),
+					HOME: home,
+					USERPROFILE: home,
+					...driverEnvironment,
 					...options.env,
 				};
 
@@ -211,7 +263,9 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 					}
 				}
 
-				const targetSessionId = options.discoverSessionId ? options.discoverSessionId(home)?.sessionId : sessionId;
+				const targetSessionId = options.discoverSessionId
+					? (await options.discoverSessionId(home))?.sessionId
+					: sessionId;
 				if (!targetSessionId) {
 					throw new Error(`Failed to discover session ID for ${driver.id}`);
 				}
