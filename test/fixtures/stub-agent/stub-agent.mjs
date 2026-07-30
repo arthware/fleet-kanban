@@ -47,6 +47,22 @@ const cwd = process.cwd();
 const taskId = process.env.KANBAN_HOOK_TASK_ID ?? "unknown-task";
 const markerPath = join(cwd, "stub-agent-output.txt");
 
+// Codex and Gemini mint their own session id and only reveal it by writing a
+// transcript once they have booted, so the runtime has to discover it after
+// spawn. Impersonate that: write a Codex-shaped rollout file naming this cwd, so
+// the discovery path has something real to find and the id it settles on is
+// known to the scenario asserting on it.
+const STUB_DISCOVERED_SESSION_ID = "5e1fc4ec-0000-4000-8000-000000000001";
+if (taskId === "selfcheck-discovered-session-id" && process.env.HOME) {
+	const sessionsDir = join(process.env.HOME, ".codex", "sessions", "2026", "07", "30");
+	mkdirSync(sessionsDir, { recursive: true });
+	writeFileSync(
+		join(sessionsDir, `rollout-2026-07-30T00-00-00-${STUB_DISCOVERED_SESSION_ID}.jsonl`),
+		`${JSON.stringify({ cwd })}\n`,
+		"utf8",
+	);
+}
+
 const runtimeHome = process.env.KANBAN_RUNTIME_HOME ?? (process.env.HOME ? join(process.env.HOME, ".kanban") : null);
 if (runtimeHome) {
 	mkdirSync(runtimeHome, { recursive: true });
@@ -71,7 +87,15 @@ if (runtimeHome) {
 appendFileSync(markerPath, `stub commit for ${taskId}\n`, "utf8");
 run("git", ["add", "stub-agent-output.txt"], { cwd });
 run("git", ["commit", "-qm", `stub agent commit for ${taskId}`], { cwd });
-const sleepMs = (taskId === "selfcheck-restart-after-gone" || taskId.includes("steer") || taskId.startsWith("gemini-test")) ? 60000 : 100;
+// Session-id discovery only polls while the session is still live, so a task that
+// asserts on it needs the stub to stay up rather than exit in 100ms.
+const sleepMs =
+	taskId === "selfcheck-restart-after-gone" ||
+	taskId === "selfcheck-discovered-session-id" ||
+	taskId.includes("steer") ||
+	taskId.startsWith("gemini-test")
+		? 60000
+		: 100;
 await new Promise((resolve) => setTimeout(resolve, sleepMs));
 await notifyReview();
 process.stdout.write("stub-agent: committed deterministic work\n");
