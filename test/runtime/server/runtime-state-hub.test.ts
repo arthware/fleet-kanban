@@ -19,9 +19,17 @@ import {
 	createRuntimeStateHub,
 	SnapshotAssemblyTimeoutError,
 	withSnapshotTimeout,
+	getTargetColumnForSession,
+	getSessionKind,
+	projectSessionSummaryColumn,
 } from "../../../src/server/runtime-state-hub";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 import type { CardPrRef } from "../../../src/workspace/card-pr-url";
+
+const mockMutateWorkspaceState = vi.fn();
+vi.mock("../../../src/state/workspace-state", () => ({
+	mutateWorkspaceState: (...args: any[]) => mockMutateWorkspaceState(...args),
+}));
 
 const monitorMockState = vi.hoisted(() => ({
 	updateWorkspaceState: vi.fn<() => Promise<unknown>>(async () => ({
@@ -142,6 +150,7 @@ async function setupWorkspaceStateStream(input: {
 				architectWorkspaceId: null,
 			}),
 			buildWorkspaceStateSnapshot: async () => createWorkspaceState(input.workspacePath, board),
+			getWorkspacePathById: (workspaceId) => (workspaceId === input.workspaceId ? input.workspacePath : null),
 		},
 		heartbeatIntervalMs: input.heartbeatIntervalMs,
 	});
@@ -287,6 +296,117 @@ describe("applyPersistedCardPrToBoard", () => {
 
 		expect(result.updated).toBe(true);
 		expect(cardColumnId(result.board, "task-1")).toBe("backlog");
+	});
+});
+
+describe("getSessionKind and getTargetColumnForSession", () => {
+	it("should classify taskId kind correctly", () => {
+		expect(getSessionKind("task-1")).toBe("card");
+		expect(getSessionKind("__home_agent__:workspace-1")).toBe("overseer");
+	});
+
+	it("should map card states to target columns", () => {
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "awaiting_review" })).toBe("review");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "running" })).toBe("in_progress");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "interrupted" })).toBe("trash");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "idle" })).toBeNull();
+	});
+
+	it("should always project overseer to null", () => {
+		expect(getTargetColumnForSession({ taskId: "__home_agent__:workspace-1", state: "awaiting_review" })).toBeNull();
+		expect(getTargetColumnForSession({ taskId: "__home_agent__:workspace-1", state: "running" })).toBeNull();
+	});
+});
+
+describe("projectSessionSummaryColumn", () => {
+	beforeEach(() => {
+		mockMutateWorkspaceState.mockReset();
+	});
+
+	it("given a card in in_progress transitioning to awaiting_review, when projected, then it moves to review and broadcasts update", async () => {
+		const board = boardWithCard("in_progress");
+		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
+			const res = mutate(createWorkspaceState(cwd, board));
+			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		expect(mockMutateWorkspaceState).toHaveBeenCalled();
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a card in review transitioning to running, when projected, then it moves to in_progress and broadcasts update", async () => {
+		const board = boardWithCard("review");
+		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
+			const res = mutate(createWorkspaceState(cwd, board));
+			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "running" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		expect(mockMutateWorkspaceState).toHaveBeenCalled();
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {
+		const board = boardWithCard("review");
+		mockMutateWorkspaceState.mockImplementation(async (cwd, mutate) => {
+			const res = mutate(createWorkspaceState(cwd, board));
+			return { value: res.value, state: createWorkspaceState(cwd, res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockBroadcast).not.toHaveBeenCalled();
+	});
+
+	it("given an overseer, when projected, then it no-ops and returns false", async () => {
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "__home_agent__:workspace-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+		expect(mockBroadcast).not.toHaveBeenCalled();
 	});
 });
 
