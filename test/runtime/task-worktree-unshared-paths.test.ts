@@ -4,6 +4,7 @@ import {
 	collectTrackedDirectories,
 	DEFAULT_WORKTREE_UNSHARED_PATHS,
 	isPathInsideTrackedSourceTree,
+	isWorktreeEnvFilePath,
 	resolveWorktreeUnsharedPaths,
 	shouldKeepPathUnsharedInWorktree,
 	shouldMirrorIgnoredPathIntoWorktree,
@@ -108,11 +109,29 @@ describe("isPathInsideTrackedSourceTree", () => {
 	});
 });
 
+describe("isWorktreeEnvFilePath", () => {
+	it.each([
+		[".env", true],
+		[".env.local", true],
+		["apps/lab/.env.local", true],
+		["apps/lab/.env.test-integration", true],
+		["apps/lab/.env.development", true],
+		[".envrc", false],
+		["apps/lab/env.local", false],
+		["apps/lab/foo.env", false],
+		["apps/lab/.env/local", false],
+	])("given path %s, when env file matching is checked, then match is %s", (relativePath, expected) => {
+		expect(isWorktreeEnvFilePath(relativePath)).toBe(expected);
+	});
+});
+
 describe("shouldMirrorIgnoredPathIntoWorktree", () => {
 	const trackedDirectories = collectTrackedDirectories([
 		"README.md",
 		"packages/skill-runner/package.json",
 		"packages/skill-runner/src/index.ts",
+		"apps/lab/package.json",
+		"apps/lab/src/index.ts",
 	]);
 
 	it("given a root-level env file, when mirroring is decided, then it is mirrored into the worktree", () => {
@@ -122,6 +141,36 @@ describe("shouldMirrorIgnoredPathIntoWorktree", () => {
 		});
 
 		expect(mirrored).toBe(true);
+	});
+
+	it.each(["apps/lab/.env.local", "apps/lab/.env.test-integration", "apps/lab/.env.development"])(
+		"given nested env file %s inside a tracked package, when mirroring is decided, then it is mirrored into the worktree",
+		(relativePath) => {
+			const mirrored = shouldMirrorIgnoredPathIntoWorktree(relativePath, {
+				unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+				trackedDirectories,
+			});
+
+			expect(mirrored).toBe(true);
+		},
+	);
+
+	it("given nested env files are exempt by basename, when a similar non-env path is decided, then the structural rule still keeps it local", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("apps/lab/.envrc", {
+			unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+			trackedDirectories,
+		});
+
+		expect(mirrored).toBe(false);
+	});
+
+	it("given a nested env file is explicitly unshared, when mirroring is decided, then unsharedPaths wins over the env exemption", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("apps/lab/.env.local", {
+			unsharedPaths: [".env.local"],
+			trackedDirectories,
+		});
+
+		expect(mirrored).toBe(false);
 	});
 
 	it("given a generated artifact under a tracked source tree, when mirroring is decided, then it stays local to the repo", () => {

@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync, copyFileSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 import type {
 	RuntimeBoardCard,

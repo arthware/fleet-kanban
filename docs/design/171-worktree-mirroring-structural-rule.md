@@ -35,13 +35,16 @@ does this path sit?* — not lexical — *what is it called?*
 
 ## The rule
 
-A git-ignored path is mirrored into a worktree when it sits **at the repo root**, or inside a subtree
-**git tracks nothing in**. Anything under a directory that contains tracked files stays local to the
-source repo.
+A git-ignored path is mirrored into a worktree when it sits **at the repo root**, inside a subtree
+**git tracks nothing in**, or its basename is **`.env` / `.env.<suffix>`**. Anything else under a
+directory that contains tracked files stays local to the source repo.
 
 The repo root is deliberately not a "source tree": it is the container for workspace-level local state
 (`.env`, `.env.local`, tool config), which build tools read by explicit path rather than discover by
 walking. That exclusion is what keeps root-level env mirroring — the behaviour #167 restored — intact.
+The same explicit-path reasoning applies to per-package env files such as `apps/lab/.env.local` and
+`apps/lab/.env.test-integration`; they are consumed by dotenv/framework config, not by bundler module
+walks. The basename rule deliberately does not match `.envrc`, `env.local`, or `foo.env`.
 
 Implementation (`src/workspace/task-worktree-unshared-paths.ts`):
 
@@ -51,8 +54,9 @@ Implementation (`src/workspace/task-worktree-unshared-paths.ts`):
 - `isPathInsideTrackedSourceTree(path, trackedDirectories)` — true when any ancestor of the path is
   such a directory. Checking every ancestor, not just the immediate parent, makes the verdict identical
   whether git hands us an ignored directory or a file inside it.
+- `isWorktreeEnvFilePath(path)` — the narrow basename exemption for `.env` and `.env.<suffix>`.
 - `shouldMirrorIgnoredPathIntoWorktree(path, rules)` — the single decision point, composing the
-  explicit `sharedPaths` opt-in, the name rule, and the structural rule.
+  explicit `sharedPaths` opt-in, the name rule, the env exemption, and the structural rule.
 
 The name-based list is **kept, not extended**: it still covers root-level dependency and cache
 directories (`node_modules`, `.turbo`, `.next`) that the structural rule mirrors happily because they
@@ -71,16 +75,15 @@ purpose so worktrees inherit it, is unaffected. Two keys are new:
 - **`worktree.additionalUnsharedPaths`** closes the foot-gun that made #160 re-openable: a repo that
   wanted one extra artifact name unshared had to write `unsharedPaths`, which silently discarded the
   `node_modules` / `dist` / `.turbo` defaults. Additions now extend whichever list is in effect.
-- **`worktree.sharedPaths`** force-mirrors specific repo-relative paths. The structural rule
-  necessarily stops mirroring ignored files nested inside tracked packages, including a per-app
-  `apps/web/.env.local`. Generated artifacts are recreated by the repo's `postCreateCommand` exactly as
-  `node_modules` already is, but secrets cannot be regenerated — `sharedPaths` is their opt-in.
+- **`worktree.sharedPaths`** force-mirrors specific repo-relative paths. Generated artifacts are
+  recreated by the repo's `postCreateCommand` exactly as `node_modules` already is, but non-env local
+  state that cannot be regenerated still uses `sharedPaths` as its opt-in.
 
 ## Verification
 
 - `test/runtime/task-worktree-unshared-paths.test.ts` — the predicate, including the root-vs-nested
-  boundary and the `sharedPaths` override.
+  boundary, the nested env exemption, the `unsharedPaths`-wins ordering, and the `sharedPaths` override.
 - `test/integration/worktree-shapes.integration.test.ts` — a fixture carrying both a
-  `packages/<pkg>/src/generated/` artifact and a root `.env`, asserted across all three worktree shapes
-  plus a re-entry pass. The two halves of the rule pin each other: the generated artifact must be
-  absent while `.env` must still be a symlink.
+  `packages/<pkg>/src/generated/` artifact and env files, asserted across all three worktree shapes
+  plus a re-entry pass. The two halves of the rule pin each other: generated artifacts must be absent
+  while `.env` files must still be symlinks.

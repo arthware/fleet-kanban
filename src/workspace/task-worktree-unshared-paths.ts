@@ -35,6 +35,12 @@ function pathPatternMatchesBasename(pattern: string, basename: string): boolean 
 	return basename.endsWith(pattern.slice(1));
 }
 
+export function isWorktreeEnvFilePath(relativePath: string): boolean {
+	const normalizedPath = toPlatformRelativePath(relativePath);
+	const basename = normalizedPath.split("/").at(-1) ?? "";
+	return basename === ".env" || basename.startsWith(".env.");
+}
+
 /**
  * Name rule: a repo-tunable list of artifact basenames (or `*.ext` globs) that never
  * get mirrored, matched against any segment of the path.
@@ -117,6 +123,9 @@ export function shouldMirrorIgnoredPathIntoWorktree(relativePath: string, rules:
 	}
 	if (shouldKeepPathUnsharedInWorktree(relativePath, rules.unsharedPaths)) {
 		return false;
+	}
+	if (isWorktreeEnvFilePath(relativePath)) {
+		return true;
 	}
 	return !isPathInsideTrackedSourceTree(relativePath, rules.trackedDirectories);
 }
