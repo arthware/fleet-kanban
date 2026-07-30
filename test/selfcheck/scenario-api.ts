@@ -88,6 +88,18 @@ export function createSelfcheckCard(input: {
 	};
 }
 
+function getRealHome(): string {
+	if (process.platform === "win32") {
+		return process.env.USERPROFILE || `C:\\Users\\${process.env.USERNAME || "Default"}`;
+	}
+	if (process.platform === "darwin") {
+		const user = process.env.USER || process.env.LOGNAME || "arthur";
+		return `/Users/${user}`;
+	}
+	const user = process.env.USER || process.env.LOGNAME || "root";
+	return `/home/${user}`;
+}
+
 function copyRecursiveSync(src: string, dest: string) {
 	const exists = existsSync(src);
 	if (!exists) return;
@@ -105,12 +117,16 @@ function copyRecursiveSync(src: string, dest: string) {
 }
 
 export function copyCredentialsToIsolatedHome(isolatedHome: string) {
-	const realHome = homedir();
+	const realHome = getRealHome();
 	const targets = [
 		".claude.json",
-		".claude",
+		join(".claude", "settings.json"),
+		join(".claude", ".claude.json"),
 		join(".gemini", "google_accounts.json"),
+		join(".gemini", "settings.json"),
 		join(".codex", "auth.json"),
+		".tool-versions",
+		".asdfrc",
 	];
 	for (const rel of targets) {
 		const srcPath = join(realHome, rel);
@@ -124,11 +140,17 @@ export async function createSelfcheckContext(opts?: { live?: boolean }): Promise
 	let instance: any;
 	try {
 		if (opts?.live) {
+			const realHome = getRealHome();
+			const env: Record<string, string> = {
+				KANBAN_TEST_PREFLIGHT_REAL: "1",
+			};
+			const asdfPath = join(realHome, ".asdf");
+			if (existsSync(asdfPath)) {
+				env.ASDF_DATA_DIR = asdfPath;
+			}
 			instance = await startIsolatedKanbanInstance({
 				cwd: fixture.path,
-				env: {
-					KANBAN_TEST_PREFLIGHT_REAL: "1",
-				},
+				env,
 			});
 			copyCredentialsToIsolatedHome(instance.homeDir);
 		} else {

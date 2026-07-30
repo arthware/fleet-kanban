@@ -42,28 +42,30 @@ function stripAnsi(str: string): string {
 // Check if binary is missing, unauthenticated, or in interactive first-run onboarding
 function isUnauthenticatedText(out: string): boolean {
 	const outLower = out.toLowerCase().replace(/\s+/g, "");
-	return (
-		outLower.includes("login") ||
-		outLower.includes("unauthenticated") ||
-		outLower.includes("authenticate") ||
-		outLower.includes("sign-in") ||
-		outLower.includes("signin") ||
-		outLower.includes("credentials") ||
-		outLower.includes("apikey") ||
-		outLower.includes("api-key") ||
-		outLower.includes("notloggedin") ||
-		outLower.includes("unauthorized") ||
-		outLower.includes("pleasesignin") ||
-		outLower.includes("openthebrowser") ||
-		outLower.includes("pressenter") ||
-		outLower.includes("oauth") ||
-		outLower.includes("choosethetextstyle") ||
-		outLower.includes("textstylethatlooksbest") ||
-		outLower.includes("selectastyle") ||
-		outLower.includes("welcometoclaude") ||
-		outLower.includes("welcometogemini") ||
-		outLower.includes("welcometocodex")
-	);
+	const matchers = [
+		"login",
+		"unauthenticated",
+		"notloggedin",
+		"unauthorized",
+		"pleasesignin",
+		"openthebrowser",
+		"choosethetextstyle",
+		"textstylethatlooksbest",
+		"selectastyle",
+		"quicksafetycheck",
+		"mustspecifythegemini_api_key",
+		"noauthenticationmethodselected",
+		"pleasesetanauthmethod",
+		"notauthenticated",
+		"entergeminiapikey",
+	];
+	for (const m of matchers) {
+		if (outLower.includes(m)) {
+			console.log(`[match-debug] MATCHED: "${m}" in "${outLower.substring(0, 300)}"`);
+			return true;
+		}
+	}
+	return false;
 }
 
 async function captureTerminalOutput(
@@ -158,7 +160,7 @@ describe("Live Selfcheck Integration Tests", () => {
 				120000,
 			); // 120s timeout
 
-			if (result.unauthenticated || !result.session || !result.state) {
+			if (result.unauthenticated || !("session" in result) || !("state" in result) || !result.session || !result.state) {
 				const cleanOut = result.termOut.replace(/\s+/g, " ").trim().substring(0, 300);
 				const detailedReason = `Not authenticated/configured: "${cleanOut || "<empty>"}"`;
 				selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: detailedReason };

@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, existsSync, copyFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { AgentDriver, AgentObservationMessage, AgentUsage } from "../../../src/agents/driver";
+import { copyCredentialsToIsolatedHome } from "../../selfcheck/scenario-api";
 
 export interface LiveTckExpectations {
 	assertMessages?: (messages: readonly AgentObservationMessage[]) => void;
@@ -27,6 +28,18 @@ interface TestSummary {
 
 const summary: Record<string, TestSummary> = {};
 
+function getRealHome(): string {
+	if (process.platform === "win32") {
+		return process.env.USERPROFILE || `C:\\Users\\${process.env.USERNAME || "Default"}`;
+	}
+	if (process.platform === "darwin") {
+		const user = process.env.USER || process.env.LOGNAME || "arthur";
+		return `/Users/${user}`;
+	}
+	const user = process.env.USER || process.env.LOGNAME || "root";
+	return `/home/${user}`;
+}
+
 function getCleanSystemEnv(): Record<string, string | undefined> {
 	const env = { ...process.env };
 	if (env.PATH) {
@@ -34,11 +47,27 @@ function getCleanSystemEnv(): Record<string, string | undefined> {
 			.filter((p) => !p.includes("node_modules"))
 			.join(":");
 	}
+	const realHome = getRealHome();
+	const asdfPath = join(realHome, ".asdf");
+	if (existsSync(asdfPath)) {
+		env.ASDF_DATA_DIR = asdfPath;
+	}
 	return env;
 }
 
 export function resolveBinaryExecutable(binary: string): string | null {
 	const cleanEnv = getCleanSystemEnv();
+
+	// Ensure .tool-versions is present in process.env.HOME so asdf shims work during resolution
+	if (process.env.HOME) {
+		const realToolVersions = join(getRealHome(), ".tool-versions");
+		const isolatedToolVersions = join(process.env.HOME, ".tool-versions");
+		if (existsSync(realToolVersions) && !existsSync(isolatedToolVersions)) {
+			try {
+				copyFileSync(realToolVersions, isolatedToolVersions);
+			} catch {}
+		}
+	}
 
 	// 1. Try finding it directly on clean PATH
 	try {
@@ -102,6 +131,7 @@ function isUnauthenticated(runResult: { error?: any; status: number | null; stdo
 		outLower.includes("credentials") ||
 		outLower.includes("api key") ||
 		outLower.includes("api-key") ||
+		outLower.includes("api_key") ||
 		outLower.includes("not logged in") ||
 		outLower.includes("unauthorized")
 	);
@@ -150,7 +180,8 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 			}
 
 			const sessionId = randomUUID();
-			const home = homedir();
+			const home = process.env.HOME || homedir();
+			copyCredentialsToIsolatedHome(home);
 
 			const runEnv = {
 				...getCleanSystemEnv(),
