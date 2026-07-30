@@ -32,6 +32,7 @@ import { supported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
+import { buildClaudeHookSettings } from "./hook-settings";
 
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 	return {
@@ -98,117 +99,7 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 				if (hasWorkspaceId) {
 					const settingsPath = join(getHookAgentDirectory("claude"), "settings.json");
 
-					type ClaudeHookEvent =
-						| "Stop"
-						| "SubagentStop"
-						| "PreToolUse"
-						| "PermissionRequest"
-						| "PostToolUse"
-						| "PostToolUseFailure"
-						| "Notification"
-						| "UserPromptSubmit";
-
-					interface ClaudeHookCommand {
-						type: "command";
-						command: string;
-						timeout?: number;
-					}
-
-					interface ClaudeHookMatcher {
-						matcher?: string;
-						hooks: ClaudeHookCommand[];
-					}
-
-					interface ClaudeHooksSettings {
-						hooks: Record<ClaudeHookEvent, ClaudeHookMatcher[]>;
-					}
-
-					const preToolUseHooks: ClaudeHookMatcher[] = [
-						{
-							matcher: "*",
-							hooks: [{ type: "command" as const, command: buildHookCommand("activity", { source: "claude" }) }],
-						},
-						...(bashGuardEnabled
-							? [
-									{
-										matcher: "Bash",
-										hooks: [
-											{
-												type: "command" as const,
-												command: buildHooksCommand(["guard", "--source", "claude"]),
-											},
-										],
-									},
-								]
-							: []),
-					];
-
-					const hooksSettings: ClaudeHooksSettings = {
-						hooks: {
-							Stop: [
-								{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] },
-							],
-							SubagentStop: [
-								{ hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }] },
-							],
-							PreToolUse: preToolUseHooks,
-							PermissionRequest: [
-								{
-									matcher: "*",
-									hooks: [
-										{
-											type: "command",
-											command: buildHookCommand("to_review", {
-												source: "claude",
-												notificationType: "permission_prompt",
-											}),
-										},
-									],
-								},
-							],
-							PostToolUse: [
-								{
-									matcher: "*",
-									hooks: [
-										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
-									],
-								},
-							],
-							PostToolUseFailure: [
-								{
-									matcher: "*",
-									hooks: [
-										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
-									],
-								},
-							],
-							Notification: [
-								{
-									matcher: "permission_prompt",
-									hooks: [
-										{
-											type: "command",
-											command: buildHookCommand("to_review", {
-												source: "claude",
-												notificationType: "permission_prompt",
-											}),
-										},
-									],
-								},
-								{
-									matcher: "*",
-									hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }],
-								},
-							],
-							UserPromptSubmit: [
-								{
-									hooks: [
-										{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
-									],
-								},
-							],
-						},
-					};
+					const hooksSettings = buildClaudeHookSettings(bashGuardEnabled);
 					filesToWrite.push({
 						path: settingsPath,
 						content: JSON.stringify(hooksSettings, null, 2),
