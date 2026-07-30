@@ -50,8 +50,8 @@ export function getTargetColumnForSession(summary: {
 
 export async function projectSessionSummaryColumn(
 	workspaceId: string,
-	summary: Pick<RuntimeTaskSessionSummary, "taskId" | "state"> & Partial<RuntimeTaskSessionSummary>,
-	_workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
+	summary: { taskId: string; state: RuntimeTaskSessionState },
+	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
 	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
 ): Promise<boolean> {
 	const targetColumnId = getTargetColumnForSession(summary);
@@ -61,34 +61,11 @@ export async function projectSessionSummaryColumn(
 	try {
 		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
 			const previousColumnId = getTaskColumnId(state.board, summary.taskId);
-			const session = state.sessions[summary.taskId];
-			const needsSessionUpdate = !!(
-				summary.agentSessionId &&
-				(!session || session.agentSessionId !== summary.agentSessionId)
-			);
-
-			if (!needsSessionUpdate && (!previousColumnId || previousColumnId === targetColumnId)) {
+			if (!previousColumnId || previousColumnId === targetColumnId) {
 				return { board: state.board, value: false, save: false };
 			}
-
 			const moved = moveTaskToColumn(state.board, summary.taskId, targetColumnId, Date.now());
-			const nextSessions =
-				needsSessionUpdate && session
-					? {
-							...state.sessions,
-							[summary.taskId]: {
-								...session,
-								agentSessionId: summary.agentSessionId ?? null,
-							},
-						}
-					: undefined;
-
-			return {
-				board: moved.board,
-				sessions: nextSessions,
-				value: true,
-				save: true,
-			};
+			return { board: moved.board, value: moved.moved, save: moved.moved };
 		});
 		if (mutation.saved && mutation.value) {
 			await broadcastWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);

@@ -624,7 +624,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					}
 				}
 				const responseSummary = applyFleetToolsWarning(nextSummary);
-				await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
+				if (isHome) {
+					await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
+				}
 				return {
 					ok: true,
 					summary: responseSummary,

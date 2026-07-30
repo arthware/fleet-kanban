@@ -48,8 +48,12 @@ export function buildClaudeHookSettings(bashGuardEnabled: boolean): ClaudeHooksS
 
 	return {
 		hooks: {
-			Stop: [{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] }],
-			SubagentStop: [{ hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }] }],
+			Stop: [
+				{ hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }] },
+			],
+			SubagentStop: [
+				{ hooks: [{ type: "command", command: buildHookCommand("activity", { source: "claude" }) }] },
+			],
 			PreToolUse: preToolUseHooks,
 			PermissionRequest: [
 				{
@@ -68,13 +72,17 @@ export function buildClaudeHookSettings(bashGuardEnabled: boolean): ClaudeHooksS
 			PostToolUse: [
 				{
 					matcher: "*",
-					hooks: [{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) }],
+					hooks: [
+						{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+					],
 				},
 			],
 			PostToolUseFailure: [
 				{
 					matcher: "*",
-					hooks: [{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) }],
+					hooks: [
+						{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+					],
 				},
 			],
 			Notification: [
@@ -97,7 +105,9 @@ export function buildClaudeHookSettings(bashGuardEnabled: boolean): ClaudeHooksS
 			],
 			UserPromptSubmit: [
 				{
-					hooks: [{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) }],
+					hooks: [
+						{ type: "command", command: buildHookCommand("to_in_progress", { source: "claude" }) },
+					],
 				},
 			],
 		},

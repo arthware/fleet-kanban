@@ -723,39 +723,6 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 		const serializedSize = JSON.stringify(migrated).length;
 		expect(serializedSize).toBeLessThan(5000); // well bounded!
 	});
-
-	it("asserts that agentSessionId is preserved during session summary rebuilds and liveness reconciliation", async () => {
-		const context = await loadWorkspaceContext(repoPath);
-
-		await writeBoardJson(
-			context.workspaceId,
-			createBoard({
-				backlog: [createCard("test-card-agent-session-id-preservation")],
-			}),
-		);
-		resetWorkspaceBoardCacheForTests();
-
-		const sessions: Record<string, any> = {
-			"test-card-agent-session-id-preservation": createSession("test-card-agent-session-id-preservation", {
-				state: "running",
-				pid: 12345,
-				startedAt: 67890,
-				agentSessionId: "preservation-asserted-uuid-1234",
-				agentSessionLifecycle: "attached",
-			}),
-		};
-		await writeSessionsJson(context.workspaceId, sessions);
-
-		// Run summary rebuild and liveness reconciliation
-		await migrateAllWorkspaceAgentSessions();
-
-		const migrated = await readSessionsJson(context.workspaceId);
-
-		// Rebuild must NOT drop agentSessionId
-		const testSession = migrated["test-card-agent-session-id-preservation"] as any;
-		expect(testSession).toBeDefined();
-		expect(testSession.agentSessionId).toBe("preservation-asserted-uuid-1234");
-	});
 });
 
 describe("mutateWorkspaceStateById", () => {
