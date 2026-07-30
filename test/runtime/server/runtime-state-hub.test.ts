@@ -10,6 +10,7 @@ import type {
 	RuntimeBoardData,
 	RuntimeStateStreamMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
+	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 } from "../../../src/core/api-contract";
 import { runtimeBoardCardSchema } from "../../../src/core/api-contract";
@@ -18,6 +19,7 @@ import {
 	applyPersistedCardPrToBoard,
 	createRuntimeStateHub,
 	getTargetColumnForSession,
+	persistDiscoveredAgentSessionId,
 	projectSessionSummaryColumn,
 	SnapshotAssemblyTimeoutError,
 	withSnapshotTimeout,
@@ -102,7 +104,11 @@ function emptyBoard(): RuntimeBoardData {
 	};
 }
 
-function createWorkspaceState(workspacePath: string, board: RuntimeBoardData): RuntimeWorkspaceStateResponse {
+function createWorkspaceState(
+	workspacePath: string,
+	board: RuntimeBoardData,
+	sessions: Record<string, RuntimeTaskSessionSummary> = {},
+): RuntimeWorkspaceStateResponse {
 	return {
 		repoPath: workspacePath,
 		statePath: `${workspacePath}/.cline/kanban/board.json`,
@@ -113,8 +119,27 @@ function createWorkspaceState(workspacePath: string, board: RuntimeBoardData): R
 			branches: ["main"],
 		},
 		board,
-		sessions: {},
+		sessions,
 		revision: 1,
+	};
+}
+
+function createSessionSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "running",
+		agentId: "codex",
+		workspacePath: "/path/to/workspace/.cline/worktrees/task-1",
+		pid: 4242,
+		startedAt: 1_000,
+		updatedAt: 2_000,
+		lastOutputAt: null,
+		reviewReason: null,
+		exitCode: null,
+		agentSessionId: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		...overrides,
 	};
 }
 
@@ -457,6 +482,100 @@ describe("projectSessionSummaryColumn", () => {
 			expect.stringContaining(
 				'[kanban] Background projection mutation failed for task "task-1" in workspace "workspace-unknown": Error: Workspace with ID "workspace-unknown" not found in index.\n',
 			),
+		);
+		stderrWriteSpy.mockRestore();
+	});
+});
+
+describe("persistDiscoveredAgentSessionId", () => {
+	const board = boardWithCard("in_progress");
+
+	beforeEach(() => {
+		mockMutateWorkspaceState.mockReset();
+	});
+
+	function mockStateWithSessions(sessions: Record<string, RuntimeTaskSessionSummary>) {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const state = createWorkspaceState("/path/to/workspace", board, sessions);
+			const res = mutate(state);
+			return {
+				value: res.value,
+				state: { ...state, sessions: res.sessions ?? state.sessions },
+				saved: res.save,
+			};
+		});
+	}
+
+	it("given a stored session with no agent session id, when a discovered id is emitted, then it is written back", async () => {
+		mockStateWithSessions({ "task-1": createSessionSummary({ agentSessionId: null }) });
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "codex-discovered-id", agentSessionLifecycle: "attached" }),
+		);
+
+		expect(result).toBe(true);
+		const [, mutate] = mockMutateWorkspaceState.mock.calls[0];
+		const mutation = mutate(
+			createWorkspaceState("/path/to/workspace", board, {
+				"task-1": createSessionSummary({ agentSessionId: null }),
+			}),
+		);
+		expect(mutation.sessions?.["task-1"].agentSessionId).toBe("codex-discovered-id");
+		expect(mutation.sessions?.["task-1"].agentSessionLifecycle).toBe("attached");
+		// The rest of the stored row survives — this writes identity, not the whole session.
+		expect(mutation.sessions?.["task-1"].pid).toBe(4242);
+	});
+
+	it("given the id is already persisted, when the same summary is emitted again, then it does not write", async () => {
+		mockStateWithSessions({ "task-1": createSessionSummary({ agentSessionId: "codex-discovered-id" }) });
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "codex-discovered-id" }),
+		);
+
+		expect(result).toBe(false);
+	});
+
+	it("given a summary with no agent session id, when emitted, then it does not touch workspace state", async () => {
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: null }),
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+	});
+
+	it("given discovery lands before the session row exists, when emitted, then the summary is stored whole", async () => {
+		mockStateWithSessions({});
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "gemini-discovered-id" }),
+		);
+
+		expect(result).toBe(true);
+		const [, mutate] = mockMutateWorkspaceState.mock.calls[0];
+		const mutation = mutate(createWorkspaceState("/path/to/workspace", board, {}));
+		expect(mutation.sessions?.["task-1"].agentSessionId).toBe("gemini-discovered-id");
+	});
+
+	it("given the workspace mutation fails, when emitted, then it reports the failure and returns false", async () => {
+		const stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		mockMutateWorkspaceState.mockRejectedValueOnce(
+			new Error('Workspace with ID "workspace-unknown" not found in index.'),
+		);
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-unknown",
+			createSessionSummary({ agentSessionId: "codex-discovered-id" }),
+		);
+
+		expect(result).toBe(false);
+		expect(stderrWriteSpy).toHaveBeenCalledWith(
+			expect.stringContaining('[kanban] Persisting discovered agent session id failed for task "task-1"'),
 		);
 		stderrWriteSpy.mockRestore();
 	});

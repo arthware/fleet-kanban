@@ -624,9 +624,12 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					}
 				}
 				const responseSummary = applyFleetToolsWarning(nextSummary);
-				if (isHome) {
-					await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
-				}
+				// Persist for cards and overseers alike. An agent that mints its own session id
+				// only reveals it after booting; that later id is written back by the runtime
+				// state hub, which already owns a lifetime-managed subscription to session
+				// summaries. Do not subscribe per request here.
+				await persistTaskSessionSummary(workspaceScope.workspacePath, responseSummary);
+
 				return {
 					ok: true,
 					summary: responseSummary,

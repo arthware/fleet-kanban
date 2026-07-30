@@ -80,6 +80,58 @@ export async function projectSessionSummaryColumn(
 	return false;
 }
 
+/**
+ * Write back an agent session id that only became known after the agent booted.
+ *
+ * Claude is told its session id up front, so the row written when the session starts
+ * already carries it. Codex and Gemini mint their own and reveal it only once they have
+ * written their first transcript, so the session manager discovers it in the background
+ * and emits an updated summary. Without persisting that emit the id lived only in memory:
+ * after a restart the card had no pointer to its conversation and rendered as a dead card
+ * with an empty transcript panel.
+ *
+ * Bounded by construction — it writes only when the persisted id differs from the emitted
+ * one, so a card costs at most one write per discovered id, never one per summary emit.
+ */
+export async function persistDiscoveredAgentSessionId(
+	workspaceId: string,
+	summary: RuntimeTaskSessionSummary,
+): Promise<boolean> {
+	if (!summary.agentSessionId) {
+		return false;
+	}
+	try {
+		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
+			const existing = state.sessions[summary.taskId];
+			if (existing?.agentSessionId === summary.agentSessionId) {
+				return { board: state.board, value: false, save: false };
+			}
+			// Discovery can land before the starting request has written its row; in that
+			// case the emitted summary is the session, so store it whole.
+			const nextSession: RuntimeTaskSessionSummary = existing
+				? {
+						...existing,
+						agentSessionId: summary.agentSessionId,
+						agentSessionLifecycle: summary.agentSessionLifecycle,
+					}
+				: summary;
+			return {
+				board: state.board,
+				sessions: { ...state.sessions, [summary.taskId]: nextSession },
+				value: true,
+				save: true,
+			};
+		});
+		return mutation.saved && mutation.value;
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(
+			`[kanban] Persisting discovered agent session id failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
+		);
+	}
+	return false;
+}
+
 const TASK_SESSION_STREAM_BATCH_MS = 150;
 
 // The initial snapshot assembly (project payload + workspace state + metadata monitor
@@ -600,6 +652,9 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					broadcastRuntimeWorkspaceStateUpdated,
 				).catch(() => {
 					// Ignore background projection error
+				});
+				void persistDiscoveredAgentSessionId(workspaceId, summary).catch(() => {
+					// Ignore background session identity writeback error
 				});
 			});
 			terminalSummaryUnsubscribeByWorkspaceId.set(workspaceId, unsubscribe);

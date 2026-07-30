@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
 import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
 import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
@@ -70,6 +71,16 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "an archived card keeps its session pointer", async () => {
 		await givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer();
+	});
+	await runScenario(results, "a card keeps the session id its agent minted, with no browser open", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();

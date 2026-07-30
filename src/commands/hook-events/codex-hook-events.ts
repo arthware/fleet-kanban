@@ -1,4 +1,5 @@
 import type { Dirent, Stats } from "node:fs";
+import { realpathSync } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +103,22 @@ function isCodexUserInputToolName(name: string | null): boolean {
 
 function normalizePathForComparison(path: string): string {
 	return path.replaceAll("\\", "/");
+}
+
+/**
+ * The cwd string Codex records is the one its own process resolved, which on macOS
+ * is the real path (`/private/var/...`) while the runtime commonly holds the symlink
+ * it launched through (`/var/...`). Comparing those as plain strings silently fails
+ * to match, so a session's transcript is never found. Match on either spelling.
+ */
+function encodedCwdCandidates(cwd: string): string[] {
+	const candidates = new Set<string>([normalizePathForComparison(cwd)]);
+	try {
+		candidates.add(normalizePathForComparison(realpathSync(cwd)));
+	} catch {
+		// The worktree may be gone; the unresolved spelling is still worth matching.
+	}
+	return Array.from(candidates, (candidate) => `"cwd":${JSON.stringify(candidate)}`);
 }
 
 async function readFilePrefix(filePath: string, byteLength: number): Promise<string> {
@@ -276,8 +293,7 @@ export async function resolveCodexRolloutFinalMessageForCwd(
 	if (!cwd.trim()) {
 		return null;
 	}
-	const normalizedCwd = normalizePathForComparison(cwd);
-	const encodedCwd = JSON.stringify(normalizedCwd);
+	const encodedCwds = encodedCwdCandidates(cwd);
 	const rolloutFiles = (await listCodexRolloutFiles(sessionsRoot)).slice(0, MAX_CODEX_ROLLOUT_FILES_TO_SCAN);
 
 	for (const filePath of rolloutFiles) {
@@ -294,7 +310,7 @@ export async function resolveCodexRolloutFinalMessageForCwd(
 		} catch {
 			continue;
 		}
-		if (!prefix.includes(`"cwd":${encodedCwd}`)) {
+		if (!encodedCwds.some((encodedCwd) => prefix.includes(encodedCwd))) {
 			continue;
 		}
 
@@ -332,8 +348,7 @@ export async function findCodexRolloutFileForCwd(
 	if (!cwd.trim()) {
 		return null;
 	}
-	const normalizedCwd = normalizePathForComparison(cwd);
-	const encodedCwd = JSON.stringify(normalizedCwd);
+	const encodedCwds = encodedCwdCandidates(cwd);
 	const rolloutFiles = (await listCodexRolloutFiles(sessionsRoot)).slice(0, MAX_CODEX_ROLLOUT_FILES_TO_SCAN);
 
 	for (const filePath of rolloutFiles) {
@@ -353,7 +368,7 @@ export async function findCodexRolloutFileForCwd(
 		} catch {
 			continue;
 		}
-		if (prefix.includes(`"cwd":${encodedCwd}`)) {
+		if (encodedCwds.some((encodedCwd) => prefix.includes(encodedCwd))) {
 			return filePath;
 		}
 	}
