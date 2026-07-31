@@ -1,17 +1,30 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import matter from "gray-matter";
 import { afterEach, describe, expect, it } from "vitest";
 import { composeCardDirective } from "../../../src/prompts/compose-card-directive";
+import { resolveSkillSync } from "../../../src/prompts/skill-discovery";
 
-const IMPLEMENT_DIRECTIVE =
-	"You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work.\n\n";
-
-const OLD_PLAN_LITERAL =
-	"You are working a plan card. Use the fleet-plan skill: investigate and write a design doc; do not implement.\n\n";
-
-function getOldPrLiteral(baseRef: string): string {
-	return `You are working an auto-review PR card. Use the fleet-pr skill: the card is your authorization to commit and push — never pause to ask whether to commit, push, or open the PR; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Commit as you go, push the task branch to remote, then open one idempotent PR against this card's base branch \`${baseRef}\` non-interactively — \`gh pr create --base ${baseRef} --title <subject> --body <summary>\` (never a bare or interactive \`gh pr create\`, and never ask which base branch to use) — and leave the card in Review. Never open the PR against the repository's default branch.\n\n`;
+/**
+ * The `directive:` a bundled skill declares in its own SKILL.md frontmatter.
+ *
+ * These tests deliberately do NOT keep a copy of that prose. A duplicate here would
+ * break on every intentional wording change while proving nothing about
+ * `composeCardDirective` — it would only assert that nobody edited a skill file.
+ * What the composer actually promises is that the directive is *single-sourced from
+ * the skill*, so that is what we read and assert against.
+ */
+function declaredDirective(skillName: string): string {
+	const resolved = resolveSkillSync(skillName, {});
+	if (!resolved) {
+		throw new Error(`Expected bundled skill "${skillName}" to resolve.`);
+	}
+	const { data } = matter(readFileSync(resolved.skillFilePath, "utf-8"));
+	if (typeof data.directive !== "string" || data.directive.trim() === "") {
+		throw new Error(`Expected bundled skill "${skillName}" to declare a directive.`);
+	}
+	return data.directive;
 }
 
 describe("composeCardDirective", () => {
@@ -46,11 +59,11 @@ Body for ${skillName}
 		tempDirs.length = 0;
 	});
 
-	it("given a build card skill (fleet-implement), when composed, then it matches the implement directive exactly", () => {
+	it("given a build card skill (fleet-implement), when composed, then it is sourced verbatim from that skill's own frontmatter", () => {
 		// when
 		const result = composeCardDirective(["fleet-implement"], { baseRef: "production-line" });
 		// then
-		expect(result).toBe(IMPLEMENT_DIRECTIVE);
+		expect(result).toBe(`${declaredDirective("fleet-implement")}\n\n`);
 	});
 
 	it("given a build card skill, when composed, then the directive mandates reporting a card premise found false", () => {
@@ -61,31 +74,40 @@ Body for ${skillName}
 		expect(result).toContain("stop and report it instead of implementing around it");
 	});
 
-	it("given a plan card skill (fleet-plan), when composed, then it matches the old plan literal exactly", () => {
+	it("given a build card skill, when composed, then the directive requires the card to end with a retro", () => {
+		// when
+		const result = composeCardDirective(["fleet-implement"], { baseRef: "production-line" });
+		// then
+		expect(result).toContain("## Retro");
+		expect(result).toContain("what made this harder than it should be");
+	});
+
+	it("given a plan card skill (fleet-plan), when composed, then it is sourced verbatim from that skill's own frontmatter", () => {
 		// when
 		const result = composeCardDirective(["fleet-plan"], { baseRef: "production-line" });
 		// then
-		expect(result).toBe(OLD_PLAN_LITERAL);
+		expect(result).toBe(`${declaredDirective("fleet-plan")}\n\n`);
 	});
 
-	it("given a stack of build and PR skills, when composed, then it matches the old implement-then-PR stack exactly with baseRef interpolated", () => {
+	it("given a stack of build and PR skills, when composed, then each directive appears once, in the order given", () => {
 		// given
 		const baseRef = "production-line";
 		// when
 		const result = composeCardDirective(["fleet-implement", "fleet-pr"], { baseRef });
 		// then
-		const expected = `${IMPLEMENT_DIRECTIVE}${getOldPrLiteral(baseRef)}`;
-		expect(result).toBe(expected);
+		const implement = declaredDirective("fleet-implement");
+		const pr = declaredDirective("fleet-pr").replace(/\$\{baseRef\}/g, baseRef);
+		expect(result).toBe(`${implement}\n\n${pr}\n\n`);
 	});
 
-	it("given a different baseRef for a stack, when composed, then it templates that baseRef correctly", () => {
+	it("given a different baseRef for a stack, when composed, then that baseRef is templated into the PR directive", () => {
 		// given
 		const baseRef = "main";
 		// when
 		const result = composeCardDirective(["fleet-implement", "fleet-pr"], { baseRef });
 		// then
-		const expected = `${IMPLEMENT_DIRECTIVE}${getOldPrLiteral(baseRef)}`;
-		expect(result).toBe(expected);
+		expect(result).toContain("against this card's base branch `main`");
+		expect(result).not.toContain("${baseRef}");
 	});
 
 	it("given an empty skill list, when composed, then it returns an empty string", () => {
