@@ -71,7 +71,7 @@
     "selfcheck": "tsx test/selfcheck/run-selfcheck.ts",
     "kanban:scratch": "node scripts/scratch-instance.mjs",
     "test:watch": "vitest",
-    "prepare": "husky",
+    "prepare": "git config core.hooksPath .husky",
     "prepublishOnly": "npm run build && npm run check"
   },
   "license": "Apache-2.0",
