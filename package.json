@@ -61,7 +61,8 @@
     "lint": "npx @biomejs/biome lint src test web-ui/src web-ui/tests vitest.config.ts web-ui/vite.config.ts web-ui/vitest.config.ts web-ui/playwright.config.ts",
     "format": "npx @biomejs/biome check --write .",
     "check": "npm run verify",
-    "verify": "npm run lint && npm run web:build && npm run typecheck && npm run test:fast && npm --prefix web-ui run test",
+    "verify:precommit": "npm run lint && npm run typecheck && npm run test:fast && npm --prefix web-ui run test",
+    "verify": "npm run verify:precommit && npm run web:build",
     "test": "vitest run",
     "test:fast": "vitest run test/runtime test/utilities test/agents --exclude \"**/*.live.test.ts\"",
     "tck:live": "vitest run test/agents/tck/live-conformance.live.test.ts",
@@ -69,7 +70,6 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "selfcheck": "tsx test/selfcheck/run-selfcheck.ts",
     "kanban:scratch": "node scripts/scratch-instance.mjs",
-    "test:precommit": "npm run test:fast",
     "test:watch": "vitest",
     "prepare": "husky",
     "prepublishOnly": "npm run build && npm run check"
