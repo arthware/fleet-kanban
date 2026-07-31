@@ -234,7 +234,7 @@ describe("worktree skills directory placement", () => {
 		}
 	});
 
-	it("given a claude agent, when skills are placed at .claude/skills, then bundled skill links are created there", async () => {
+	it("given a claude agent, when skills are placed at the Claude skills relative path, then bundled skill links are created there", async () => {
 		const { root, cleanup } = await createSandbox();
 		try {
 			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
@@ -263,7 +263,7 @@ describe("worktree skills directory placement", () => {
 });
 
 describe("resolveWorktreeSkillsRelativePath", () => {
-	it("maps the claude agent to .claude/skills", () => {
+	it("maps the claude agent to the Claude skills relative path", () => {
 		expect(resolveWorktreeSkillsRelativePath("claude")).toBe(CLAUDE_SKILLS_RELATIVE_PATH);
 	});
 

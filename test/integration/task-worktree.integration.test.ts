@@ -549,7 +549,7 @@ describe.sequential("task-worktree integration", () => {
 		});
 	});
 
-	it("given a claude card, when setup runs, then skills mount at .claude/skills and are excluded once", async () => {
+	it("given a claude card, when setup runs, then skills mount at the Claude skills relative path and are excluded once", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-claude-skills-");
 			try {
