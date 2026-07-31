@@ -22,6 +22,7 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
+	DiscoverSessionInput,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
@@ -237,6 +238,9 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
 				return loc.present ? loc.path : null;
+			},
+			discoverSession: async () => {
+				return null;
 			},
 		},
 		signals: {
@@ -633,3 +637,5 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
+
+export { CLAUDE_SKILLS_RELATIVE_PATH, isClaudeTranscriptPath } from "./paths";

@@ -1,6 +1,8 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { realpathSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
@@ -9,6 +11,7 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
+	DiscoverSessionInput,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
@@ -211,6 +214,53 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
 				return loc.present ? loc.path : null;
+			},
+			discoverSession: async (input) => {
+				const geminiRoot = join(input.homePath, ".gemini");
+				const slug = await findGeminiSlugForCwd(geminiRoot, input.cwd);
+				if (!slug) {
+					return null;
+				}
+
+				const chatsDir = join(geminiRoot, "tmp", slug, "chats");
+				let files: string[] = [];
+				try {
+					const entries = await readdir(chatsDir, { withFileTypes: true });
+					files = entries
+						.filter((e) => e.isFile() && e.name.startsWith("session-") && e.name.endsWith(".jsonl"))
+						.map((e) => join(chatsDir, e.name));
+				} catch {
+					return null;
+				}
+
+				const filesWithMtime = [];
+				const freshWindowMs = 10000;
+				for (const file of files) {
+					try {
+						const s = await stat(file);
+						if (s.mtimeMs >= input.startedAtMs - freshWindowMs) {
+							filesWithMtime.push({ file, mtimeMs: s.mtimeMs });
+						}
+					} catch {}
+				}
+
+				filesWithMtime.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+				if (filesWithMtime.length === 0) {
+					return null;
+				}
+
+				const newestFile = filesWithMtime[0].file;
+				try {
+					const content = await readFile(newestFile, "utf8");
+					const firstLine = content.split("\n")[0];
+					const parsed = JSON.parse(firstLine);
+					if (parsed && typeof parsed === "object" && typeof parsed.sessionId === "string") {
+						return parsed.sessionId;
+					}
+				} catch {}
+
+				return null;
 			},
 		},
 		signals: {
@@ -509,4 +559,55 @@ function readString(record: Record<string, unknown>, key: string): string | null
 function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export async function findGeminiSlugForCwd(geminiRoot: string, cwd: string): Promise<string | null> {
+	const resolveReal = (p: string) => {
+		try {
+			return realpathSync(resolve(p)).replace(/[/\\]$/, "");
+		} catch {
+			return resolve(p).replace(/[/\\]$/, "");
+		}
+	};
+
+	const normalizedCwd = resolveReal(cwd);
+
+	// 1. Try ~/.gemini/projects.json
+	const projectsJsonPath = join(geminiRoot, "projects.json");
+	try {
+		const content = await readFile(projectsJsonPath, "utf8");
+		const data = JSON.parse(content);
+		if (data && typeof data === "object" && data.projects && typeof data.projects === "object") {
+			for (const [projPath, slug] of Object.entries(data.projects)) {
+				if (typeof slug === "string" && resolveReal(projPath) === normalizedCwd) {
+					return slug;
+				}
+			}
+		}
+	} catch {
+		// Ignore and try fallback
+	}
+
+	// 2. Fallback to scanning ~/.gemini/tmp/*/
+	const tmpRoot = join(geminiRoot, "tmp");
+	try {
+		const entries = await readdir(tmpRoot, { withFileTypes: true });
+		for (const entry of entries) {
+			if (entry.isDirectory()) {
+				const projectRootPath = join(tmpRoot, entry.name, ".project_root");
+				try {
+					const content = await readFile(projectRootPath, "utf8");
+					if (resolveReal(content.trim()) === normalizedCwd) {
+						return entry.name;
+					}
+				} catch {
+					// Ignore subdirectory read errors
+				}
+			}
+		}
+	} catch {
+		// Ignore root readdir errors
+	}
+
+	return null;
 }

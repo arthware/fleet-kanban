@@ -276,6 +276,12 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 					expect(presentResult.value).toBe(true);
 				}
 
+				const pathResult = await driver.observe.artifactPath({ sessionId: targetSessionId, homePath: home });
+				expect(pathResult).not.toBeNull();
+				if (pathResult) {
+					expect(existsSync(pathResult)).toBe(true);
+				}
+
 				const messagesResult = await driver.observe.messages({ sessionId: targetSessionId, homePath: home });
 				expect(messagesResult.supported).toBe(true);
 				if (messagesResult.supported) {

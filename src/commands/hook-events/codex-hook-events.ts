@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
+import { getCodexSessionsRoot } from "../../agents/codex/paths";
 import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../../core/api-contract";
 
 const CODEX_LOG_POLL_INTERVAL_MS = 200;
@@ -288,7 +288,7 @@ function extractRolloutCommandFromPayload(payload: Record<string, unknown>): str
 
 export async function resolveCodexRolloutFinalMessageForCwd(
 	cwd: string,
-	sessionsRoot = join(homedir(), ".codex", "sessions"),
+	sessionsRoot = getCodexSessionsRoot(),
 ): Promise<string | null> {
 	if (!cwd.trim()) {
 		return null;
@@ -885,7 +885,7 @@ export async function startCodexSessionWatcher(
 ): Promise<() => Promise<void>> {
 	const state = createCodexWatcherState();
 	const watcherCwd = options.cwd?.trim() ?? "";
-	const sessionsRoot = options.sessionsRoot ?? join(homedir(), ".codex", "sessions");
+	const sessionsRoot = options.sessionsRoot ?? getCodexSessionsRoot();
 	const rolloutPollIntervalMs = options.rolloutPollIntervalMs ?? CODEX_ROLLOUT_POLL_INTERVAL_MS;
 	const watcherStartedAtMs = Date.now();
 	let rolloutLogPath = "";

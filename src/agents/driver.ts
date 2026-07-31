@@ -95,13 +95,20 @@ export interface ObservationRequest {
 	readonly homePath: string;
 }
 
+export interface DiscoverSessionInput {
+	readonly cwd: string;
+	readonly startedAtMs: number;
+	readonly homePath: string;
+}
+
 export interface ObservationPort {
 	artifactPresent(input?: ObservationRequest): Promise<Capability<boolean>>;
 	messages(input?: ObservationRequest): Promise<Capability<readonly AgentObservationMessage[]>>;
 	transcript(input?: ObservationRequest): Promise<Capability<readonly RuntimeTaskChatMessage[]>>;
 	usage(input?: ObservationRequest): Promise<Capability<AgentUsage>>;
 	richUsage(input?: ObservationRequest): Promise<Capability<RuntimeTaskTokenUsage | null>>;
-	artifactPath?(input: ObservationRequest): Promise<string | null>;
+	artifactPath(input: ObservationRequest): Promise<string | null>;
+	discoverSession(input: DiscoverSessionInput): Promise<string | null>;
 }
 
 export interface NativeSignalInput {

@@ -5,7 +5,6 @@ import { describe, expect } from "vitest";
 import { createClaudeDriver } from "../../../src/agents/claude/driver";
 import { createCodexDriver } from "../../../src/agents/codex/driver";
 import { createGeminiDriver } from "../../../src/agents/gemini/driver";
-import { captureCodexSessionId } from "../../../src/terminal/codex-session-capture";
 import { describeLiveDriverTck, registerLiveSummaryHandler } from "./live-tck";
 
 /** How far back a just-spawned Codex rollout file may be stamped and still count as this run's. */
@@ -57,10 +56,11 @@ function findLatestGeminiSession(home: string): { sessionId: string } | null {
  * nothing and reported it as a missing session.
  */
 async function findLatestCodexSession(home: string): Promise<{ sessionId: string } | null> {
-	const sessionId = await captureCodexSessionId({
+	const driver = createCodexDriver();
+	const sessionId = await driver.observe.discoverSession({
 		cwd: process.cwd(),
 		startedAtMs: Date.now() - CODEX_SESSION_LOOKBACK_MS,
-		sessionsRoot: join(home, ".codex", "sessions"),
+		homePath: home,
 	});
 	return sessionId ? { sessionId } : null;
 }
