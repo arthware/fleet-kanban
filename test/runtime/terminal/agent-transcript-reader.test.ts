@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { readAgentTranscript } from "../../../src/terminal/agent-transcript-reader";
+import {
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+} from "../../fixtures/agent-paths";
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -37,7 +42,7 @@ describe("readAgentTranscript — claude", () => {
 	it("given a recorded Claude transcript, when it is read through the locator path, then production can render the main conversation", async () => {
 		// given
 		await writeFixture(
-			join(".claude", "projects", "-Users-arthur-code-repos-tools", `${sessionId}.jsonl`),
+			getClaudeMockTranscriptPath("", sessionId, "-Users-arthur-code-repos-tools"),
 			"claude-transcript-recorded.jsonl",
 		);
 
@@ -57,7 +62,7 @@ describe("readAgentTranscript — claude", () => {
 	});
 
 	it("normalizes user prompt, assistant prose, reasoning, and tool call/result into ordered messages", async () => {
-		await writeJsonl(join(".claude", "projects", "-Users-dev-repo", `${sessionId}.jsonl`), [
+		await writeJsonl(getClaudeMockTranscriptPath("", sessionId, "-Users-dev-repo"), [
 			{ type: "mode", mode: "default" },
 			{
 				type: "user",
@@ -125,7 +130,12 @@ describe("readAgentTranscript — codex", () => {
 		// given
 		const recordedSessionId = "019f4b49-a9e3-74b3-8beb-75b8dec8a874";
 		await writeFixture(
-			join(".codex", "sessions", "2026", "07", "10", `rollout-2026-07-10T09-09-07-${recordedSessionId}.jsonl`),
+			getCodexMockTranscriptPath(
+				"",
+				recordedSessionId,
+				"2026/07/10",
+				`rollout-2026-07-10T09-09-07-${recordedSessionId}.jsonl`,
+			),
 			"codex-transcript-recorded.jsonl",
 		);
 
@@ -146,7 +156,7 @@ describe("readAgentTranscript — codex", () => {
 
 	it("renders human/assistant turns and tool activity, skipping injected preamble and duplicate event stream", async () => {
 		await writeJsonl(
-			join(".codex", "sessions", "2026", "07", "07", `rollout-2026-07-07T21-35-52-${sessionId}.jsonl`),
+			getCodexMockTranscriptPath("", sessionId, "2026/07/07", `rollout-2026-07-07T21-35-52-${sessionId}.jsonl`),
 			[
 				{
 					type: "session_meta",
@@ -224,7 +234,7 @@ describe("readAgentTranscript — gemini", () => {
 		// given
 		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
 		await writeFixture(
-			join(".gemini", "tmp", "fleet-kanban-4", "chats", "session-2026-07-23T18-22-84456eab.jsonl"),
+			getGeminiMockTranscriptPath("", sessionId, "fleet-kanban-4", "session-2026-07-23T18-22-84456eab.jsonl"),
 			"gemini-transcript-recorded.jsonl",
 		);
 

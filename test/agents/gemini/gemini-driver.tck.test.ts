@@ -1,15 +1,21 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createGeminiDriver } from "../../../src/agents/gemini/driver";
+import { getGeminiMockTranscriptPath } from "../../fixtures/agent-paths";
 import { describeDriverTck } from "../tck/driver-tck";
 
 const homePath = mkdtempSync(join(tmpdir(), "gemini-tck-"));
 const sessionId = "gemini-session-1";
-const chatsDir = join(homePath, ".gemini", "tmp", "fleet-kanban-gemini", "chats");
-mkdirSync(chatsDir, { recursive: true });
+const expectedPath = getGeminiMockTranscriptPath(
+	homePath,
+	sessionId,
+	"fleet-kanban-gemini",
+	`session-2026-07-29T10-00-00-${sessionId}.jsonl`,
+);
+mkdirSync(dirname(expectedPath), { recursive: true });
 writeFileSync(
-	join(chatsDir, `session-2026-07-29T10-00-00-${sessionId}.jsonl`),
+	expectedPath,
 	JSON.stringify({
 		type: "user",
 		timestamp: "2026-07-29T10:00:00.000Z",

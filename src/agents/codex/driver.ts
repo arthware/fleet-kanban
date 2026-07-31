@@ -1,7 +1,5 @@
-import type { Dirent, Stats } from "node:fs";
-import { realpathSync } from "node:fs";
-import { open, readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import type { Dirent } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
@@ -12,7 +10,6 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
-	DiscoverSessionInput,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,

@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { deriveClaudeUsage, deriveCodexUsage, readAgentUsage } from "../../../src/terminal/agent-usage-reader";
+import {
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+} from "../../fixtures/agent-paths";
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
@@ -197,7 +202,7 @@ describe("readAgentUsage — claude", () => {
 	});
 
 	async function writeTranscript(sessionId: string, records: unknown[]): Promise<void> {
-		const absolutePath = join(homePath, ".claude", "projects", "-Users-dev-repo", `${sessionId}.jsonl`);
+		const absolutePath = getClaudeMockTranscriptPath(homePath, sessionId, "-Users-dev-repo");
 		await mkdir(dirname(absolutePath), { recursive: true });
 		await writeFile(absolutePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 	}
@@ -254,13 +259,10 @@ describe("readAgentUsage — codex", () => {
 	async function writeRollout(sessionId: string, records: unknown[]): Promise<void> {
 		// Mirror the codex layout the locator scans: a date-partitioned tree of
 		// `rollout-<timestamp>-<sessionId>.jsonl` files.
-		const absolutePath = join(
+		const absolutePath = getCodexMockTranscriptPath(
 			homePath,
-			".codex",
-			"sessions",
-			"2026",
-			"07",
-			"10",
+			sessionId,
+			"2026/07/10",
 			`rollout-2026-07-10T11-09-06-${sessionId}.jsonl`,
 		);
 		await mkdir(dirname(absolutePath), { recursive: true });
@@ -312,12 +314,10 @@ describe("readAgentUsage — gemini", () => {
 
 	async function writeGeminiTranscript(): Promise<string> {
 		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
-		const absolutePath = join(
+		const absolutePath = getGeminiMockTranscriptPath(
 			homePath,
-			".gemini",
-			"tmp",
+			sessionId,
 			"fleet-kanban-4",
-			"chats",
 			"session-2026-07-23T18-22-84456eab.jsonl",
 		);
 		await mkdir(dirname(absolutePath), { recursive: true });

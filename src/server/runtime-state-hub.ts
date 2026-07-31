@@ -51,7 +51,7 @@ export function getTargetColumnForSession(summary: {
 export async function projectSessionSummaryColumn(
 	workspaceId: string,
 	summary: { taskId: string; state: RuntimeTaskSessionState },
-	workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
+	_workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
 	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
 ): Promise<boolean> {
 	const targetColumnId = getTargetColumnForSession(summary);

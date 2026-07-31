@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, type TestContext } from "vitest";
 import { WebSocket } from "ws";
 import { getTaskColumnId } from "../../src/core/task-board-mutations";
 import {
@@ -10,6 +9,11 @@ import {
 	waitFor,
 } from "../selfcheck/scenario-api";
 import { resolveBinaryExecutable } from "./tck/live-tck";
+
+interface TerminalCapture {
+	getOutput: () => string;
+	close: () => void;
+}
 
 interface TestSummary {
 	executed: boolean;
@@ -139,7 +143,7 @@ async function captureTerminalOutput(
  * drive all three real CLIs.
  */
 describe.skipIf(!process.env.KANBAN_LIVE_BOARD)("Live Selfcheck Integration Tests", () => {
-	const runLiveTestForAgent = async (agentId: "claude" | "codex" | "gemini", binaryName: string, ctx: any) => {
+	const runLiveTestForAgent = async (agentId: "claude" | "codex" | "gemini", binaryName: string, ctx: TestContext) => {
 		const executablePath = resolveBinaryExecutable(binaryName);
 		if (!executablePath) {
 			selfcheckLiveSummary[agentId] = { executed: false, skipped: true, reason: `${binaryName} binary not found` };
@@ -149,7 +153,7 @@ describe.skipIf(!process.env.KANBAN_LIVE_BOARD)("Live Selfcheck Integration Test
 
 		console.log(`[test] Starting live test for ${agentId} using binary ${executablePath}...`);
 		const context = await createSelfcheckContext({ live: true });
-		let capture: any;
+		let capture: TerminalCapture | null = null;
 		try {
 			const driver = createTrpcScenarioDriver(context);
 			const taskId = `live-selfcheck-${agentId}`;
@@ -237,11 +241,12 @@ describe.skipIf(!process.env.KANBAN_LIVE_BOARD)("Live Selfcheck Integration Test
 			expect(col).toBe("review");
 
 			selfcheckLiveSummary[agentId] = { executed: true, skipped: false, reason: "" };
-		} catch (error: any) {
+		} catch (error) {
 			if (selfcheckLiveSummary[agentId].skipped) {
 				throw error; // Vitest abort skip signal
 			}
-			selfcheckLiveSummary[agentId] = { executed: false, skipped: false, reason: `failed: ${error.message}` };
+			const msg = error instanceof Error ? error.message : String(error);
+			selfcheckLiveSummary[agentId] = { executed: false, skipped: false, reason: `failed: ${msg}` };
 			throw error;
 		} finally {
 			if (capture) {

@@ -22,13 +22,13 @@ import {
 	getTaskColumnId,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
-import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
+import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
 import { createPetRepoFixtureCopy, type PetRepoFixture } from "../utilities/pet-repo-fixture";
 import { requestJson } from "../utilities/trpc-request";
 import { connectRuntimeStream, type RuntimeStreamClient } from "./runtime-stream";
 
 export interface SelfcheckContext {
-	instance: any; // Using any or IsolatedKanbanInstance to keep things simple
+	instance: IsolatedKanbanInstance;
 	baseUrl: string;
 	workspaceId: string;
 	fixture: PetRepoFixture;
@@ -101,7 +101,7 @@ function getRealHome(): string {
 
 export async function createSelfcheckContext(opts?: { live?: boolean }): Promise<SelfcheckContext> {
 	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
-	let instance: any;
+	let instance: IsolatedKanbanInstance;
 	try {
 		if (opts?.live) {
 			const realHome = getRealHome();
@@ -264,7 +264,7 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}
 			try {
 				process.kill(summary.pid, "SIGKILL");
-			} catch (_err: any) {
+			} catch (_err) {
 				// Ignore errors (e.g. process already dead)
 			}
 		},
