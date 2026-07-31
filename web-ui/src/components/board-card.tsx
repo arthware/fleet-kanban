@@ -1,6 +1,5 @@
 import { Draggable } from "@hello-pangea/dnd";
 import { getRuntimeAgentCatalogEntry } from "@runtime-agent-catalog";
-import { formatClineToolCallLabel } from "@runtime-cline-tool-call-display";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
 import {
 	AlertCircle,
@@ -19,12 +18,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { notifyError, showAppToast } from "@/components/app-toaster";
 import { DesignDocBadge } from "@/components/design-doc-badge";
-import { ClineMarkdownContent } from "@/components/detail-panels/cline-markdown-content";
-import {
-	formatClineReasoningEffortLabel,
-	formatClineSelectedModelButtonText,
-	resolveClineModelDisplayName,
-} from "@/components/detail-panels/cline-model-picker-options";
+import { MarkdownContent } from "@/components/detail-panels/markdown-content";
 import { ExternalIssueBadge } from "@/components/external-issue-badge";
 import { PrBadge } from "@/components/pr-badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +43,7 @@ import {
 	truncateTaskPromptLabel,
 } from "@/utils/task-prompt";
 import { DEFAULT_TEXT_MEASURE_FONT, measureTextWidth, readElementFontShorthand } from "@/utils/text-measure";
+import { formatToolCallLabel } from "./tool-call-label";
 
 interface CardSessionActivity {
 	dotColor: string;
@@ -80,10 +75,7 @@ const KNOWN_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 	"claude-haiku-4-5": "Haiku 4.5",
 };
 
-function resolveAgentModelDisplayName(agentId: RuntimeAgentId | null, modelId: string): string {
-	if (agentId === "cline") {
-		return resolveClineModelDisplayName(modelId);
-	}
+function resolveAgentModelDisplayName(_agentId: RuntimeAgentId | null, modelId: string): string {
 	return KNOWN_MODEL_DISPLAY_NAMES[modelId] ?? modelId;
 }
 
@@ -161,7 +153,7 @@ function resolveToolCallLabel(
 		if (!toolInputSummary && !parsedSummary) {
 			return null;
 		}
-		return formatClineToolCallLabel(toolName, toolInputSummary ?? parsedSummary);
+		return formatToolCallLabel(toolName, toolInputSummary ?? parsedSummary);
 	}
 	if (!activityText) {
 		return null;
@@ -170,7 +162,7 @@ function resolveToolCallLabel(
 	if (!parsed) {
 		return null;
 	}
-	return formatClineToolCallLabel(parsed.toolName, parsed.toolInputSummary);
+	return formatToolCallLabel(parsed.toolName, parsed.toolInputSummary);
 }
 
 function isCardCreditLimitError(summary: RuntimeTaskSessionSummary | undefined): boolean {
@@ -295,16 +287,6 @@ function resolveAgentBadgeInfo(
 		colorClasses = "border-status-green/30 bg-status-green/10 text-status-green";
 	} else if (agentId === "gemini") {
 		colorClasses = "border-status-blue/30 bg-status-blue/10 text-status-blue";
-	} else if (agentId === "cursor") {
-		colorClasses = "border-status-purple/30 bg-status-purple/10 text-status-purple";
-	} else if (agentId === "cline") {
-		colorClasses = "border-status-cyan/30 bg-status-cyan/10 text-status-cyan";
-	} else if (agentId === "droid") {
-		colorClasses = "border-status-gold/30 bg-status-gold/10 text-status-gold";
-	} else if (agentId === "kiro") {
-		colorClasses = "border-status-violet/30 bg-status-violet/10 text-status-violet";
-	} else if (agentId === "opencode") {
-		colorClasses = "border-status-lime/30 bg-status-lime/10 text-status-lime";
 	}
 
 	if (isTrashCard) {
@@ -343,7 +325,6 @@ export function BoardCard({
 	workspaceId,
 	workspacePath,
 	taskWorktreesRoot,
-	defaultClineModelId = null,
 	defaultAgentId = null,
 }: {
 	card: BoardCardModel;
@@ -369,7 +350,6 @@ export function BoardCard({
 	workspaceId?: string | null;
 	workspacePath?: string | null;
 	taskWorktreesRoot?: string | null;
-	defaultClineModelId?: string | null;
 	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
@@ -580,43 +560,11 @@ export function BoardCard({
 	// falling back to the workspace's default agent so operators can see what a
 	// card actually runs on, not just what it explicitly overrode.
 	const effectiveAgentId = card.agentId ?? defaultAgentId ?? null;
-	const modelOverrideLabel = useMemo(() => {
-		if (card.clineSettings === undefined) {
-			return null;
-		}
-		const explicitReasoningLabel = card.clineSettings.reasoningEffort
-			? formatClineReasoningEffortLabel(card.clineSettings.reasoningEffort)
-			: !card.clineSettings.providerId && !card.clineSettings.modelId
-				? "Default"
-				: null;
-		if (card.clineSettings.providerId && !card.clineSettings.modelId) {
-			const providerLabel = `Provider: ${card.clineSettings.providerId}`;
-			return explicitReasoningLabel ? `${providerLabel} (${explicitReasoningLabel})` : providerLabel;
-		}
-		const effectiveModelId = card.clineSettings.modelId ?? defaultClineModelId;
-		if (!effectiveModelId) {
-			return explicitReasoningLabel ? `Default model (${explicitReasoningLabel})` : null;
-		}
-		const modelName = resolveClineModelDisplayName(effectiveModelId);
-		if (explicitReasoningLabel) {
-			return `${modelName} (${explicitReasoningLabel})`;
-		}
-		const inheritedReasoningEffort = "";
-		return formatClineSelectedModelButtonText({
-			modelName,
-			reasoningEffort: inheritedReasoningEffort,
-			showReasoningEffort: Boolean(inheritedReasoningEffort),
-		});
-	}, [card.clineSettings, defaultClineModelId]);
-	// Model source priority: the Cline picker's own structured override (already
-	// resolved above) wins when present; otherwise the card's plain agentModel
-	// override; otherwise a muted "default" once the agent itself is known — a
+	// Model source priority: the card's plain agentModel override wins when
+	// present; otherwise a muted "default" once the agent itself is known — a
 	// card that has never set anything model-specific still tells you it's
 	// running the workspace default rather than showing nothing.
 	const resolvedModelLabel = useMemo(() => {
-		if (modelOverrideLabel) {
-			return { text: modelOverrideLabel, isDefault: false };
-		}
 		if (card.agentModel) {
 			return { text: resolveAgentModelDisplayName(effectiveAgentId, card.agentModel), isDefault: false };
 		}
@@ -624,7 +572,7 @@ export function BoardCard({
 			return { text: "default", isDefault: true };
 		}
 		return null;
-	}, [modelOverrideLabel, card.agentModel, effectiveAgentId]);
+	}, [card.agentModel, effectiveAgentId]);
 	const badgeInfo = useMemo(() => {
 		return resolveAgentBadgeInfo(effectiveAgentId, resolvedModelLabel, isTrashCard);
 	}, [effectiveAgentId, resolvedModelLabel, isTrashCard]);
@@ -1186,7 +1134,7 @@ export function BoardCard({
 							</span>
 						) : null}
 					</div>
-					<ClineMarkdownContent content={card.prompt} />
+					<MarkdownContent content={card.prompt} />
 				</DialogBody>
 			</Dialog>
 		</>

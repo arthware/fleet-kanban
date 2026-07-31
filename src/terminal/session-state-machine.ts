@@ -1,8 +1,4 @@
-import type {
-	RuntimeTaskHookActivity,
-	RuntimeTaskSessionReviewReason,
-	RuntimeTaskSessionSummary,
-} from "../core/api-contract";
+import type { RuntimeTaskSessionReviewReason, RuntimeTaskSessionSummary } from "../core/api-contract";
 
 export type SessionTransitionEvent =
 	| { type: "hook.to_review" }
@@ -11,32 +7,6 @@ export type SessionTransitionEvent =
 	| { type: "human.input_submitted" }
 	| { type: "agent.prompt-ready" }
 	| { type: "process.exit"; exitCode: number | null; interrupted: boolean };
-
-/**
- * A `to_review` hook that means "blocked — answer me" rather than "done — review
- * me". The claude adapter already emits the raw distinction: a `PermissionRequest`
- * hook or a `Notification(permission_prompt)` fire while the agent waits on the
- * human, whereas `Stop` fires when the turn simply ended. Both currently collapse
- * to `reviewReason: "hook"`; this classifier lets the ingest path lift the former
- * to `reviewReason: "needs_input"` so the architect can tell them apart at a glance.
- */
-export function isNeedsInputReviewHook(metadata: Partial<RuntimeTaskHookActivity> | null | undefined): boolean {
-	if (!metadata) {
-		return false;
-	}
-	const notificationType = metadata.notificationType?.trim().toLowerCase() ?? "";
-	const hookEventName = metadata.hookEventName?.trim().toLowerCase() ?? "";
-	const toolName = metadata.toolName?.trim().toLowerCase() ?? "";
-	return (
-		notificationType === "permission_prompt" ||
-		notificationType === "permission.asked" ||
-		notificationType === "request_user_input" ||
-		hookEventName === "permissionrequest" ||
-		toolName === "askuserquestion" ||
-		toolName === "ask_user_question" ||
-		toolName === "request_user_input"
-	);
-}
 
 export interface SessionTransitionResult {
 	changed: boolean;

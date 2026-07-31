@@ -61,7 +61,6 @@ export function KanbanBoard({
 	archivedData,
 	isArchivedLoading,
 	onLoadArchivedCards,
-	defaultClineModelId,
 	defaultAgentId,
 }: {
 	data: BoardData;
@@ -94,7 +93,6 @@ export function KanbanBoard({
 	archivedData?: BoardData | null;
 	isArchivedLoading?: boolean;
 	onLoadArchivedCards?: () => Promise<void> | void;
-	defaultClineModelId?: string | null;
 	defaultAgentId?: RuntimeAgentId | null;
 }): React.ReactElement {
 	const dragOccurredRef = useRef(false);
@@ -450,7 +448,6 @@ export function KanbanBoard({
 						workspaceId={workspaceId}
 						workspacePath={workspacePath}
 						taskWorktreesRoot={taskWorktreesRoot}
-						defaultClineModelId={defaultClineModelId}
 						defaultAgentId={defaultAgentId}
 						onCardClick={(card) => {
 							if (!dragOccurredRef.current) {

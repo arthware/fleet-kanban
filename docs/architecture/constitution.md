@@ -19,7 +19,7 @@ Dependent artifacts to keep in sync on amendment:
   - AGENTS.md (links here; must not restate principles)
   - .agents/skills/fleet-implement/SKILL.md  (Art. 4 wording: module tests, minimal mocking)
   - .agents/skills/fleet-plan/SKILL.md, .agents/skills/fleet-pr/SKILL.md
-  - src/prompts/*-card-directive.ts + append-system-prompt.ts (injection of Art. 1–5)
+  - src/prompts/compose-card-directive.ts + append-system-prompt.ts (injection of Art. 1–5)
   - docs/architecture/concepts/  (Art. 1 checks against this map)
 
 TODO on next amendment: none.
@@ -77,7 +77,7 @@ No "done / fixed / passing" claim without **fresh command output in the same tur
 
 ## Article 6 — Capability over identity
 
-Prefer capability-oriented reasoning over `selectedAgentId === "cline"` branching. Keep the SDK isolated behind `src/cline-sdk/`; only boundary modules may import `@clinebot/*`.
+Prefer capability-oriented reasoning over harness-specific branching. Keep harness-specific implementation isolated behind their respective driver modules.
 
 ## Article 7 — Clean replacement over compatibility scaffolding
 

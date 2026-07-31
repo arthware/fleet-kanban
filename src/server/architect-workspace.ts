@@ -191,7 +191,7 @@ They live as subdirectories of your workspace, so you can read across them with 
 		const epicList = activeEpics
 			.map(
 				(ws) =>
-					`- ${ws.epic!.name} (branch: ${ws.epic!.branch}, workspace: ${ws.workspaceId}, path: ${ws.repoPath})`,
+					`- ${ws.epic?.name} (branch: ${ws.epic?.branch}, workspace: ${ws.workspaceId}, path: ${ws.repoPath})`,
 			)
 			.join("\n");
 		epicsSection = `\n\n# Active Epics\n\nThere are active epics running on integration branches in the workspace:\n${epicList}`;

@@ -8,34 +8,16 @@ import type { RuntimeAgentDefinition, RuntimeConfigResponse } from "@/runtime/ty
 vi.mock("@runtime-agent-catalog", () => ({
 	getRuntimeAgentCatalogEntry: vi.fn((agentId: string) => {
 		const entries: Record<string, { id: string; label: string; installUrl: string | null }> = {
-			cline: { id: "cline", label: "Cline", installUrl: null },
 			claude: { id: "claude", label: "Claude Code", installUrl: "https://docs.anthropic.com" },
-			cursor: { id: "cursor", label: "Cursor Agent", installUrl: "https://cursor.com/docs/cli/overview" },
 			codex: { id: "codex", label: "OpenAI Codex", installUrl: "https://github.com/openai/codex" },
-			droid: { id: "droid", label: "Factory Droid", installUrl: "https://docs.factory.ai" },
-			kiro: { id: "kiro", label: "Kiro", installUrl: "https://kiro.dev" },
+			gemini: { id: "gemini", label: "Gemini CLI", installUrl: "https://github.com/google-gemini/gemini-cli" },
 		};
 		return entries[agentId] ?? null;
 	}),
 }));
 
-vi.mock("@/components/shared/cline-setup-section", () => ({
-	ClineSetupSection: () => null,
-}));
-
-vi.mock("@/hooks/use-runtime-settings-cline-controller", () => ({
-	useRuntimeSettingsClineController: () => ({
-		hasUnsavedChanges: false,
-		saveProviderSettings: vi.fn(async () => ({ ok: true })),
-	}),
-}));
-
-vi.mock("@/runtime/native-agent", () => ({
-	isClineProviderAuthenticated: () => false,
-}));
-
 const baseRuntimeConfig = {
-	selectedAgentId: "cline",
+	selectedAgentId: "claude",
 	selectedShortcutLabel: null,
 	agentAutonomousModeEnabled: true,
 	readyForReviewNotificationsEnabled: true,
@@ -45,33 +27,14 @@ const baseRuntimeConfig = {
 	globalConfigPath: null,
 	projectConfigPath: null,
 	agents: [],
-	clineProviderSettings: null,
 } as unknown as RuntimeConfigResponse;
 
 const registeredAgents: RuntimeAgentDefinition[] = [
-	{
-		id: "cline",
-		label: "Cline",
-		binary: "cline",
-		command: "cline",
-		defaultArgs: [],
-		installed: true,
-		configured: true,
-	},
 	{
 		id: "claude",
 		label: "Claude Code",
 		binary: "claude",
 		command: "claude",
-		defaultArgs: [],
-		installed: true,
-		configured: false,
-	},
-	{
-		id: "cursor",
-		label: "Cursor Agent",
-		binary: "cursor-agent",
-		command: "cursor-agent",
 		defaultArgs: [],
 		installed: true,
 		configured: false,
@@ -86,20 +49,11 @@ const registeredAgents: RuntimeAgentDefinition[] = [
 		configured: false,
 	},
 	{
-		id: "droid",
-		label: "Factory Droid",
-		binary: "droid",
-		command: "droid",
+		id: "gemini",
+		label: "Gemini CLI",
+		binary: "gemini",
+		command: "gemini",
 		defaultArgs: [],
-		installed: false,
-		configured: false,
-	},
-	{
-		id: "kiro",
-		label: "Kiro",
-		binary: "kiro-cli",
-		command: "kiro-cli chat",
-		defaultArgs: ["chat"],
 		installed: false,
 		configured: false,
 	},
@@ -133,7 +87,7 @@ describe("TaskStartAgentOnboardingCarousel", () => {
 		}
 	});
 
-	it("given Cursor is registered, when onboarding renders the agent step, then Cursor Agent appears", async () => {
+	it("given only supported agents are registered, when onboarding renders the agent step, then no retired harness appears", async () => {
 		// given
 		const agents = registeredAgents;
 
@@ -144,16 +98,20 @@ describe("TaskStartAgentOnboardingCarousel", () => {
 					open={true}
 					workspaceId={"workspace-1"}
 					runtimeConfig={baseRuntimeConfig}
-					selectedAgentId={"cline"}
+					selectedAgentId={"claude"}
 					agents={agents}
-					clineProviderSettings={null}
 					activeSlideIndex={3}
 				/>,
 			);
 		});
 
 		// then
-		expect(document.body.textContent).toContain("Cursor Agent");
-		expect(document.body.textContent).toContain("Cursor's coding agent CLI powered by Cursor Agent.");
+		expect(document.body.textContent).toContain("Claude Code");
+		expect(document.body.textContent).toContain("OpenAI Codex");
+		expect(document.body.textContent).toContain("Gemini CLI");
+		expect(document.body.textContent).not.toContain("Cline");
+		expect(document.body.textContent).not.toContain("Cursor Agent");
+		expect(document.body.textContent).not.toContain("Factory Droid");
+		expect(document.body.textContent).not.toContain("Kiro");
 	});
 });

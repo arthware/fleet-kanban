@@ -5,17 +5,17 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ClineSdkAccumulatedUsage } from "../../../src/cline-sdk/sdk-runtime-boundary";
+import { deriveClaudeUsage, deriveCodexUsage, readAgentUsage } from "../../../src/terminal/agent-usage-reader";
 import {
-	deriveClaudeUsage,
-	deriveCodexUsage,
-	mapClineUsage,
-	readAgentUsage,
-} from "../../../src/terminal/agent-usage-reader";
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+} from "../../fixtures/agent-paths";
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixturePath = join(fixtureDir, "claude-usage-transcript.jsonl");
 const codexFixturePath = join(fixtureDir, "codex-usage-rollout.jsonl");
+const geminiFixturePath = join(fixtureDir, "gemini-transcript-recorded.jsonl");
 
 // The three real records in claude-usage-transcript.jsonl are all
 // claude-opus-4-8, so the reader now prices them from the static table: input
@@ -190,29 +190,6 @@ describe("deriveCodexUsage", () => {
 	});
 });
 
-describe("mapClineUsage", () => {
-	// Cline reports usage through its SDK, not a transcript. The normalized shape
-	// is a straight pass-through of `SessionAccumulatedUsage` — the only renames
-	// are cacheWriteTokens → cacheCreationTokens and totalCost → costUsd.
-	it("passes SDK usage through, renaming cache-write and carrying Cline's own cost", () => {
-		const sdkUsage: ClineSdkAccumulatedUsage = {
-			inputTokens: 1200,
-			outputTokens: 340,
-			cacheReadTokens: 5000,
-			cacheWriteTokens: 800,
-			totalCost: 0.0123,
-		};
-
-		expect(mapClineUsage(sdkUsage)).toEqual({
-			inputTokens: 1200,
-			outputTokens: 340,
-			cacheReadTokens: 5000,
-			cacheCreationTokens: 800,
-			costUsd: 0.0123,
-		});
-	});
-});
-
 describe("readAgentUsage — claude", () => {
 	let homePath = "";
 
@@ -225,7 +202,7 @@ describe("readAgentUsage — claude", () => {
 	});
 
 	async function writeTranscript(sessionId: string, records: unknown[]): Promise<void> {
-		const absolutePath = join(homePath, ".claude", "projects", "-Users-dev-repo", `${sessionId}.jsonl`);
+		const absolutePath = getClaudeMockTranscriptPath(homePath, sessionId, "-Users-dev-repo");
 		await mkdir(dirname(absolutePath), { recursive: true });
 		await writeFile(absolutePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 	}
@@ -282,13 +259,10 @@ describe("readAgentUsage — codex", () => {
 	async function writeRollout(sessionId: string, records: unknown[]): Promise<void> {
 		// Mirror the codex layout the locator scans: a date-partitioned tree of
 		// `rollout-<timestamp>-<sessionId>.jsonl` files.
-		const absolutePath = join(
+		const absolutePath = getCodexMockTranscriptPath(
 			homePath,
-			".codex",
-			"sessions",
-			"2026",
-			"07",
-			"10",
+			sessionId,
+			"2026/07/10",
 			`rollout-2026-07-10T11-09-06-${sessionId}.jsonl`,
 		);
 		await mkdir(dirname(absolutePath), { recursive: true });
@@ -327,14 +301,47 @@ describe("readAgentUsage — codex", () => {
 	});
 });
 
-describe("readAgentUsage — cline", () => {
-	// Cline usage is SDK-reported, not transcript-derived, and the derive-on-read
-	// endpoint holds no live ClineCore handle to call getAccumulatedUsage — so the
-	// reader returns absent until that handle is reachable (mapClineUsage is the
-	// ready mapping). This pins the documented deferral.
-	it("returns absent because no live SDK handle is reachable on the read path", async () => {
-		const result = await readAgentUsage({ agentId: "cline", sessionId: "any", homePath: tmpdir() });
+describe("readAgentUsage — gemini", () => {
+	let homePath = "";
 
-		expect(result).toEqual({ present: false, usage: null });
+	beforeEach(async () => {
+		homePath = await mkdtemp(join(tmpdir(), "usage-reader-gemini-"));
+	});
+
+	afterEach(async () => {
+		await rm(homePath, { recursive: true, force: true });
+	});
+
+	async function writeGeminiTranscript(): Promise<string> {
+		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
+		const absolutePath = getGeminiMockTranscriptPath(
+			homePath,
+			sessionId,
+			"fleet-kanban-4",
+			"session-2026-07-23T18-22-84456eab.jsonl",
+		);
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, await readFile(geminiFixturePath, "utf8"), "utf8");
+		return sessionId;
+	}
+
+	it("known-red card 4: given a recorded Gemini transcript with tokens, when usage is read, then production should derive Gemini token totals", async () => {
+		// given
+		const sessionId = await writeGeminiTranscript();
+
+		// when
+		const result = await readAgentUsage({ agentId: "gemini", sessionId, homePath });
+
+		// then
+		expect(result).toEqual({
+			present: true,
+			usage: {
+				inputTokens: 49178,
+				outputTokens: 630,
+				cacheReadTokens: 40786,
+				cacheCreationTokens: 0,
+				costUsd: null,
+			},
+		});
 	});
 });

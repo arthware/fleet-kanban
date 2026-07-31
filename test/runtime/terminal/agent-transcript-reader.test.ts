@@ -1,10 +1,18 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { readAgentTranscript } from "../../../src/terminal/agent-transcript-reader";
+import {
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+} from "../../fixtures/agent-paths";
+
+const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 let homePath = "";
 
@@ -22,11 +30,39 @@ async function writeJsonl(relativePath: string, records: unknown[]): Promise<voi
 	await writeFile(absolutePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 }
 
+async function writeFixture(relativePath: string, fixtureName: string): Promise<void> {
+	const absolutePath = join(homePath, relativePath);
+	await mkdir(join(absolutePath, ".."), { recursive: true });
+	await writeFile(absolutePath, await readFile(join(fixtureDir, fixtureName), "utf8"), "utf8");
+}
+
 describe("readAgentTranscript — claude", () => {
 	const sessionId = "claude-read-1";
 
+	it("given a recorded Claude transcript, when it is read through the locator path, then production can render the main conversation", async () => {
+		// given
+		await writeFixture(
+			getClaudeMockTranscriptPath("", sessionId, "-Users-arthur-code-repos-tools"),
+			"claude-transcript-recorded.jsonl",
+		);
+
+		// when
+		const result = await readAgentTranscript({ agentId: "claude", sessionId, homePath });
+
+		// then
+		expect(result.present).toBe(true);
+		expect(result.messages.map((message) => message.role)).toEqual([
+			"user",
+			"reasoning",
+			"assistant",
+			"tool",
+			"tool",
+		]);
+		expect(result.messages[2]?.content).toBe("The card asks for characterization tests.");
+	});
+
 	it("normalizes user prompt, assistant prose, reasoning, and tool call/result into ordered messages", async () => {
-		await writeJsonl(join(".claude", "projects", "-Users-dev-repo", `${sessionId}.jsonl`), [
+		await writeJsonl(getClaudeMockTranscriptPath("", sessionId, "-Users-dev-repo"), [
 			{ type: "mode", mode: "default" },
 			{
 				type: "user",
@@ -90,9 +126,37 @@ describe("readAgentTranscript — claude", () => {
 describe("readAgentTranscript — codex", () => {
 	const sessionId = "019f3e14-664d-7da1-958b-030480aa2f8d";
 
+	it("given a recorded Codex rollout, when it is read through the locator path, then production can render the conversation without duplicate event messages", async () => {
+		// given
+		const recordedSessionId = "019f4b49-a9e3-74b3-8beb-75b8dec8a874";
+		await writeFixture(
+			getCodexMockTranscriptPath(
+				"",
+				recordedSessionId,
+				"2026/07/10",
+				`rollout-2026-07-10T09-09-07-${recordedSessionId}.jsonl`,
+			),
+			"codex-transcript-recorded.jsonl",
+		);
+
+		// when
+		const result = await readAgentTranscript({ agentId: "codex", sessionId: recordedSessionId, homePath });
+
+		// then
+		expect(result.present).toBe(true);
+		expect(result.messages.map((message) => message.role)).toEqual([
+			"user",
+			"reasoning",
+			"assistant",
+			"tool",
+			"tool",
+		]);
+		expect(result.messages.filter((message) => message.content === "I will add black-box tests.")).toHaveLength(1);
+	});
+
 	it("renders human/assistant turns and tool activity, skipping injected preamble and duplicate event stream", async () => {
 		await writeJsonl(
-			join(".codex", "sessions", "2026", "07", "07", `rollout-2026-07-07T21-35-52-${sessionId}.jsonl`),
+			getCodexMockTranscriptPath("", sessionId, "2026/07/07", `rollout-2026-07-07T21-35-52-${sessionId}.jsonl`),
 			[
 				{
 					type: "session_meta",
@@ -160,7 +224,27 @@ describe("readAgentTranscript — codex", () => {
 
 describe("readAgentTranscript — unknown agent", () => {
 	it("reports absent without touching the filesystem layout", async () => {
-		const result = await readAgentTranscript({ agentId: "gemini", sessionId: "whatever", homePath });
+		const result = await readAgentTranscript({ agentId: "unknown-agent", sessionId: "whatever", homePath });
 		expect(result).toEqual({ present: false, messages: [] });
+	});
+});
+
+describe("readAgentTranscript — gemini", () => {
+	it("known-red card 4: given a recorded Gemini transcript, when it is read, then production should render non-empty user and assistant turns", async () => {
+		// given
+		const sessionId = "84456eab-7b3b-49d8-babb-3a49e2ecd15c";
+		await writeFixture(
+			getGeminiMockTranscriptPath("", sessionId, "fleet-kanban-4", "session-2026-07-23T18-22-84456eab.jsonl"),
+			"gemini-transcript-recorded.jsonl",
+		);
+
+		// when
+		const result = await readAgentTranscript({ agentId: "gemini", sessionId, homePath });
+
+		// then
+		expect(result.present).toBe(true);
+		expect(result.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		expect(result.messages[0]?.content).toBe("Update the fleet implement skill.");
+		expect(result.messages[1]?.content).toBe("I will now update the skill file.");
 	});
 });

@@ -487,27 +487,4 @@ describe("RuntimeSettingsDialog", () => {
 		);
 		expect(handleOpenChange).toHaveBeenCalledWith(false);
 	});
-
-	it("forwards cline setup saves to the dialog onSaved callback", async () => {
-		const handleSaved = vi.fn();
-		await act(async () => {
-			root.render(
-				<RuntimeSettingsDialog
-					open={true}
-					workspaceId={"workspace-1"}
-					initialConfig={savedClineOauthConfig}
-					onOpenChange={() => {}}
-					onSaved={handleSaved}
-				/>,
-			);
-		});
-
-		expect(clineSetupSectionOnSavedRef.onSaved).toBeTypeOf("function");
-
-		await act(async () => {
-			clineSetupSectionOnSavedRef.onSaved?.();
-		});
-
-		expect(handleSaved).toHaveBeenCalledTimes(1);
-	});
 });

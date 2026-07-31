@@ -10,7 +10,6 @@ import {
 	useTaskWorkspaceSnapshotValue,
 	useTaskWorkspaceStateVersionValue,
 } from "@/stores/workspace-metadata-store";
-import type { SendTerminalInputOptions } from "@/terminal/terminal-input";
 import type { BoardCard, BoardData, CardSelection } from "@/types";
 
 interface UseGitActionsInput {
@@ -18,16 +17,6 @@ interface UseGitActionsInput {
 	board: BoardData;
 	selectedCard: CardSelection | null;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
-	sendTaskSessionInput: (
-		taskId: string,
-		text: string,
-		options?: SendTerminalInputOptions,
-	) => Promise<{ ok: boolean; message?: string }>;
-	sendTaskChatMessage: (
-		taskId: string,
-		text: string,
-		options?: { mode?: "plan" | "act" },
-	) => Promise<{ ok: boolean; message?: string }>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
 	isGitHistoryOpen: boolean;
 	refreshWorkspaceState: () => Promise<void>;
@@ -56,8 +45,6 @@ export function useGitActions({
 	board,
 	selectedCard,
 	runtimeProjectConfig,
-	sendTaskSessionInput,
-	sendTaskChatMessage,
 	isGitHistoryOpen,
 	refreshWorkspaceState,
 }: UseGitActionsInput): UseGitActionsResult {

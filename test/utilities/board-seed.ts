@@ -39,7 +39,7 @@ function createCard(input: {
 		prompt: input.prompt,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		agentId: "droid",
+		agentId: "claude",
 		baseRef: input.baseRef ?? "main",
 		createdAt: timestamp,
 		updatedAt: timestamp,

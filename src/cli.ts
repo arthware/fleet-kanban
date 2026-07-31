@@ -7,7 +7,6 @@ import { Command, Option } from "commander";
 import ora, { type Ora } from "ora";
 import packageJson from "../package.json" with { type: "json" };
 import "./cli-warning-filter";
-import { disposeCliTelemetryService } from "./cline-sdk/cline-telemetry-service.js";
 import { registerCardTypeCommand } from "./commands/card-type";
 import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
@@ -51,6 +50,8 @@ interface CliOptions {
 }
 
 const KANBAN_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.1.0";
+
+async function disposeCliTelemetryService(): Promise<void> {}
 
 function parseCliPortValue(rawValue: string): { mode: "fixed"; value: number } | { mode: "auto" } {
 	const normalized = rawValue.trim().toLowerCase();

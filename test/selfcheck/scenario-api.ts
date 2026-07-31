@@ -1,17 +1,17 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type {
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
-	RuntimeConfigResponse,
+	RuntimeHookEvent,
 	RuntimeHookIngestResponse,
 	RuntimeProjectsResponse,
 	RuntimeShellSessionStartResponse,
 	RuntimeStateStreamSnapshotMessage,
 	RuntimeStateStreamTaskReadyForReviewMessage,
+	RuntimeTaskHookActivity,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartResponse,
 	RuntimeWorkspaceStateResponse,
@@ -20,18 +20,11 @@ import type {
 import {
 	completeTaskAndGetReadyLinkedTaskIds,
 	getTaskColumnId,
+	hasTaskEnteredColumn,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
-import {
-	LINKED_CHILD_TASK_ID,
-	LINKED_PARENT_TASK_ID,
-	STUB_LIFECYCLE_TASK_ID,
-	seedIsolatedBoardState,
-} from "../utilities/board-seed";
-import { createGitTestEnv } from "../utilities/git-env";
 import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
 import { createPetRepoFixtureCopy, type PetRepoFixture } from "../utilities/pet-repo-fixture";
-import { createTempDir } from "../utilities/temp-dir";
 import { requestJson } from "../utilities/trpc-request";
 import { connectRuntimeStream, type RuntimeStreamClient } from "./runtime-stream";
 
@@ -46,9 +39,21 @@ export interface SelfcheckContext {
 export interface ScenarioDriver {
 	createCard(input: { card: RuntimeBoardCard; column: RuntimeBoardColumnId }): Promise<void>;
 	startCard(taskId: string): Promise<void>;
-	steerCard(taskId: string, text: string): Promise<void>;
+	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectEnteredColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectAgentFinishedCleanly(taskId: string): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
+	killAgentProcess(taskId: string): Promise<void>;
+	expectSessionGone(taskId: string): Promise<void>;
+	expectAgentRunning(taskId: string): Promise<number>;
+	readLaunchedArgv(taskId: string): Promise<readonly string[]>;
+	readAgentStdin(taskId: string): Promise<string>;
+	ingestNativeHook(
+		taskId: string,
+		input: { event: RuntimeHookEvent; metadata?: Partial<RuntimeTaskHookActivity> },
+	): Promise<void>;
+	expectReviewReason(taskId: string, reason: string | null): Promise<void>;
 }
 
 export class ScenarioAssertionError extends Error {
@@ -58,21 +63,17 @@ export class ScenarioAssertionError extends Error {
 	}
 }
 
-const DEFAULT_COLUMNS: Array<{ id: RuntimeBoardColumnId; title: string }> = [
-	{ id: "backlog", title: "Backlog" },
-	{ id: "in_progress", title: "In Progress" },
-	{ id: "review", title: "Review" },
-	{ id: "done", title: "Done" },
-	{ id: "trash", title: "Trash" },
-];
-
 export function createSelfcheckCard(input: {
 	id: string;
 	title: string;
 	prompt?: string;
 	baseRef?: string;
-	agentId?: RuntimeBoardCard["agentId"];
+	agentId: RuntimeBoardCard["agentId"];
+	agentModel?: string;
 }): RuntimeBoardCard {
+	if (!input.agentId) {
+		throw new Error(`createSelfcheckCard failed: card ${input.id} is missing agentId.`);
+	}
 	const now = Date.now();
 	return {
 		id: input.id,
@@ -80,29 +81,59 @@ export function createSelfcheckCard(input: {
 		prompt: input.prompt ?? input.title,
 		startInPlanMode: false,
 		autoReviewEnabled: false,
-		agentId: input.agentId ?? "droid",
+		agentId: input.agentId,
 		baseRef: input.baseRef ?? "main",
 		createdAt: now,
 		updatedAt: now,
 		transitions: [{ column: "backlog", at: now }],
+		...(input.agentModel ? { agentModel: input.agentModel } : {}),
 	};
 }
 
-export async function createSelfcheckContext(): Promise<SelfcheckContext> {
-	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
-	const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
-	if (!existsSync(stubAgentPath)) {
-		fixture.cleanup();
-		throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+function getRealHome(): string {
+	if (process.platform === "win32") {
+		return process.env.USERPROFILE || `C:\\Users\\${process.env.USERNAME || "Default"}`;
 	}
+	if (process.platform === "darwin") {
+		const user = process.env.USER || process.env.LOGNAME || "arthur";
+		return `/Users/${user}`;
+	}
+	const user = process.env.USER || process.env.LOGNAME || "root";
+	return `/home/${user}`;
+}
+
+export async function createSelfcheckContext(opts?: { live?: boolean }): Promise<SelfcheckContext> {
+	const fixture = createPetRepoFixtureCopy("kanban-selfcheck-pet-repo-");
 	let instance: IsolatedKanbanInstance;
 	try {
-		instance = await startIsolatedKanbanInstance({
-			cwd: fixture.path,
-			env: {
-				KANBAN_TEST_AGENT_BINARY: stubAgentPath,
-			},
-		});
+		if (opts?.live) {
+			const realHome = getRealHome();
+			const env: Record<string, string> = {
+				KANBAN_TEST_PREFLIGHT_REAL: "1",
+				HOME: realHome,
+				USERPROFILE: realHome,
+			};
+			const asdfPath = join(realHome, ".asdf");
+			if (existsSync(asdfPath)) {
+				env.ASDF_DATA_DIR = asdfPath;
+			}
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env,
+			});
+		} else {
+			const stubAgentPath = resolve(process.cwd(), "test/fixtures/stub-agent/stub-agent.mjs");
+			if (!existsSync(stubAgentPath)) {
+				fixture.cleanup();
+				throw new ScenarioAssertionError(`Missing stub agent fixture: ${stubAgentPath}`);
+			}
+			instance = await startIsolatedKanbanInstance({
+				cwd: fixture.path,
+				env: {
+					KANBAN_TEST_AGENT_BINARY: stubAgentPath,
+				},
+			});
+		}
 	} catch (error) {
 		fixture.cleanup();
 		throw error;
@@ -129,7 +160,50 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	let stream: RuntimeStreamClient | null = null;
 	return {
 		createCard: async ({ card, column }) => {
-			await mutateBoard(context, (board) => placeCard(board, card, column));
+			if (!card.agentId) {
+				throw new Error(`createCard failed: card ${card.id} is missing agentId.`);
+			}
+			let attempts = 3;
+			while (attempts > 0) {
+				const current = await loadState(context);
+				const nextBoard = placeCard(current.board, card, column);
+				const response = await requestJson<RuntimeWorkspaceStateResponse>({
+					baseUrl: context.baseUrl,
+					procedure: "workspace.saveState",
+					type: "mutation",
+					workspaceId: context.workspaceId,
+					payload: {
+						board: nextBoard,
+						sessions: {
+							...current.sessions,
+							[card.id]: {
+								taskId: card.id,
+								state: "idle",
+								agentId: card.agentId,
+								workspacePath: null,
+								pid: null,
+								startedAt: null,
+								updatedAt: Date.now(),
+								lastOutputAt: null,
+								reviewReason: null,
+								exitCode: null,
+								agentSessionId: null,
+								lastHookAt: null,
+								latestHookActivity: null,
+							},
+						},
+						expectedRevision: current.revision,
+					},
+				});
+				if (response.status === 200 && response.payload.board) {
+					return;
+				}
+				attempts -= 1;
+				if (attempts === 0) {
+					assertOk(false, `createCard failed for ${card.id} after 3 attempts due to revision conflicts.`);
+				}
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
 		},
 		startCard: async (taskId) => {
 			const state = await loadState(context);
@@ -152,13 +226,13 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			}
 			await startTaskSession(context, card);
 		},
-		steerCard: async (taskId, text) => {
+		steerCard: async (taskId, text, submit = true) => {
 			const response = await requestJson<RuntimeTaskSessionInputResponse>({
 				baseUrl: context.baseUrl,
-				procedure: "runtime.sendTaskInput",
+				procedure: "runtime.sendTaskSessionInput",
 				type: "mutation",
 				workspaceId: context.workspaceId,
-				payload: { taskId, text, bracketedPaste: true, submit: true },
+				payload: { taskId, text, bracketedPaste: true, submit },
 			});
 			assertOk(
 				response.status === 200 && response.payload.ok,
@@ -170,6 +244,26 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				const state = await loadState(context);
 				return getTaskColumnId(state.board, taskId) === column ? true : null;
 			}, `card ${taskId} to be in ${column}`);
+		},
+		// Use this — not `expectColumn` — for any column a running card only passes
+		// through. `in_progress` is one: a card whose agent exits lands in `review`
+		// within a few hundred milliseconds, and the runtime does that on its own
+		// (session state -> column projection). `expectColumn` polls for where the card
+		// *is*, so it only sees `in_progress` if it happens to look inside that window —
+		// a check that races the very session the scenario just started. The card's
+		// transition history records the move permanently, so asserting on it cannot be
+		// lost to whatever the runtime does next.
+		expectEnteredColumn: async (taskId, column) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				return hasTaskEnteredColumn(findCard(state.board, taskId), column) ? true : null;
+			}, `card ${taskId} to have entered ${column}`);
+		},
+		expectAgentFinishedCleanly: async (taskId) => {
+			await waitFor(async () => {
+				const summary = (await loadState(context)).sessions[taskId];
+				return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
+			}, `agent for ${taskId} to finish cleanly`);
 		},
 		expectOverseerNotified: async (taskId) => {
 			if (!stream) {
@@ -185,152 +279,99 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 			await stream.close();
 			stream = null;
 		},
+		killAgentProcess: async (taskId) => {
+			const state = await loadState(context);
+			const summary = state.sessions[taskId];
+			if (!summary || !summary.pid) {
+				throw new ScenarioAssertionError(`No running agent process found for task ${taskId} to kill.`);
+			}
+			try {
+				process.kill(summary.pid, "SIGKILL");
+			} catch (_err) {
+				// Ignore errors (e.g. process already dead)
+			}
+		},
+		expectSessionGone: async (taskId) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				const isGone = !summary || summary.pid === null;
+				return isGone ? true : null;
+			}, `session for ${taskId} to be gone (pid null)`);
+		},
+		expectAgentRunning: async (taskId) => {
+			const pid = await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				if (summary && summary.pid !== null) {
+					return summary.pid;
+				}
+				return null;
+			}, `agent process for ${taskId} to be running (non-null pid)`);
+			return pid;
+		},
+		readLaunchedArgv: async (taskId) => {
+			const runtimeHome = context.instance.homeDir;
+			const argvPath = join(runtimeHome, ".kanban", `launched-argv-${taskId}.json`);
+			let content = "";
+			await waitFor(async () => {
+				if (existsSync(argvPath)) {
+					try {
+						content = readFileSync(argvPath, "utf8");
+						return true;
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			}, `launched argv file to exist at ${argvPath}`);
+			return JSON.parse(content) as readonly string[];
+		},
+		readAgentStdin: async (taskId) => {
+			const runtimeHome = context.instance.homeDir;
+			const stdinPath = join(runtimeHome, ".kanban", `launched-stdin-${taskId}.txt`);
+			let content = "";
+			await waitFor(async () => {
+				if (existsSync(stdinPath)) {
+					try {
+						content = readFileSync(stdinPath, "utf8");
+						return true;
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			}, `launched stdin file to exist at ${stdinPath}`);
+			return content;
+		},
+		ingestNativeHook: async (taskId, input) => {
+			const hook = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: context.baseUrl,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId: context.workspaceId,
+					event: input.event,
+					metadata: input.metadata,
+				},
+			});
+			assertOk(
+				hook.status === 200 && hook.payload.ok,
+				`ingestNativeHook failed for ${taskId}: ${hook.payload.error}`,
+			);
+		},
+		expectReviewReason: async (taskId, reason) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const summary = state.sessions[taskId];
+				return summary && summary.reviewReason === reason ? true : null;
+			}, `card ${taskId} to have reviewReason ${reason}`);
+		},
 	};
 }
 
-export async function givenReviewCardWhenSteeredThenMovesToInProgress(driver: ScenarioDriver): Promise<void> {
-	const taskId = "selfcheck-steer-review";
-	await driver.createCard({
-		column: "review",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck steer review",
-			prompt: "Wait for steering input.",
-		}),
-	});
-	await driver.startCard(taskId);
-	await driver.expectColumn(taskId, "review");
-	await driver.steerCard(taskId, "Continue after review.");
-	await driver.expectColumn(taskId, "in_progress");
-}
-
-export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver: ScenarioDriver): Promise<void> {
-	const context = driverContext(driver);
-	seedIsolatedBoardState({ homeDir: context.instance.homeDir, workspaceId: context.workspaceId });
-	const config = await requestJson<RuntimeConfigResponse>({
-		baseUrl: context.baseUrl,
-		procedure: "runtime.getConfig",
-		type: "query",
-		workspaceId: context.workspaceId,
-	});
-	assertOk(config.status === 200, "Could not load runtime config.");
-	assertOk(config.payload.effectiveCommand?.includes("stub-agent.mjs"), "Runtime is not using the stub agent.");
-
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "backlog");
-	await driver.startCard(STUB_LIFECYCLE_TASK_ID);
-	await waitFor(async () => {
-		const state = await loadState(context);
-		const summary = state.sessions[STUB_LIFECYCLE_TASK_ID];
-		return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
-	}, "stub card to reach review");
-	await mutateBoard(context, (board) => moveCard(board, STUB_LIFECYCLE_TASK_ID, "review"));
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "review");
-	await mutateBoard(context, (board) => completeTask(board, STUB_LIFECYCLE_TASK_ID).board);
-	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "done");
-	await mutateBoard(context, (board) =>
-		moveCard(moveCard(board, LINKED_PARENT_TASK_ID, "in_progress"), LINKED_PARENT_TASK_ID, "review"),
-	);
-	const completed = completeTask((await loadState(context)).board, LINKED_PARENT_TASK_ID);
-	assertOk(
-		completed.readyTaskIds.includes(LINKED_CHILD_TASK_ID),
-		"Completing the linked parent did not unblock child.",
-	);
-	await mutateBoard(context, () => completed.board);
-	await driver.startCard(LINKED_CHILD_TASK_ID);
-	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
-}
-
-export async function givenReviewHookWhenIngestedThenOverseerIsNotified(driver: ScenarioDriver): Promise<void> {
-	const taskId = "selfcheck-review-ping";
-	await driver.createCard({
-		column: "review",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck review ping",
-		}),
-	});
-	await driver.startCard(taskId);
-	await driver.expectOverseerNotified(taskId);
-}
-
-export async function givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts(): Promise<void> {
-	const sandbox = createTempDir("kanban-selfcheck-worktree-shapes-");
-	let instance: IsolatedKanbanInstance | null = null;
-	try {
-		const { repoPath, depPath } = createWorktreeShapeRepos(sandbox.path);
-		instance = await startIsolatedKanbanInstance({
-			cwd: repoPath,
-			env: { GIT_ALLOW_PROTOCOL: "file" },
-		});
-		const baseUrl = new URL(instance.baseUrl).origin;
-		const workspaceId = await resolveCurrentWorkspaceId(baseUrl);
-		const shape1Path = await ensureWorktree(baseUrl, workspaceId, instance.homeDir, "task-card", "main");
-		assertShape(shape1Path);
-
-		const fleetDir = join(sandbox.path, "fleet_project", ".fleet");
-		mkdirSync(fleetDir, { recursive: true });
-		writeFileSync(
-			join(fleetDir, "config.json"),
-			JSON.stringify({ kanban_port: instance.port, repos: ["main-repo"] }),
-		);
-		const epic = runFleetCli(["epic", "create", "cool-epic", "--repo", "main-repo", "--base", "main"], {
-			FLEET_DIR: fleetDir,
-			CLINE_HOME: instance.homeDir,
-			HOME: instance.homeDir,
-			USERPROFILE: instance.homeDir,
-			GIT_ALLOW_PROTOCOL: "file",
-		});
-		assertOk(epic.status === 0, `fleet epic create failed: ${epic.stderr || epic.stdout}`);
-		assertShape(join(instance.homeDir, "epics", "main-repo@cool-epic"));
-
-		const projects = await requestJson<RuntimeProjectsResponse>({
-			baseUrl,
-			procedure: "projects.list",
-			type: "query",
-		});
-		const epicWorkspaceId =
-			projects.payload.projects.find((project) => project.epic?.name === "cool-epic")?.id ?? null;
-		if (!epicWorkspaceId) {
-			throw new ScenarioAssertionError("Epic workspace was not registered.");
-		}
-		const shape3Path = await ensureWorktree(
-			baseUrl,
-			epicWorkspaceId,
-			instance.homeDir,
-			"epic-task-card",
-			"epic/cool-epic",
-		);
-		assertShape(shape3Path);
-		void depPath;
-	} finally {
-		await instance?.stop();
-		sandbox.cleanup();
-	}
-}
-
-export async function givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly(): Promise<void> {
-	const help = spawnSync(
-		process.execPath,
-		["--import", resolveTsxLoader(), resolve(process.cwd(), "src/cli.ts"), "--help"],
-		{
-			encoding: "utf8",
-			env: createGitTestEnv(),
-		},
-	);
-	assertOk(help.status === 0, `kanban --help exited ${String(help.status)}: ${help.stderr}`);
-	assertOk(help.stdout.includes("Usage:"), "kanban --help did not print usage.");
-	const usage = spawnSync(
-		process.execPath,
-		["--import", resolveTsxLoader(), resolve(process.cwd(), "src/cli.ts"), "task", "start"],
-		{
-			encoding: "utf8",
-			env: createGitTestEnv(),
-		},
-	);
-	assertOk(usage.status !== 0, "kanban task start without --task-id exited zero.");
-}
-
-function driverContext(driver: ScenarioDriver): SelfcheckContext {
+export function driverContext(driver: ScenarioDriver): SelfcheckContext {
 	const context = (driver as { __context?: SelfcheckContext }).__context;
 	if (!context) {
 		throw new ScenarioAssertionError("Scenario driver did not expose its selfcheck context.");
@@ -343,7 +384,7 @@ export function attachContext<T extends ScenarioDriver>(driver: T, context: Self
 	return driver;
 }
 
-async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
+export async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
 	const projects = await requestJson<RuntimeProjectsResponse>({
 		baseUrl,
 		procedure: "projects.list",
@@ -356,7 +397,7 @@ async function resolveCurrentWorkspaceId(baseUrl: string): Promise<string> {
 	return projects.payload.currentProjectId;
 }
 
-async function loadState(context: SelfcheckContext): Promise<RuntimeWorkspaceStateResponse> {
+export async function loadState(context: SelfcheckContext): Promise<RuntimeWorkspaceStateResponse> {
 	const response = await requestJson<RuntimeWorkspaceStateResponse>({
 		baseUrl: context.baseUrl,
 		procedure: "workspace.getState",
@@ -367,28 +408,30 @@ async function loadState(context: SelfcheckContext): Promise<RuntimeWorkspaceSta
 	return response.payload;
 }
 
-async function saveBoard(
-	context: SelfcheckContext,
-	state: RuntimeWorkspaceStateResponse,
-	board: RuntimeBoardData,
-): Promise<RuntimeWorkspaceStateResponse> {
-	const response = await requestJson<RuntimeWorkspaceStateResponse>({
-		baseUrl: context.baseUrl,
-		procedure: "workspace.saveState",
-		type: "mutation",
-		workspaceId: context.workspaceId,
-		payload: { board, sessions: state.sessions, expectedRevision: state.revision },
-	});
-	assertOk(response.status === 200, "Could not save workspace state.");
-	return response.payload;
-}
-
-async function mutateBoard(
+export async function mutateBoard(
 	context: SelfcheckContext,
 	mutate: (board: RuntimeBoardData) => RuntimeBoardData,
 ): Promise<RuntimeWorkspaceStateResponse> {
-	const state = await loadState(context);
-	return await saveBoard(context, state, mutate(state.board));
+	let attempts = 3;
+	while (attempts > 0) {
+		const state = await loadState(context);
+		const response = await requestJson<RuntimeWorkspaceStateResponse>({
+			baseUrl: context.baseUrl,
+			procedure: "workspace.saveState",
+			type: "mutation",
+			workspaceId: context.workspaceId,
+			payload: { board: mutate(state.board), sessions: state.sessions, expectedRevision: state.revision },
+		});
+		if (response.status === 200 && response.payload) {
+			return response.payload;
+		}
+		attempts -= 1;
+		if (attempts === 0) {
+			assertOk(false, "mutateBoard failed after 3 attempts due to revision conflicts.");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	throw new Error("unreachable");
 }
 
 function placeCard(board: RuntimeBoardData, card: RuntimeBoardCard, columnId: RuntimeBoardColumnId): RuntimeBoardData {
@@ -417,7 +460,10 @@ function findCard(board: RuntimeBoardData, taskId: string): RuntimeBoardCard {
 	throw new ScenarioAssertionError(`Task ${taskId} not found.`);
 }
 
-function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoardColumnId): RuntimeBoardData {
+export function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoardColumnId): RuntimeBoardData {
+	if (getTaskColumnId(board, taskId) === columnId) {
+		return board;
+	}
 	const moved = moveTaskToColumn(board, taskId, columnId);
 	if (!moved.moved) {
 		throw new ScenarioAssertionError(`Task ${taskId} did not move to ${columnId}.`);
@@ -425,7 +471,7 @@ function moveCard(board: RuntimeBoardData, taskId: string, columnId: RuntimeBoar
 	return moved.board;
 }
 
-function completeTask(
+export function completeTask(
 	board: RuntimeBoardData,
 	taskId: string,
 ): ReturnType<typeof completeTaskAndGetReadyLinkedTaskIds> {
@@ -461,6 +507,7 @@ async function startTaskSession(context: SelfcheckContext, card: RuntimeBoardCar
 			startInPlanMode: card.startInPlanMode,
 			baseRef: card.baseRef,
 			agentId: card.agentId,
+			agentModel: card.agentModel,
 			cols: 100,
 			rows: 30,
 		},
@@ -486,7 +533,7 @@ async function startShellReviewSession(context: SelfcheckContext, taskId: string
 	assertOk(hook.status === 200 && hook.payload.ok, `Review hook failed for ${taskId}: ${hook.payload.error}`);
 }
 
-async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
+export async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
 	const startedAt = Date.now();
 	let lastValue: T | null = null;
 	while (Date.now() - startedAt < timeoutMs) {
@@ -499,187 +546,7 @@ async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, 
 	throw new ScenarioAssertionError(`Timed out waiting for ${label}. Last value: ${JSON.stringify(lastValue)}`);
 }
 
-function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
-	const fleetProjectDir = join(root, "fleet_project");
-	const depPath = join(root, "dependency-repo");
-	const repoPath = join(fleetProjectDir, "main-repo");
-	mkdirSync(depPath, { recursive: true });
-	runGit(depPath, ["init", "-b", "main"]);
-	writeFileSync(join(depPath, "dep-file.txt"), "submodule-content\n", "utf8");
-	runGit(depPath, ["add", "dep-file.txt"]);
-	runGit(depPath, ["commit", "-m", "init-dep"]);
-
-	mkdirSync(repoPath, { recursive: true });
-	runGit(repoPath, ["init", "-b", "main"]);
-	runGit(repoPath, ["config", "protocol.file.allow", "always"]);
-	writeFileSync(join(repoPath, "README.md"), "main-content\n", "utf8");
-	writeFileSync(
-		join(repoPath, ".gitignore"),
-		[
-			".env",
-			".env.local",
-			"/node_modules/",
-			"/dist/",
-			"/.turbo/",
-			"apps/lab/.env.local",
-			"apps/lab/.env.test-integration",
-			"packages/skill-runner/src/generated/",
-			"packages/viewer/src/tailwind.build.css",
-			"",
-		].join("\n"),
-		"utf8",
-	);
-	writeFileSync(join(repoPath, ".env"), "ENV_VAR=value\n", "utf8");
-	writeFileSync(join(repoPath, ".env.local"), "ENV_LOCAL=local-value\n", "utf8");
-	mkdirSync(join(repoPath, "node_modules"), { recursive: true });
-	writeFileSync(join(repoPath, "node_modules", "ignore.txt"), "ignored-node-module\n", "utf8");
-	mkdirSync(join(repoPath, "dist"), { recursive: true });
-	writeFileSync(join(repoPath, "dist", "built.js"), "compiled-js\n", "utf8");
-	mkdirSync(join(repoPath, ".turbo"), { recursive: true });
-	writeFileSync(join(repoPath, ".turbo", "cache.json"), '{"cached":true}\n', "utf8");
-	mkdirSync(join(repoPath, "apps", "lab", "src"), { recursive: true });
-	writeFileSync(join(repoPath, "apps", "lab", "package.json"), '{"name":"lab"}\n', "utf8");
-	writeFileSync(join(repoPath, "apps", "lab", "src", "index.ts"), "export const lab = true;\n", "utf8");
-	writeFileSync(join(repoPath, "apps", "lab", ".env.local"), "LAB_ENV_LOCAL=local\n", "utf8");
-	writeFileSync(join(repoPath, "apps", "lab", ".env.test-integration"), "LAB_ENV_TEST_INTEGRATION=test\n", "utf8");
-	mkdirSync(join(repoPath, "packages", "skill-runner", "src", "generated"), { recursive: true });
-	mkdirSync(join(repoPath, "packages", "viewer", "src"), { recursive: true });
-	writeFileSync(join(repoPath, "packages", "skill-runner", "package.json"), '{"name":"skill-runner"}\n', "utf8");
-	writeFileSync(
-		join(repoPath, "packages", "skill-runner", "src", "index.ts"),
-		"export const runner = true;\n",
-		"utf8",
-	);
-	writeFileSync(
-		join(repoPath, "packages", "skill-runner", "src", "generated", "runner-assets.json"),
-		'{"assets":[]}\n',
-		"utf8",
-	);
-	writeFileSync(join(repoPath, "packages", "viewer", "src", "app.tsx"), "export const App = null;\n", "utf8");
-	writeFileSync(join(repoPath, "packages", "viewer", "src", "tailwind.build.css"), ".a{color:red}\n", "utf8");
-	mkdirSync(join(repoPath, ".cline", "kanban"), { recursive: true });
-	writeFileSync(
-		join(repoPath, ".cline", "kanban", "config.json"),
-		JSON.stringify(
-			{
-				worktree: {
-					postCreateCommand: "echo 'hook-ran' > post-create-marker.txt",
-					unsharedPaths: ["node_modules", "dist", ".turbo"],
-				},
-			},
-			null,
-			2,
-		),
-		"utf8",
-	);
-	runGit(repoPath, [
-		"add",
-		"README.md",
-		".gitignore",
-		".cline/kanban/config.json",
-		"apps/lab/package.json",
-		"apps/lab/src/index.ts",
-		"packages/skill-runner/package.json",
-		"packages/skill-runner/src/index.ts",
-		"packages/viewer/src/app.tsx",
-	]);
-	runGit(repoPath, ["commit", "-m", "init-main"]);
-	runGit(repoPath, ["-c", "protocol.file.allow=always", "submodule", "add", depPath, "vendor/submodule"]);
-	runGit(repoPath, ["commit", "-m", "add-submodule"]);
-	return { repoPath, depPath };
-}
-
-async function ensureWorktree(
-	baseUrl: string,
-	workspaceId: string,
-	homeDir: string,
-	taskId: string,
-	baseRef: string,
-): Promise<string> {
-	seedIsolatedBoardState({
-		homeDir,
-		workspaceId,
-		board: {
-			columns: DEFAULT_COLUMNS.map((column) => ({
-				...column,
-				cards: column.id === "backlog" ? [createSelfcheckCard({ id: taskId, title: taskId, baseRef })] : [],
-			})),
-			dependencies: [],
-		},
-	});
-	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
-		baseUrl,
-		procedure: "workspace.ensureWorktree",
-		type: "mutation",
-		workspaceId,
-		payload: { taskId, baseRef },
-	});
-	assertOk(ensured.status === 200 && ensured.payload.ok, `Could not ensure worktree ${taskId}.`);
-	return ensured.payload.path;
-}
-
-function assertShape(worktreePath: string): void {
-	assertOk(
-		existsSync(join(worktreePath, ".env")) && lstatSync(join(worktreePath, ".env")).isSymbolicLink(),
-		".env was not a symlink.",
-	);
-	assertOk(
-		existsSync(join(worktreePath, ".env.local")) && lstatSync(join(worktreePath, ".env.local")).isSymbolicLink(),
-		".env.local was not a symlink.",
-	);
-	assertOk(
-		existsSync(join(worktreePath, "apps", "lab", ".env.local")) &&
-			lstatSync(join(worktreePath, "apps", "lab", ".env.local")).isSymbolicLink(),
-		"apps/lab/.env.local was not a symlink.",
-	);
-	assertOk(
-		existsSync(join(worktreePath, "apps", "lab", ".env.test-integration")) &&
-			lstatSync(join(worktreePath, "apps", "lab", ".env.test-integration")).isSymbolicLink(),
-		"apps/lab/.env.test-integration was not a symlink.",
-	);
-	assertOk(existsSync(join(worktreePath, "vendor", "submodule", "dep-file.txt")), "Submodule was not checked out.");
-	for (const path of ["node_modules", "dist", ".turbo"]) {
-		assertOk(!existsSync(join(worktreePath, path)), `${path} should not be present in worktree.`);
-	}
-	assertOk(
-		!existsSync(join(worktreePath, "packages", "skill-runner", "src", "generated")),
-		"packages/skill-runner/src/generated should not be present in worktree.",
-	);
-	assertOk(
-		!existsSync(join(worktreePath, "packages", "viewer", "src", "tailwind.build.css")),
-		"packages/viewer/src/tailwind.build.css should not be present in worktree.",
-	);
-	assertOk(
-		readFileSync(join(worktreePath, "post-create-marker.txt"), "utf8").trim() === "hook-ran",
-		"postCreateCommand did not run.",
-	);
-}
-
-function runFleetCli(args: string[], env: NodeJS.ProcessEnv): { status: number; stdout: string; stderr: string } {
-	const result = spawnSync("python3", [resolve(process.cwd(), "fleet-cli/fleet.py"), ...args], {
-		env: { ...process.env, ...env },
-		encoding: "utf8",
-	});
-	return { status: result.status ?? 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-}
-
-function runGit(cwd: string, args: string[]): string {
-	const result = spawnSync("git", args, {
-		cwd,
-		encoding: "utf8",
-		env: createGitTestEnv({ GIT_ALLOW_PROTOCOL: "file" }),
-	});
-	if (result.status !== 0) {
-		throw new ScenarioAssertionError(`git ${args.join(" ")} failed in ${cwd}: ${result.stderr || result.stdout}`);
-	}
-	return result.stdout.trim();
-}
-
-function resolveTsxLoader(): string {
-	return new URL(import.meta.resolve("tsx")).href;
-}
-
-function assertOk(condition: unknown, message: string): asserts condition {
+export function assertOk(condition: unknown, message: string): asserts condition {
 	if (!condition) {
 		throw new ScenarioAssertionError(message);
 	}

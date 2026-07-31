@@ -4,12 +4,7 @@ import {
 	getRuntimeLaunchSupportedAgentCatalog,
 	RUNTIME_AGENT_CATALOG,
 } from "../core/agent-catalog";
-import type {
-	RuntimeAgentDefinition,
-	RuntimeAgentId,
-	RuntimeClineProviderSettings,
-	RuntimeConfigResponse,
-} from "../core/api-contract";
+import type { RuntimeAgentDefinition, RuntimeAgentId, RuntimeConfigResponse } from "../core/api-contract";
 import { isBinaryAvailableOnPath } from "./command-discovery";
 
 const TEST_AGENT_BINARY_ENV = "KANBAN_TEST_AGENT_BINARY";
@@ -93,14 +88,13 @@ function getCuratedDefinitions(runtimeConfig: RuntimeConfigState, detected: stri
 		const hasDetectedBinary = getRuntimeAgentBinaryCandidates(entry.id).some((candidate) =>
 			detectedSet.has(candidate),
 		);
-		const isInstalled = entry.id === "cline" ? true : hasDetectedBinary;
 		return {
 			id: entry.id,
 			label: entry.label,
 			binary,
 			command,
 			defaultArgs,
-			installed: isInstalled,
+			installed: hasDetectedBinary,
 			configured: runtimeConfig.selectedAgentId === entry.id,
 		};
 	});
@@ -112,7 +106,7 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 		return null;
 	}
 	const testAgentBinary = process.env[TEST_AGENT_BINARY_ENV]?.trim();
-	if (testAgentBinary && selected.id !== "cline") {
+	if (testAgentBinary) {
 		const args = parseTestAgentArgs(process.env[TEST_AGENT_ARGS_ENV]);
 		return {
 			agentId: selected.id,
@@ -137,10 +131,7 @@ export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): Resolved
 	return null;
 }
 
-export function buildRuntimeConfigResponse(
-	runtimeConfig: RuntimeConfigState,
-	clineProviderSettings: RuntimeClineProviderSettings,
-): RuntimeConfigResponse {
+export function buildRuntimeConfigResponse(runtimeConfig: RuntimeConfigState): RuntimeConfigResponse {
 	const detectedCommands = detectInstalledCommands();
 	const agents = getCuratedDefinitions(runtimeConfig, detectedCommands);
 	const resolved = resolveAgentCommand(runtimeConfig);
@@ -159,6 +150,5 @@ export function buildRuntimeConfigResponse(
 		agents,
 		shortcuts: runtimeConfig.shortcuts,
 		worktree: runtimeConfig.worktree,
-		clineProviderSettings,
 	};
 }

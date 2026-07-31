@@ -23,6 +23,7 @@ import {
 } from "../core/api-contract";
 import { createGitProcessEnv } from "../core/git-process-env";
 import { parseHomeAgentSessionId } from "../core/home-agent-session";
+import { harvestSessions } from "../core/session-ledger";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import { updateTaskDependencies } from "../core/task-board-mutations";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
@@ -573,29 +574,63 @@ function classifyPersistedSessionLifecycle(summary: RuntimeTaskSessionSummary): 
 	return summary.agentSessionLifecycle === "resumable" || summary.agentSessionId ? "resumable" : "gone";
 }
 
+function boundLatestHookActivity(
+	activity: RuntimeTaskSessionSummary["latestHookActivity"],
+): RuntimeTaskSessionSummary["latestHookActivity"] {
+	if (!activity) {
+		return null;
+	}
+	const limit = 1000;
+	const capString = (val: string | null): string | null => {
+		if (val === null) return null;
+		if (val.length <= limit) return val;
+		return `${val.slice(0, limit)}...`;
+	};
+	return {
+		...activity,
+		activityText: capString(activity.activityText),
+		toolInputSummary: capString(activity.toolInputSummary),
+		finalMessage: capString(activity.finalMessage),
+	};
+}
+
 function normalizePersistedSessionLiveness(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSummary {
-	return reconcileTaskSessionSummaryLiveness({
+	const normalized = reconcileTaskSessionSummaryLiveness({
 		summary,
 		lifecycle: classifyPersistedSessionLifecycle(summary),
 	});
+	return {
+		...normalized,
+		latestHookActivity: boundLatestHookActivity(normalized.latestHookActivity ?? summary.latestHookActivity ?? null),
+	};
 }
 
 function partitionWorkspaceSessions(
 	workspaceId: string,
 	sessions: Record<string, RuntimeTaskSessionSummary>,
+	board: RuntimeBoardData | null,
 ): Record<string, RuntimeTaskSessionSummary> {
 	const nextSessions: Record<string, RuntimeTaskSessionSummary> = {};
+	const activeCardIds = board ? getActiveBoardCardIds(board) : null;
+
 	for (const [taskId, summary] of Object.entries(sessions)) {
 		const parsedHomeAgentId = parseHomeAgentSessionId(taskId);
-		if (parsedHomeAgentId && parsedHomeAgentId.workspaceId !== workspaceId) {
-			continue;
+		if (parsedHomeAgentId) {
+			if (parsedHomeAgentId.workspaceId !== workspaceId) {
+				continue;
+			}
+			const normalized = normalizePersistedSessionLiveness(summary);
+			if (normalized.agentSessionLifecycle === "gone") {
+				continue;
+			}
+			nextSessions[taskId] = normalized;
+		} else {
+			if (activeCardIds !== null && !activeCardIds.has(taskId)) {
+				continue;
+			}
+			const normalized = normalizePersistedSessionLiveness(summary);
+			nextSessions[taskId] = normalized;
 		}
-
-		const normalized = normalizePersistedSessionLiveness(summary);
-		if (parsedHomeAgentId && normalized.agentSessionLifecycle === "gone") {
-			continue;
-		}
-		nextSessions[taskId] = normalized;
 	}
 	return nextSessions;
 }
@@ -631,8 +666,18 @@ async function writeWorkspaceSessions(
 async function reconcileWorkspaceAgentSessionsLocked(
 	workspaceId: string,
 ): Promise<Record<string, RuntimeTaskSessionSummary>> {
+	// Process-guarded, one-shot legacy harvest: ensures legacy pointers are
+	// durably archived in the ledger before they can be partitioned/pruned.
+	await harvestSessions(workspaceId);
+
 	const currentSessions = await readWorkspaceSessions(workspaceId);
-	const nextSessions = partitionWorkspaceSessions(workspaceId, currentSessions);
+	let board: RuntimeBoardData | null = null;
+	try {
+		board = await getCachedWorkspaceBoard(workspaceId);
+	} catch {
+		// Board is unreadable: refuse to drop any card sessions.
+	}
+	const nextSessions = partitionWorkspaceSessions(workspaceId, currentSessions, board);
 	if (!sessionsAreEqual(currentSessions, nextSessions)) {
 		await writeWorkspaceSessions(workspaceId, nextSessions);
 	}
@@ -1020,7 +1065,7 @@ export async function saveWorkspaceState(
 		}
 		const board = parsedPayload.board;
 		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, board);
-		const sessions = partitionWorkspaceSessions(context.workspaceId, parsedPayload.sessions);
+		const sessions = partitionWorkspaceSessions(context.workspaceId, parsedPayload.sessions, archivedBoard.board);
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
@@ -1051,11 +1096,10 @@ export interface RuntimeWorkspaceAtomicMutationResponse<T> {
 	saved: boolean;
 }
 
-export async function mutateWorkspaceState<T>(
-	cwd: string,
+async function mutateWorkspaceStateWithContext<T>(
+	context: RuntimeWorkspaceContext,
 	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
 ): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
-	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const currentBoard = await getCachedWorkspaceBoard(context.workspaceId);
 		const currentSessions = await reconcileWorkspaceAgentSessionsLocked(context.workspaceId);
@@ -1073,7 +1117,11 @@ export async function mutateWorkspaceState<T>(
 
 		const archivedBoard = await archiveTrashCardsAndTrimBoard(context.workspaceId, mutation.board);
 		const nextBoard = archivedBoard.board;
-		const nextSessions = partitionWorkspaceSessions(context.workspaceId, mutation.sessions ?? currentSessions);
+		const nextSessions = partitionWorkspaceSessions(
+			context.workspaceId,
+			mutation.sessions ?? currentSessions,
+			nextBoard,
+		);
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
 			revision: nextRevision,
@@ -1093,6 +1141,25 @@ export async function mutateWorkspaceState<T>(
 			saved: true,
 		};
 	});
+}
+
+export async function mutateWorkspaceState<T>(
+	cwd: string,
+	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
+): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
+	const context = await loadWorkspaceContext(cwd);
+	return await mutateWorkspaceStateWithContext(context, mutate);
+}
+
+export async function mutateWorkspaceStateById<T>(
+	workspaceId: string,
+	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
+): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
+	const context = await loadWorkspaceContextById(workspaceId);
+	if (!context) {
+		throw new Error(`Workspace with ID "${workspaceId}" not found in index.`);
+	}
+	return await mutateWorkspaceStateWithContext(context, mutate);
 }
 
 export async function restoreArchivedWorkspaceTask(

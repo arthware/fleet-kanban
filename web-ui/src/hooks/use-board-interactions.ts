@@ -19,7 +19,6 @@ import {
 import { clearTaskWorkspaceInfo, setTaskWorkspaceInfo } from "@/stores/workspace-metadata-store";
 import type { SendTerminalInputOptions } from "@/terminal/terminal-input";
 import type { BoardCard, BoardColumnId, BoardData } from "@/types";
-import { getNextDetailTaskIdAfterTrashMove } from "@/utils/detail-view-task-order";
 import {
 	getBrowserNotificationPermission,
 	hasPromptedForBrowserNotificationPermission,
@@ -419,83 +418,6 @@ export function useBoardInteractions({
 		],
 	);
 
-	useEffect(() => {
-		setBoard((currentBoard) => {
-			let nextBoard = currentBoard;
-			const previousSessions = previousSessionsRef.current;
-			const blockedInterruptedTaskIds = new Set<string>();
-			for (const summary of Object.values(sessions)) {
-				const previous = previousSessions[summary.taskId];
-				if (previous && previous.updatedAt > summary.updatedAt) {
-					continue;
-				}
-				const columnId = getTaskColumnId(nextBoard, summary.taskId);
-				if (summary.state === "awaiting_review" && columnId === "in_progress") {
-					const programmaticMoveAttempt = tryProgrammaticCardMove(summary.taskId, columnId, "review");
-					if (programmaticMoveAttempt === "started" || programmaticMoveAttempt === "blocked") {
-						continue;
-					}
-					const moved = moveTaskToColumn(nextBoard, summary.taskId, "review", { insertAtTop: true });
-					if (moved.moved) {
-						nextBoard = moved.board;
-					}
-					continue;
-				}
-				if (summary.state === "running" && columnId === "review") {
-					const programmaticMoveAttempt = tryProgrammaticCardMove(summary.taskId, columnId, "in_progress", {
-						skipKickoff: true,
-					});
-					if (programmaticMoveAttempt === "started" || programmaticMoveAttempt === "blocked") {
-						continue;
-					}
-					const moved = moveTaskToColumn(nextBoard, summary.taskId, "in_progress", { insertAtTop: true });
-					if (moved.moved) {
-						nextBoard = moved.board;
-					}
-					continue;
-				}
-				if (
-					summary.state === "interrupted" &&
-					previous?.state !== "interrupted" &&
-					columnId &&
-					columnId !== "trash"
-				) {
-					const nextTaskId = getNextDetailTaskIdAfterTrashMove(nextBoard, summary.taskId);
-					const programmaticMoveAttempt = tryProgrammaticCardMove(summary.taskId, columnId, "trash", {
-						skipTrashWorkflow: true,
-					});
-					if (programmaticMoveAttempt === "started" || programmaticMoveAttempt === "blocked") {
-						if (programmaticMoveAttempt === "blocked") {
-							blockedInterruptedTaskIds.add(summary.taskId);
-						}
-						setSelectedTaskId((currentSelectedTaskId) =>
-							currentSelectedTaskId === summary.taskId ? nextTaskId : currentSelectedTaskId,
-						);
-						continue;
-					}
-					const moved = moveTaskToColumn(nextBoard, summary.taskId, "trash", { insertAtTop: true });
-					if (moved.moved) {
-						setSelectedTaskId((currentSelectedTaskId) =>
-							currentSelectedTaskId === summary.taskId ? nextTaskId : currentSelectedTaskId,
-						);
-						nextBoard = moved.board;
-					}
-				}
-			}
-			const nextPreviousSessions = { ...sessions };
-			for (const taskId of blockedInterruptedTaskIds) {
-				const previousSession = previousSessions[taskId];
-				if (previousSession) {
-					nextPreviousSessions[taskId] = previousSession;
-					continue;
-				}
-				delete nextPreviousSessions[taskId];
-			}
-			previousSessionsRef.current = nextPreviousSessions;
-			return nextBoard;
-		});
-	}, [programmaticCardMoveCycle, sessions, setBoard, setSelectedTaskId, tryProgrammaticCardMove]);
-
 	const { confirmMoveTaskToTrash, handleCreateDependency, handleDeleteDependency, requestMoveTaskToTrash } =
 		useLinkedBacklogTaskActions({
 			board,
@@ -841,7 +763,6 @@ export function useBoardInteractions({
 					autoReviewMode: "pr",
 					images: selection.card.images,
 					agentId: selection.card.agentId,
-					clineSettings: selection.card.clineSettings,
 					baseRef: selection.card.baseRef,
 				});
 				return updated.updated ? updated.board : currentBoard;

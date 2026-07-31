@@ -1,31 +1,136 @@
 // Streams live runtime state to browser clients over websocket.
-// It listens to terminal and native Cline updates, normalizes them into the
+// It listens to terminal updates, normalizes them into the
 // shared API contract, and fans out workspace-scoped snapshots and deltas.
 import type { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
-import type { ClineTaskMessage, ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
 import type {
+	RuntimeBoardColumnId,
 	RuntimeBoardData,
-	RuntimeClineMcpServerAuthStatus,
-	RuntimeStateStreamClineSessionContextUpdatedMessage,
 	RuntimeStateStreamErrorMessage,
-	RuntimeStateStreamMcpAuthUpdatedMessage,
 	RuntimeStateStreamMessage,
 	RuntimeStateStreamProjectsMessage,
 	RuntimeStateStreamSnapshotMessage,
 	RuntimeStateStreamTaskChatClearedMessage,
-	RuntimeStateStreamTaskChatMessage,
 	RuntimeStateStreamTaskReadyForReviewMessage,
 	RuntimeStateStreamTaskSessionsMessage,
 	RuntimeStateStreamWorkspaceMetadataMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
+	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
+import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
-import { mutateWorkspaceState } from "../state/workspace-state";
+import { mutateWorkspaceStateById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
+
+export function getTargetColumnForSession(summary: {
+	taskId: string;
+	state: RuntimeTaskSessionState;
+}): RuntimeBoardColumnId | null {
+	if (isHomeAgentSessionId(summary.taskId)) {
+		return null;
+	}
+	switch (summary.state) {
+		case "awaiting_review":
+			return "review";
+		case "running":
+			return "in_progress";
+		case "idle":
+		case "failed":
+		case "interrupted":
+			return null;
+		default: {
+			const _exhaustive: never = summary.state;
+			return null;
+		}
+	}
+}
+
+export async function projectSessionSummaryColumn(
+	workspaceId: string,
+	summary: { taskId: string; state: RuntimeTaskSessionState },
+	_workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
+	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
+): Promise<boolean> {
+	const targetColumnId = getTargetColumnForSession(summary);
+	if (!targetColumnId) {
+		return false;
+	}
+	try {
+		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
+			const previousColumnId = getTaskColumnId(state.board, summary.taskId);
+			if (!previousColumnId || previousColumnId === targetColumnId) {
+				return { board: state.board, value: false, save: false };
+			}
+			const moved = moveTaskToColumn(state.board, summary.taskId, targetColumnId, Date.now());
+			return { board: moved.board, value: moved.moved, save: moved.moved };
+		});
+		if (mutation.saved && mutation.value) {
+			await broadcastWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);
+			return true;
+		}
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(
+			`[kanban] Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
+		);
+	}
+	return false;
+}
+
+/**
+ * Write back an agent session id that only became known after the agent booted.
+ *
+ * Claude is told its session id up front, so the row written when the session starts
+ * already carries it. Codex and Gemini mint their own and reveal it only once they have
+ * written their first transcript, so the session manager discovers it in the background
+ * and emits an updated summary. Without persisting that emit the id lived only in memory:
+ * after a restart the card had no pointer to its conversation and rendered as a dead card
+ * with an empty transcript panel.
+ *
+ * Bounded by construction — it writes only when the persisted id differs from the emitted
+ * one, so a card costs at most one write per discovered id, never one per summary emit.
+ */
+export async function persistDiscoveredAgentSessionId(
+	workspaceId: string,
+	summary: RuntimeTaskSessionSummary,
+): Promise<boolean> {
+	if (!summary.agentSessionId) {
+		return false;
+	}
+	try {
+		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
+			const existing = state.sessions[summary.taskId];
+			if (existing?.agentSessionId === summary.agentSessionId) {
+				return { board: state.board, value: false, save: false };
+			}
+			// Discovery can land before the starting request has written its row; in that
+			// case the emitted summary is the session, so store it whole.
+			const nextSession: RuntimeTaskSessionSummary = existing
+				? {
+						...existing,
+						agentSessionId: summary.agentSessionId,
+						agentSessionLifecycle: summary.agentSessionLifecycle,
+					}
+				: summary;
+			return {
+				board: state.board,
+				sessions: { ...state.sessions, [summary.taskId]: nextSession },
+				value: true,
+				save: true,
+			};
+		});
+		return mutation.saved && mutation.value;
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(
+			`[kanban] Persisting discovered agent session id failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
+		);
+	}
+	return false;
+}
 
 const TASK_SESSION_STREAM_BATCH_MS = 150;
 
@@ -77,15 +182,13 @@ export interface DisposeRuntimeStateWorkspaceOptions {
 export interface CreateRuntimeStateHubDependencies {
 	workspaceRegistry: Pick<
 		WorkspaceRegistry,
-		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot"
+		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot" | "getWorkspacePathById"
 	>;
 	heartbeatIntervalMs?: number;
 }
 
 export interface RuntimeStateHub {
 	trackTerminalManager: (workspaceId: string, manager: TerminalSessionManager) => void;
-	trackClineTaskSessionService: (workspaceId: string, workspacePath: string, service: ClineTaskSessionService) => void;
-	broadcastTaskChatMessage: (workspaceId: string, taskId: string, message: ClineTaskMessage) => void;
 	broadcastTaskChatCleared: (workspaceId: string, taskId: string) => void;
 	handleUpgrade: (
 		request: IncomingMessage,
@@ -98,8 +201,6 @@ export interface RuntimeStateHub {
 	disposeWorkspace: (workspaceId: string, options?: DisposeRuntimeStateWorkspaceOptions) => void;
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void>;
-	broadcastClineMcpAuthStatusesUpdated: (statuses: RuntimeClineMcpServerAuthStatus[]) => void;
-	bumpClineSessionContextVersion: () => void;
 	broadcastTaskReadyForReview: (workspaceId: string, taskId: string) => void;
 	close: () => Promise<void>;
 }
@@ -129,16 +230,12 @@ export function applyPersistedCardPrToBoard(
 
 export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): RuntimeStateHub {
 	const terminalSummaryUnsubscribeByWorkspaceId = new Map<string, () => void>();
-	const clineSummaryUnsubscribeByWorkspaceId = new Map<string, () => void>();
-	const clineMessageUnsubscribeByWorkspaceId = new Map<string, () => void>();
-	const clinePreviousSummaryByWorkspaceId = new Map<string, Map<string, RuntimeTaskSessionSummary>>();
 	const pendingTaskSessionSummariesByWorkspaceId = new Map<string, Map<string, RuntimeTaskSessionSummary>>();
 	const taskSessionBroadcastTimersByWorkspaceId = new Map<string, NodeJS.Timeout>();
 	const runtimeStateClientsByWorkspaceId = new Map<string, Set<WebSocket>>();
 	const runtimeStateClients = new Set<WebSocket>();
 	const runtimeStateWorkspaceIdByClient = new Map<WebSocket, string>();
 	const responsiveClients = new Set<WebSocket>();
-	let clineSessionContextVersion = 0;
 	const runtimeStateWebSocketServer = new WebSocketServer({ noServer: true });
 	const workspaceMetadataMonitor = createWorkspaceMetadataMonitor({
 		onMetadataUpdated: (workspaceId, workspaceMetadata) => {
@@ -159,12 +256,12 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		// clients so the card renders its live PR state. `setCardPrUrl` is
 		// idempotent and `mutateWorkspaceState` skips the write when nothing changed.
 		persistCardPr: async ({ workspaceId, workspacePath, taskId, pr }) => {
-			const mutation = await mutateWorkspaceState(workspacePath, (state) => {
+			const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
 				const result = applyPersistedCardPrToBoard(state.board, taskId, pr);
 				return { board: result.board, value: result.updated, save: result.updated };
 			});
 			if (mutation.value) {
-				await broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
+				await broadcastRuntimeWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);
 			}
 		},
 	});
@@ -196,33 +293,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 		} catch {
 			// Ignore transient project summary failures; next update will resync.
-		}
-	};
-
-	const broadcastClineMcpAuthStatusesUpdated = (statuses: RuntimeClineMcpServerAuthStatus[]) => {
-		if (runtimeStateClients.size === 0) {
-			return;
-		}
-		const payload: RuntimeStateStreamMcpAuthUpdatedMessage = {
-			type: "mcp_auth_updated",
-			statuses,
-		};
-		for (const client of runtimeStateClients) {
-			sendRuntimeStateMessage(client, payload);
-		}
-	};
-
-	const bumpClineSessionContextVersion = () => {
-		clineSessionContextVersion += 1;
-		if (runtimeStateClients.size === 0) {
-			return;
-		}
-		const payload: RuntimeStateStreamClineSessionContextUpdatedMessage = {
-			type: "cline_session_context_updated",
-			version: clineSessionContextVersion,
-		};
-		for (const client of runtimeStateClients) {
-			sendRuntimeStateMessage(client, payload);
 		}
 	};
 
@@ -261,22 +331,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}, TASK_SESSION_STREAM_BATCH_MS);
 		timer.unref();
 		taskSessionBroadcastTimersByWorkspaceId.set(workspaceId, timer);
-	};
-
-	const broadcastTaskChatMessage = (workspaceId: string, taskId: string, message: ClineTaskMessage) => {
-		const runtimeClients = runtimeStateClientsByWorkspaceId.get(workspaceId);
-		if (!runtimeClients || runtimeClients.size === 0) {
-			return;
-		}
-		const payload: RuntimeStateStreamTaskChatMessage = {
-			type: "task_chat_message",
-			workspaceId,
-			taskId,
-			message,
-		};
-		for (const client of runtimeClients) {
-			sendRuntimeStateMessage(client, payload);
-		}
 	};
 
 	const broadcastTaskChatCleared = (workspaceId: string, taskId: string) => {
@@ -357,25 +411,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 		}
 		terminalSummaryUnsubscribeByWorkspaceId.delete(workspaceId);
-		const unsubscribeClineSummary = clineSummaryUnsubscribeByWorkspaceId.get(workspaceId);
-		if (unsubscribeClineSummary) {
-			try {
-				unsubscribeClineSummary();
-			} catch {
-				// Ignore listener cleanup errors during project removal.
-			}
-		}
-		clineSummaryUnsubscribeByWorkspaceId.delete(workspaceId);
-		clinePreviousSummaryByWorkspaceId.delete(workspaceId);
-		const unsubscribeClineMessage = clineMessageUnsubscribeByWorkspaceId.get(workspaceId);
-		if (unsubscribeClineMessage) {
-			try {
-				unsubscribeClineMessage();
-			} catch {
-				// Ignore listener cleanup errors during project removal.
-			}
-		}
-		clineMessageUnsubscribeByWorkspaceId.delete(workspaceId);
 		disposeTaskSessionSummaryBroadcast(workspaceId);
 		workspaceMetadataMonitor.disposeWorkspace(workspaceId);
 
@@ -564,7 +599,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					architectWorkspaceId: projectsPayload.architectWorkspaceId,
 					workspaceState,
 					workspaceMetadata,
-					clineSessionContextVersion,
 				} satisfies RuntimeStateStreamSnapshotMessage);
 				if (client.readyState !== WebSocket.OPEN) {
 					if (monitorWorkspaceId) {
@@ -579,16 +613,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					workspaceClients.add(client);
 					runtimeStateClientsByWorkspaceId.set(monitorWorkspaceId, workspaceClients);
 					runtimeStateWorkspaceIdByClient.set(client, monitorWorkspaceId);
-					const clineSummaries = Array.from(
-						clinePreviousSummaryByWorkspaceId.get(monitorWorkspaceId)?.values() ?? [],
-					);
-					if (clineSummaries.length > 0) {
-						sendRuntimeStateMessage(client, {
-							type: "task_sessions_updated",
-							workspaceId: monitorWorkspaceId,
-							summaries: clineSummaries,
-						} satisfies RuntimeStateStreamTaskSessionsMessage);
-					}
 				}
 			} catch (error) {
 				if (didConnectWorkspaceMonitor && monitorWorkspaceId) {
@@ -621,47 +645,20 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 			const unsubscribe = manager.onSummary((summary) => {
 				queueTaskSessionSummaryBroadcast(workspaceId, summary);
+				void projectSessionSummaryColumn(
+					workspaceId,
+					summary,
+					deps.workspaceRegistry,
+					broadcastRuntimeWorkspaceStateUpdated,
+				).catch(() => {
+					// Ignore background projection error
+				});
+				void persistDiscoveredAgentSessionId(workspaceId, summary).catch(() => {
+					// Ignore background session identity writeback error
+				});
 			});
 			terminalSummaryUnsubscribeByWorkspaceId.set(workspaceId, unsubscribe);
 		},
-		trackClineTaskSessionService: (workspaceId: string, workspacePath: string, service: ClineTaskSessionService) => {
-			if (clineSummaryUnsubscribeByWorkspaceId.has(workspaceId)) {
-				return;
-			}
-			const previousSummariesByTaskId = new Map<string, RuntimeTaskSessionSummary>();
-			clinePreviousSummaryByWorkspaceId.set(workspaceId, previousSummariesByTaskId);
-			for (const summary of service.listSummaries()) {
-				previousSummariesByTaskId.set(summary.taskId, summary);
-				queueTaskSessionSummaryBroadcast(workspaceId, summary);
-			}
-			const unsubscribe = service.onSummary((summary) => {
-				const previousSummary = previousSummariesByTaskId.get(summary.taskId);
-				previousSummariesByTaskId.set(summary.taskId, summary);
-				queueTaskSessionSummaryBroadcast(workspaceId, summary);
-				const didCheckpointChange =
-					previousSummary?.latestTurnCheckpoint?.commit !== summary.latestTurnCheckpoint?.commit ||
-					previousSummary?.previousTurnCheckpoint?.commit !== summary.previousTurnCheckpoint?.commit;
-				if (didCheckpointChange) {
-					void broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
-				}
-				if (
-					previousSummary &&
-					previousSummary.state !== "awaiting_review" &&
-					summary.state === "awaiting_review" &&
-					(summary.reviewReason === "hook" ||
-						summary.reviewReason === "attention" ||
-						summary.reviewReason === "error")
-				) {
-					broadcastTaskReadyForReview(workspaceId, summary.taskId);
-				}
-			});
-			clineSummaryUnsubscribeByWorkspaceId.set(workspaceId, unsubscribe);
-			const unsubscribeMessage = service.onMessage((taskId, message) => {
-				broadcastTaskChatMessage(workspaceId, taskId, message);
-			});
-			clineMessageUnsubscribeByWorkspaceId.set(workspaceId, unsubscribeMessage);
-		},
-		broadcastTaskChatMessage,
 		broadcastTaskChatCleared,
 		handleUpgrade: (request, socket, head, context) => {
 			runtimeStateWebSocketServer.handleUpgrade(request, socket, head, (ws) => {
@@ -671,8 +668,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		disposeWorkspace,
 		broadcastRuntimeWorkspaceStateUpdated,
 		broadcastRuntimeProjectsUpdated,
-		broadcastClineMcpAuthStatusesUpdated,
-		bumpClineSessionContextVersion,
 		broadcastTaskReadyForReview,
 		close: async () => {
 			clearInterval(heartbeatInterval);
@@ -689,23 +684,6 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				}
 			}
 			terminalSummaryUnsubscribeByWorkspaceId.clear();
-			for (const unsubscribe of clineSummaryUnsubscribeByWorkspaceId.values()) {
-				try {
-					unsubscribe();
-				} catch {
-					// Ignore listener cleanup errors during shutdown.
-				}
-			}
-			clineSummaryUnsubscribeByWorkspaceId.clear();
-			clinePreviousSummaryByWorkspaceId.clear();
-			for (const unsubscribe of clineMessageUnsubscribeByWorkspaceId.values()) {
-				try {
-					unsubscribe();
-				} catch {
-					// Ignore listener cleanup errors during shutdown.
-				}
-			}
-			clineMessageUnsubscribeByWorkspaceId.clear();
 			workspaceMetadataMonitor.close();
 			for (const client of runtimeStateClients) {
 				try {

@@ -17,6 +17,7 @@ import {
 	migrateAllWorkspaceAgentSessions,
 	migrateWorkspaceTrashToArchive,
 	mutateWorkspaceState,
+	mutateWorkspaceStateById,
 	resetWorkspaceBoardCacheForTests,
 	restoreArchivedWorkspaceTask,
 	saveWorkspaceState,
@@ -346,6 +347,35 @@ describe.sequential("workspace trash archive", () => {
 });
 
 describe.sequential("workspace agent session reconciliation", () => {
+	it("given retired agent ids are persisted, when the workspace loads, then sessions and cards fall back to Claude", async () => {
+		// given
+		const context = await loadWorkspaceContext(repoPath);
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [
+					{
+						...createCard("task-session"),
+						agentId: "cursor" as RuntimeBoardCard["agentId"],
+					},
+				],
+			}),
+		);
+		await writeSessionsJson(context.workspaceId, {
+			"task-session": {
+				...createSession("task-session"),
+				agentId: "kiro",
+			},
+		});
+
+		// when
+		const state = await loadWorkspaceState(repoPath);
+
+		// then
+		expect(state.board.columns[0]?.cards[0]?.agentId).toBe("claude");
+		expect(state.sessions["task-session"]?.agentId).toBe("claude");
+	});
+
 	it("normalizes dead running sessions, reaps dead and foreign home agents, and is idempotent", async () => {
 		const context = await loadWorkspaceContext(repoPath);
 		const otherRepoPath = join(tempRoot, "other-repo");
@@ -363,6 +393,13 @@ describe.sequential("workspace agent session reconciliation", () => {
 		const foreignHomeAgentId = createHomeAgentSessionId(otherContext.workspaceId);
 		const runningTaskId = "task-running";
 		const liveLookingTaskId = "task-live-looking";
+
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard(runningTaskId), createCard(liveLookingTaskId)],
+			}),
+		);
 
 		await writeSessionsJson(context.workspaceId, {
 			[runningTaskId]: createSession(runningTaskId, {
@@ -503,5 +540,243 @@ describe("workspace epic metadata persistence", () => {
 		await setWorkspaceEpic(context.workspaceId, null);
 		const cleared = await getWorkspaceEpic(context.workspaceId);
 		expect(cleared).toBeNull();
+	});
+});
+
+describe("workspace sessions scoping, pruning, and liveness reconciliation", () => {
+	it("scopes and prunes card sessions to active board cards, drops other workspaces cards, and bounds latestHookActivity", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		// Let's set up 4 cards on the board
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("card-1"), createCard("card-2"), createCard("card-3"), createCard("card-4")],
+			}),
+		);
+
+		// Reset the board cache so it re-reads from disk
+		resetWorkspaceBoardCacheForTests();
+
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId);
+		const foreignHomeAgentId = createHomeAgentSessionId("other-workspace-id");
+
+		// 1. Load a persisted state with 200 records and 4 cards -> 4 (+ this workspace's overseer) survive
+		// 2. Load a state containing another workspace's card record -> dropped
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
+			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, { agentSessionId: "home-session" }),
+			[foreignHomeAgentId]: createSession(foreignHomeAgentId, { agentSessionId: "other-home-session" }),
+			"card-1": createSession("card-1", { agentSessionId: "session-1" }),
+			"card-2": createSession("card-2", { agentSessionId: "session-2" }),
+			"card-3": createSession("card-3", { agentSessionId: "session-3" }),
+			"card-4": createSession("card-4", { agentSessionId: "session-4" }),
+			"other-workspace-card": createSession("other-workspace-card", { agentSessionId: "other-card-session" }),
+		};
+
+		// 196 other card sessions (not on the board, so they should be pruned)
+		for (let i = 5; i <= 200; i++) {
+			sessions[`card-${i}`] = createSession(`card-${i}`, { agentSessionId: `session-${i}` });
+		}
+
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		// Trigger partition/reconciliation
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+
+		// Assertions:
+		// Active card sessions survive
+		expect(migrated["card-1"]).toBeDefined();
+		expect(migrated["card-2"]).toBeDefined();
+		expect(migrated["card-3"]).toBeDefined();
+		expect(migrated["card-4"]).toBeDefined();
+
+		// Home agent for this workspace survives
+		expect(migrated[canonicalHomeAgentId]).toBeDefined();
+
+		// Other workspace home agent is dropped
+		expect(migrated[foreignHomeAgentId]).toBeUndefined();
+
+		// Other workspace card is dropped
+		expect(migrated["other-workspace-card"]).toBeUndefined();
+
+		// Stale / un-boarded card sessions are pruned
+		expect(migrated["card-5"]).toBeUndefined();
+		expect(migrated["card-200"]).toBeUndefined();
+	});
+
+	it("reconciles dead running card/overseer sessions to interrupted on cold load, while a genuinely live session survives, and keeps records when board.json is unreadable", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		// Write a card to the board so it doesn't get pruned
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("running-card")],
+			}),
+		);
+		resetWorkspaceBoardCacheForTests();
+
+		const canonicalHomeAgentId = createHomeAgentSessionId(context.workspaceId);
+
+		// Write sessions.json with:
+		// - running-card as running (process is dead, so it should flip to interrupted)
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
+			"running-card": createSession("running-card", {
+				state: "running",
+				pid: 99999,
+				startedAt: 12345,
+				agentSessionId: "session-running-card",
+				agentSessionLifecycle: "attached",
+			}),
+			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, {
+				state: "running",
+				pid: 99999,
+				startedAt: 12345,
+				agentSessionId: "session-canonical",
+				agentSessionLifecycle: "attached",
+			}),
+		};
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		// Run liveness reconciliation
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+
+		// Assert they are flipped to interrupted
+		expect(migrated["running-card"]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+		expect(migrated[canonicalHomeAgentId]).toMatchObject({
+			state: "interrupted",
+			pid: null,
+			reviewReason: "interrupted",
+			agentSessionLifecycle: "resumable",
+		});
+
+		// 3. Test that when board.json is unreadable, nothing is dropped
+		const boardPath = join(tempRoot, "home", "kanban", "workspaces", context.workspaceId, "board.json");
+		await writeFile(boardPath, "{ invalid json", "utf8");
+		resetWorkspaceBoardCacheForTests();
+
+		// Re-write sessions
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		await migrateAllWorkspaceAgentSessions();
+
+		const migratedWithUnreadableBoard = await readSessionsJson(context.workspaceId);
+
+		// Card sessions are NOT dropped because board was unreadable!
+		expect(migratedWithUnreadableBoard["running-card"]).toBeDefined();
+		// Home agent still survives/is processed
+		expect(migratedWithUnreadableBoard[canonicalHomeAgentId]).toBeDefined();
+	});
+
+	it("bounds latestHookActivity size to prevent record ballooning", async () => {
+		const context = await loadWorkspaceContext(repoPath);
+
+		await writeBoardJson(
+			context.workspaceId,
+			createBoard({
+				backlog: [createCard("active-card")],
+			}),
+		);
+		resetWorkspaceBoardCacheForTests();
+
+		const hugeString = "A".repeat(50000); // 50 KB
+
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
+			"active-card": createSession("active-card", {
+				agentSessionId: "active-session-id",
+				latestHookActivity: {
+					activityText: hugeString,
+					toolName: "Read",
+					toolInputSummary: hugeString,
+					finalMessage: hugeString,
+					hookEventName: "AfterTool",
+					notificationType: null,
+					source: "claude",
+				},
+			}),
+		};
+		await writeSessionsJson(context.workspaceId, sessions);
+
+		await migrateAllWorkspaceAgentSessions();
+
+		const migrated = await readSessionsJson(context.workspaceId);
+		const activity = (migrated["active-card"] as RuntimeTaskSessionSummary)?.latestHookActivity;
+
+		expect(activity).toBeDefined();
+		expect(activity).not.toBeNull();
+		if (activity) {
+			expect(activity.activityText?.length).toBeLessThan(1100);
+			expect(activity.activityText).toContain("...");
+			expect(activity.toolInputSummary?.length).toBeLessThan(1100);
+			expect(activity.toolInputSummary).toContain("...");
+			expect(activity.finalMessage?.length).toBeLessThan(1100);
+			expect(activity.finalMessage).toContain("...");
+		}
+
+		// Size assertion: serialized JSON of the session is way below the original oversized 150+ KB
+		const serializedSize = JSON.stringify(migrated).length;
+		expect(serializedSize).toBeLessThan(5000); // well bounded!
+	});
+});
+
+describe("mutateWorkspaceStateById", () => {
+	it("successfully mutates the correct workspace by ID and resists any path or cwd mismatches", async () => {
+		const context1 = await loadWorkspaceContext(repoPath);
+
+		const repoPath2 = join(tempRoot, "repo2");
+		await mkdir(repoPath2, { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], {
+			cwd: repoPath2,
+			env: createGitProcessEnv(),
+			stdio: "ignore",
+		});
+		const context2 = await loadWorkspaceContext(repoPath2);
+
+		await writeBoardJson(context1.workspaceId, createBoard({ backlog: [createCard("task-1")] }));
+		await writeBoardJson(context2.workspaceId, createBoard({ backlog: [createCard("task-2")] }));
+
+		const result = await mutateWorkspaceStateById(context1.workspaceId, (state) => ({
+			board: {
+				...state.board,
+				columns: state.board.columns.map((col) =>
+					col.id === "backlog" ? { ...col, cards: [...col.cards, createCard("task-new")] } : col,
+				),
+			},
+			value: "mutated-1",
+		}));
+
+		expect(result.value).toBe("mutated-1");
+
+		const board1 = (await readJson(
+			join(tempRoot, "home", "kanban", "workspaces", context1.workspaceId, "board.json"),
+		)) as RuntimeBoardData;
+		const board2 = (await readJson(
+			join(tempRoot, "home", "kanban", "workspaces", context2.workspaceId, "board.json"),
+		)) as RuntimeBoardData;
+
+		const backlogCol1 = board1.columns.find((col) => col.id === "backlog");
+		const backlogCol2 = board2.columns.find((col) => col.id === "backlog");
+		expect(backlogCol1).toBeDefined();
+		expect(backlogCol2).toBeDefined();
+		const backlogCards1 = backlogCol1?.cards.map((c) => c.id);
+		const backlogCards2 = backlogCol2?.cards.map((c) => c.id);
+
+		expect(backlogCards1).toEqual(["task-1", "task-new"]);
+		expect(backlogCards2).toEqual(["task-2"]);
+	});
+
+	it("throws an error if workspace ID is not found in the index", async () => {
+		await expect(
+			mutateWorkspaceStateById("workspace-unknown", (state) => ({ board: state.board, value: null })),
+		).rejects.toThrow('Workspace with ID "workspace-unknown" not found in index.');
 	});
 });

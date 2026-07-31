@@ -10,6 +10,7 @@ import type {
 	RuntimeBoardData,
 	RuntimeStateStreamMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
+	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 } from "../../../src/core/api-contract";
 import { runtimeBoardCardSchema } from "../../../src/core/api-contract";
@@ -17,11 +18,20 @@ import { addTaskToColumn, moveTaskToColumn } from "../../../src/core/task-board-
 import {
 	applyPersistedCardPrToBoard,
 	createRuntimeStateHub,
+	getTargetColumnForSession,
+	persistDiscoveredAgentSessionId,
+	projectSessionSummaryColumn,
 	SnapshotAssemblyTimeoutError,
 	withSnapshotTimeout,
 } from "../../../src/server/runtime-state-hub";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api";
 import type { CardPrRef } from "../../../src/workspace/card-pr-url";
+
+const mockMutateWorkspaceState = vi.fn();
+vi.mock("../../../src/state/workspace-state", () => ({
+	mutateWorkspaceState: (...args: unknown[]) => mockMutateWorkspaceState(...args),
+	mutateWorkspaceStateById: (...args: unknown[]) => mockMutateWorkspaceState(...args),
+}));
 
 const monitorMockState = vi.hoisted(() => ({
 	updateWorkspaceState: vi.fn<() => Promise<unknown>>(async () => ({
@@ -94,7 +104,11 @@ function emptyBoard(): RuntimeBoardData {
 	};
 }
 
-function createWorkspaceState(workspacePath: string, board: RuntimeBoardData): RuntimeWorkspaceStateResponse {
+function createWorkspaceState(
+	workspacePath: string,
+	board: RuntimeBoardData,
+	sessions: Record<string, RuntimeTaskSessionSummary> = {},
+): RuntimeWorkspaceStateResponse {
 	return {
 		repoPath: workspacePath,
 		statePath: `${workspacePath}/.cline/kanban/board.json`,
@@ -105,8 +119,27 @@ function createWorkspaceState(workspacePath: string, board: RuntimeBoardData): R
 			branches: ["main"],
 		},
 		board,
-		sessions: {},
+		sessions,
 		revision: 1,
+	};
+}
+
+function createSessionSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "running",
+		agentId: "codex",
+		workspacePath: "/path/to/workspace/.cline/worktrees/task-1",
+		pid: 4242,
+		startedAt: 1_000,
+		updatedAt: 2_000,
+		lastOutputAt: null,
+		reviewReason: null,
+		exitCode: null,
+		agentSessionId: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		...overrides,
 	};
 }
 
@@ -142,6 +175,7 @@ async function setupWorkspaceStateStream(input: {
 				architectWorkspaceId: null,
 			}),
 			buildWorkspaceStateSnapshot: async () => createWorkspaceState(input.workspacePath, board),
+			getWorkspacePathById: (workspaceId) => (workspaceId === input.workspaceId ? input.workspacePath : null),
 		},
 		heartbeatIntervalMs: input.heartbeatIntervalMs,
 	});
@@ -290,6 +324,263 @@ describe("applyPersistedCardPrToBoard", () => {
 	});
 });
 
+describe("getTargetColumnForSession", () => {
+	it("should map card states to target columns", () => {
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "awaiting_review" })).toBe("review");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "running" })).toBe("in_progress");
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "interrupted" })).toBeNull();
+		expect(getTargetColumnForSession({ taskId: "task-1", state: "idle" })).toBeNull();
+	});
+
+	it("should always project overseer to null", () => {
+		expect(getTargetColumnForSession({ taskId: "__home_agent__:workspace-1", state: "awaiting_review" })).toBeNull();
+		expect(getTargetColumnForSession({ taskId: "__home_agent__:workspace-1", state: "running" })).toBeNull();
+	});
+});
+
+describe("projectSessionSummaryColumn", () => {
+	beforeEach(() => {
+		mockMutateWorkspaceState.mockReset();
+	});
+
+	it("given a card in in_progress transitioning to awaiting_review, when projected, then it moves to review and broadcasts update", async () => {
+		const board = boardWithCard("in_progress");
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a card in review transitioning to running, when projected, then it moves to in_progress and broadcasts update", async () => {
+		const board = boardWithCard("review");
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "running" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {
+		const board = boardWithCard("review");
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockBroadcast).not.toHaveBeenCalled();
+	});
+
+	it("given an overseer, when projected, then it no-ops and returns false", async () => {
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "__home_agent__:workspace-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+		expect(mockBroadcast).not.toHaveBeenCalled();
+	});
+
+	it("given a summary with workspacePath of a worktree, when projected, then it mutates the actual workspace repo path and NOT the worktree path", async () => {
+		const board = boardWithCard("in_progress");
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn((id) => (id === "workspace-1" ? "/path/to/workspace" : null)),
+		};
+		const mockBroadcast = vi.fn();
+
+		const summaryWithWorktree = {
+			taskId: "task-1",
+			state: "awaiting_review" as const,
+			workspacePath: "/path/to/worktree",
+		};
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			summaryWithWorktree,
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(true);
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalledWith("/path/to/worktree", expect.any(Function));
+		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+	});
+
+	it("given a workspace ID not found in the registry, when projected, then it logs an error and returns false", async () => {
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => null),
+		};
+		const mockBroadcast = vi.fn();
+		const stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		mockMutateWorkspaceState.mockRejectedValueOnce(
+			new Error('Workspace with ID "workspace-unknown" not found in index.'),
+		);
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-unknown",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-unknown", expect.any(Function));
+		expect(mockBroadcast).not.toHaveBeenCalled();
+		expect(stderrWriteSpy).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'[kanban] Background projection mutation failed for task "task-1" in workspace "workspace-unknown": Error: Workspace with ID "workspace-unknown" not found in index.\n',
+			),
+		);
+		stderrWriteSpy.mockRestore();
+	});
+});
+
+describe("persistDiscoveredAgentSessionId", () => {
+	const board = boardWithCard("in_progress");
+
+	beforeEach(() => {
+		mockMutateWorkspaceState.mockReset();
+	});
+
+	function mockStateWithSessions(sessions: Record<string, RuntimeTaskSessionSummary>) {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const state = createWorkspaceState("/path/to/workspace", board, sessions);
+			const res = mutate(state);
+			return {
+				value: res.value,
+				state: { ...state, sessions: res.sessions ?? state.sessions },
+				saved: res.save,
+			};
+		});
+	}
+
+	it("given a stored session with no agent session id, when a discovered id is emitted, then it is written back", async () => {
+		mockStateWithSessions({ "task-1": createSessionSummary({ agentSessionId: null }) });
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "codex-discovered-id", agentSessionLifecycle: "attached" }),
+		);
+
+		expect(result).toBe(true);
+		const [, mutate] = mockMutateWorkspaceState.mock.calls[0];
+		const mutation = mutate(
+			createWorkspaceState("/path/to/workspace", board, {
+				"task-1": createSessionSummary({ agentSessionId: null }),
+			}),
+		);
+		expect(mutation.sessions?.["task-1"].agentSessionId).toBe("codex-discovered-id");
+		expect(mutation.sessions?.["task-1"].agentSessionLifecycle).toBe("attached");
+		// The rest of the stored row survives — this writes identity, not the whole session.
+		expect(mutation.sessions?.["task-1"].pid).toBe(4242);
+	});
+
+	it("given the id is already persisted, when the same summary is emitted again, then it does not write", async () => {
+		mockStateWithSessions({ "task-1": createSessionSummary({ agentSessionId: "codex-discovered-id" }) });
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "codex-discovered-id" }),
+		);
+
+		expect(result).toBe(false);
+	});
+
+	it("given a summary with no agent session id, when emitted, then it does not touch workspace state", async () => {
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: null }),
+		);
+
+		expect(result).toBe(false);
+		expect(mockMutateWorkspaceState).not.toHaveBeenCalled();
+	});
+
+	it("given discovery lands before the session row exists, when emitted, then the summary is stored whole", async () => {
+		mockStateWithSessions({});
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-1",
+			createSessionSummary({ agentSessionId: "gemini-discovered-id" }),
+		);
+
+		expect(result).toBe(true);
+		const [, mutate] = mockMutateWorkspaceState.mock.calls[0];
+		const mutation = mutate(createWorkspaceState("/path/to/workspace", board, {}));
+		expect(mutation.sessions?.["task-1"].agentSessionId).toBe("gemini-discovered-id");
+	});
+
+	it("given the workspace mutation fails, when emitted, then it reports the failure and returns false", async () => {
+		const stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		mockMutateWorkspaceState.mockRejectedValueOnce(
+			new Error('Workspace with ID "workspace-unknown" not found in index.'),
+		);
+
+		const result = await persistDiscoveredAgentSessionId(
+			"workspace-unknown",
+			createSessionSummary({ agentSessionId: "codex-discovered-id" }),
+		);
+
+		expect(result).toBe(false);
+		expect(stderrWriteSpy).toHaveBeenCalledWith(
+			expect.stringContaining('[kanban] Persisting discovered agent session id failed for task "task-1"'),
+		);
+		stderrWriteSpy.mockRestore();
+	});
+});
+
 describe("withSnapshotTimeout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -341,7 +632,6 @@ describe("CLI-style workspace state notify", () => {
 				});
 				const api = createWorkspaceApi({
 					ensureTerminalManagerForWorkspace: vi.fn(),
-					getScopedClineTaskSessionService: vi.fn(),
 					broadcastRuntimeWorkspaceStateUpdated: stream.hub.broadcastRuntimeWorkspaceStateUpdated,
 					broadcastRuntimeProjectsUpdated: stream.hub.broadcastRuntimeProjectsUpdated,
 					buildWorkspaceStateSnapshot: vi.fn(),
@@ -422,7 +712,6 @@ describe("workspace state broadcast while metadata refresh is blocked", () => {
 			});
 			const api = createWorkspaceApi({
 				ensureTerminalManagerForWorkspace: vi.fn(),
-				getScopedClineTaskSessionService: vi.fn(),
 				broadcastRuntimeWorkspaceStateUpdated: stream.hub.broadcastRuntimeWorkspaceStateUpdated,
 				broadcastRuntimeProjectsUpdated: stream.hub.broadcastRuntimeProjectsUpdated,
 				buildWorkspaceStateSnapshot: vi.fn(),

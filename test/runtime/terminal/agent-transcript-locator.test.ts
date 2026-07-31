@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { locateAgentTranscript } from "../../../src/terminal/agent-transcript-locator";
+import {
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+} from "../../fixtures/agent-paths";
 
 let homePath = "";
 
@@ -26,9 +31,7 @@ async function writeTranscript(relativePath: string): Promise<string> {
 describe("locateAgentTranscript", () => {
 	it("finds a claude transcript stored under a cwd-slug project directory", async () => {
 		const sessionId = "claude-session-1";
-		const expectedPath = await writeTranscript(
-			join(".claude", "projects", "-Users-dev-some-repo", `${sessionId}.jsonl`),
-		);
+		const expectedPath = await writeTranscript(getClaudeMockTranscriptPath("", sessionId, "-Users-dev-some-repo"));
 
 		const location = await locateAgentTranscript({ agentId: "claude", sessionId, homePath });
 
@@ -37,9 +40,7 @@ describe("locateAgentTranscript", () => {
 
 	it("finds a codex rollout transcript nested under a date-partitioned directory", async () => {
 		const sessionId = "codex-session-1";
-		const expectedPath = await writeTranscript(
-			join(".codex", "sessions", "2026", "07", "09", `rollout-2026-07-09T12-00-00-${sessionId}.jsonl`),
-		);
+		const expectedPath = await writeTranscript(getCodexMockTranscriptPath("", sessionId, "2026/07/09"));
 
 		const location = await locateAgentTranscript({ agentId: "codex", sessionId, homePath });
 
@@ -47,7 +48,7 @@ describe("locateAgentTranscript", () => {
 	});
 
 	it("reports a claude transcript absent when no matching file exists", async () => {
-		await writeTranscript(join(".claude", "projects", "-Users-dev-some-repo", "a-different-session.jsonl"));
+		await writeTranscript(getClaudeMockTranscriptPath("", "a-different-session", "-Users-dev-some-repo"));
 
 		const location = await locateAgentTranscript({ agentId: "claude", sessionId: "missing-session", homePath });
 
@@ -55,9 +56,7 @@ describe("locateAgentTranscript", () => {
 	});
 
 	it("reports a codex transcript absent when no rollout file matches the session id", async () => {
-		await writeTranscript(
-			join(".codex", "sessions", "2026", "07", "09", "rollout-2026-07-09T12-00-00-other-session.jsonl"),
-		);
+		await writeTranscript(getCodexMockTranscriptPath("", "other-session", "2026/07/09"));
 
 		const location = await locateAgentTranscript({ agentId: "codex", sessionId: "missing-session", homePath });
 
@@ -66,9 +65,7 @@ describe("locateAgentTranscript", () => {
 
 	it("finds a gemini transcript stored under a tmp slug chats directory", async () => {
 		const sessionId = "afd41427-2374-46d9-84f1-9634c8e89cee";
-		const expectedPath = await writeTranscript(
-			join(".gemini", "tmp", "fleet-kanban-5", "chats", `session-2026-07-23T18-23-${sessionId.slice(0, 8)}.jsonl`),
-		);
+		const expectedPath = await writeTranscript(getGeminiMockTranscriptPath("", sessionId, "fleet-kanban-5"));
 
 		const location = await locateAgentTranscript({ agentId: "gemini", sessionId, homePath });
 
@@ -78,7 +75,12 @@ describe("locateAgentTranscript", () => {
 	it("reports a gemini transcript absent when no matching file exists", async () => {
 		const sessionId = "afd41427-2374-46d9-84f1-9634c8e89cee";
 		await writeTranscript(
-			join(".gemini", "tmp", "fleet-kanban-5", "chats", "session-2026-07-23T18-23-different.jsonl"),
+			getGeminiMockTranscriptPath(
+				"",
+				"different-session",
+				"fleet-kanban-5",
+				"session-2026-07-23T18-23-different.jsonl",
+			),
 		);
 
 		const location = await locateAgentTranscript({ agentId: "gemini", sessionId, homePath });

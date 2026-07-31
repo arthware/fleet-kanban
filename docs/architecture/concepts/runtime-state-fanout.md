@@ -2,10 +2,10 @@
 
 **Importance:** high  ·  **Lives in:** `src/server/runtime-state-hub.ts`, `web-ui/src/runtime/use-runtime-state-stream.ts`
 
-The central hub that streams contract-typed board/session/chat deltas to the browser.
+The central hub that streams contract-typed board and session deltas to the browser.
 
 ## Domain model
-Listens to terminal summaries, Cline summaries + messages, and workspace metadata/state changes, then
+Listens to task session execution summaries, transcript checkpoints, and workspace metadata/state changes, then
 broadcasts stream messages (`snapshot`, `workspace_state_updated`, `task_sessions_updated`,
 `task_chat_message`, …). Kanban is push-based, not poll-based; the browser folds these into one
 reducer. Stream message shapes are part of the contract union.

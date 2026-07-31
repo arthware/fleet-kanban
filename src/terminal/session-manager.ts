@@ -1,10 +1,7 @@
-// PTY-backed runtime for non-Cline task sessions and the workspace shell terminal.
-// It owns process lifecycle, terminal protocol filtering, and summary updates
-// for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-
+import { DRIVERS, type DriverSessionRef } from "../agents/driver";
 import type {
+	RuntimeAgentId,
 	RuntimeAgentSessionLifecycle,
 	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
@@ -13,7 +10,8 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
-import { isHomeAgentSessionId } from "../core/home-agent-session";
+import { isHomeAgentSessionId, parseHomeAgentSessionId } from "../core/home-agent-session";
+import { openSession } from "../core/session-ledger";
 import { reconcileTaskSessionSummaryLiveness } from "../core/session-liveness";
 import {
 	type AgentAdapterLaunchInput,
@@ -21,7 +19,7 @@ import {
 	type AgentOutputTransitionInspectionPredicate,
 	prepareAgentLaunch,
 } from "./agent-session-adapters";
-import { classifyAgentSessionLifecycle, resolveLaunchSessionId } from "./agent-session-launch";
+import { classifyAgentSessionLifecycle } from "./agent-session-launch";
 import { locateAgentTranscript } from "./agent-transcript-locator";
 import {
 	hasClaudeWorkspaceTrustPrompt,
@@ -29,10 +27,8 @@ import {
 	stopWorkspaceTrustTimers,
 	WORKSPACE_TRUST_CONFIRM_DELAY_MS,
 } from "./claude-workspace-trust";
-import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
-import { captureGeminiSessionId } from "./gemini-session-capture";
-import { deriveHomeAgentClaudeSessionId, resolveHomeAgentLaunch } from "./home-agent-session-id";
+import { deriveHomeAgentClaudeSessionId } from "./home-agent-session-id";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
 import { reduceSessionTransition, type SessionTransitionEvent } from "./session-state-machine";
@@ -84,6 +80,7 @@ interface SessionEntry {
 	suppressAutoRestartOnExit: boolean;
 	autoRestartTimestamps: number[];
 	pendingAutoRestart: Promise<void> | null;
+	lastProcessedSeq?: number;
 }
 
 export interface StartTaskSessionRequest {
@@ -274,16 +271,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 	hydrateFromRecord(record: Record<string, RuntimeTaskSessionSummary>): void {
 		for (const [taskId, summary] of Object.entries(record)) {
+			const existing = this.entries.get(taskId);
 			this.entries.set(taskId, {
 				summary: cloneSummary(summary),
-				active: null,
-				terminalStateMirror: null,
-				listenerIdCounter: 1,
-				listeners: new Map(),
-				restartRequest: null,
-				suppressAutoRestartOnExit: false,
-				autoRestartTimestamps: [],
-				pendingAutoRestart: null,
+				active: existing ? existing.active : null,
+				terminalStateMirror: existing ? existing.terminalStateMirror : null,
+				listenerIdCounter: existing ? existing.listenerIdCounter : 1,
+				listeners: existing ? existing.listeners : new Map(),
+				restartRequest: existing ? existing.restartRequest : null,
+				suppressAutoRestartOnExit: existing ? existing.suppressAutoRestartOnExit : false,
+				autoRestartTimestamps: existing ? existing.autoRestartTimestamps : [],
+				pendingAutoRestart: existing ? existing.pendingAutoRestart : null,
+				lastProcessedSeq: existing ? existing.lastProcessedSeq : undefined,
 			});
 		}
 	}
@@ -350,23 +349,36 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
 		updateSummary(entry, { agentSessionLifecycle: lifecycle });
 
-		// The home/architect chat is a single, persistent conversation. Give it a
-		// deterministic session id so it is always resumable and never lost on a
-		// board restart: start it with --session-id the first time, then resume it on
-		// every launch after (chosen by whether its transcript already exists).
-		const isHomeAgentTask = request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId);
-		const homeAgentSessionId =
-			request.agentId === "claude" && request.workspaceId && isHomeAgentTask
-				? deriveHomeAgentClaudeSessionId(
-						request.workspaceId,
-						request.agentId,
-						entry.summary.homeAgentSessionGeneration ?? 0,
-					)
-				: null;
-
-		if (!homeAgentSessionId && !isHomeAgentTask && !isFirstTaskLaunch && lifecycle === "gone") {
+		if (request.resumeMode === "resume" && lifecycle === "gone") {
 			return cloneSummary(entry.summary);
 		}
+
+		const driver = DRIVERS[request.agentId];
+		if (!driver) {
+			throw new Error(`Unsupported agent driver: ${request.agentId}`);
+		}
+
+		const ref: DriverSessionRef =
+			request.workspaceId !== undefined && isHomeAgentSessionId(request.taskId)
+				? { kind: "overseer", taskId: request.taskId, workspaceId: request.workspaceId }
+				: { kind: "card", taskId: request.taskId };
+
+		const identityResult = driver.identity.resolve({
+			ref,
+			stored: entry.summary.agentSessionId,
+			lifecycle,
+			generation: entry.summary.homeAgentSessionGeneration ?? 0,
+		});
+
+		if (!identityResult.supported) {
+			throw new Error(`Failed to resolve launch identity: ${identityResult.reason}`);
+		}
+
+		const { agentSessionId: launchSessionId, resumeSession, discoverAfterSpawn } = identityResult.value;
+
+		// Persist the resolved session id so the board/UI and lifecycle see a
+		// resumable session instead of an uncaptured (null) one.
+		updateSummary(entry, { agentSessionId: launchSessionId });
 
 		entry.restartRequest = {
 			kind: "task",
@@ -392,34 +404,6 @@ export class TerminalSessionManager implements TerminalSessionService {
 			},
 		});
 
-		let launchSessionId: string | null;
-		let resumeSession: boolean;
-		if (homeAgentSessionId) {
-			const homeTranscript = await locateAgentTranscript({
-				agentId: request.agentId,
-				sessionId: homeAgentSessionId,
-				homePath: homedir(),
-			});
-			({ agentSessionId: launchSessionId, resumeSession } = resolveHomeAgentLaunch({
-				agentSessionId: homeAgentSessionId,
-				transcriptPresent: homeTranscript.present,
-			}));
-			// Persist the deterministic id so the board/UI and lifecycle see a
-			// resumable session instead of an uncaptured (null) one.
-			updateSummary(entry, { agentSessionId: launchSessionId });
-		} else {
-			// Resume by the task's stored session id only when lifecycle routing says
-			// it is resumable. A prior launch with no resumable transcript is allowed
-			// to reattach/no-op, but must not mint a fresh prompt-replaying session.
-			({ agentSessionId: launchSessionId, resumeSession } = resolveLaunchSessionId({
-				agentId: request.agentId,
-				storedSessionId: entry.summary.agentSessionId,
-				resumeMode:
-					lifecycle === "resumable" ? "resume" : isFirstTaskLaunch || isHomeAgentTask ? "fresh" : "unavailable",
-				mintSessionId: () => randomUUID(),
-			}));
-		}
-
 		const launch = await prepareAgentLaunch({
 			taskId: request.taskId,
 			agentId: request.agentId,
@@ -427,7 +411,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			args: request.args,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
-			prompt: homeAgentSessionId ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
+			prompt:
+				ref.kind === "overseer" ? (resumeSession ? "" : request.prompt) : isFirstTaskLaunch ? request.prompt : "",
 			agentModel: request.agentModel,
 			images: request.images,
 			resumeFromTrash: request.resumeFromTrash,
@@ -618,7 +603,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			rows,
 			terminalProtocolFilter: createTerminalProtocolFilterState({
 				interceptOscColorQueries: true,
-				suppressDeviceAttributeQueries: request.agentId === "droid",
+				suppressDeviceAttributeQueries: false,
 			}),
 			onSessionCleanup: launch.cleanup ?? null,
 			deferredStartupInput: launch.deferredStartupInput ?? null,
@@ -649,24 +634,40 @@ export class TerminalSessionManager implements TerminalSessionService {
 			latestTurnCheckpoint: null,
 			previousTurnCheckpoint: null,
 		});
-		this.emitSummary(entry.summary);
 
-		// Codex assigns its own session id, written to a rollout file once it
-		// boots. Discover it in the background so a later start can resume by id.
-		if (request.agentId === "codex" && !launchSessionId) {
-			this.captureCodexSessionIdInBackground(request.taskId, request.cwd, startedAt);
+		if (request.workspaceId) {
+			const kind = isHomeAgentSessionId(request.taskId) ? "home-agent" : "card";
+			const gen = kind === "home-agent" ? (entry.summary.homeAgentSessionGeneration ?? 0) : 0;
+			openSession({
+				workspaceId: request.workspaceId,
+				taskId: request.taskId,
+				kind,
+				generation: gen,
+				agentId: request.agentId,
+				agentSessionId: launchSessionId,
+				openedAt: startedAt,
+			}).catch(() => {
+				// Best effort: ledger failure must never crash the hot start path
+			});
 		}
 
-		// Gemini assigns its own session id, written to a transcript file once it
-		// boots. Discover it in the background so a later start can resume by id.
-		if (request.agentId === "gemini" && !launchSessionId) {
-			this.captureGeminiSessionIdInBackground(request.taskId, request.cwd, startedAt);
+		this.emitSummary(entry.summary);
+
+		// If the driver requests background session discovery (e.g. Codex/Gemini assigning its own session id on boot),
+		// discover it in the background so a later start can resume by id.
+		if (discoverAfterSpawn && !launchSessionId) {
+			this.captureSessionIdInBackground(request.taskId, request.agentId, request.cwd, startedAt);
 		}
 
 		return cloneSummary(entry.summary);
 	}
 
-	private captureGeminiSessionIdInBackground(taskId: string, cwd: string, startedAtMs: number): void {
+	private captureSessionIdInBackground(
+		taskId: string,
+		agentId: RuntimeAgentId,
+		cwd: string,
+		startedAtMs: number,
+	): void {
 		const maxAttempts = 20;
 		const intervalMs = 500;
 		let attempts = 0;
@@ -678,45 +679,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 			if (!entry?.active || entry.summary.agentSessionId) {
 				return;
 			}
-			captureGeminiSessionId({ cwd, startedAtMs })
-				.then((sessionId) => {
-					const currentEntry = this.entries.get(taskId);
-					if (!currentEntry?.active || currentEntry.summary.agentSessionId) {
-						return;
-					}
-					if (sessionId) {
-						const summary = updateSummary(currentEntry, { agentSessionId: sessionId });
-						this.emitSummary(summary);
-						return;
-					}
-					if (attempts < maxAttempts) {
-						setTimeout(attempt, intervalMs).unref();
-					}
-				})
-				.catch(() => {
-					if (attempts < maxAttempts) {
-						setTimeout(attempt, intervalMs).unref();
-					}
-				});
-		};
-
-		setTimeout(attempt, intervalMs).unref();
-	}
-
-	private captureCodexSessionIdInBackground(taskId: string, cwd: string, startedAtMs: number): void {
-		const maxAttempts = 20;
-		const intervalMs = 500;
-		let attempts = 0;
-
-		const attempt = (): void => {
-			attempts += 1;
-			const entry = this.entries.get(taskId);
-			// Stop if the session is gone or the id was captured another way.
-			if (!entry?.active || entry.summary.agentSessionId) {
+			const driver = (DRIVERS as Record<RuntimeAgentId, any>)[agentId];
+			if (!driver) {
 				return;
 			}
-			captureCodexSessionId({ cwd, startedAtMs })
-				.then((sessionId) => {
+			driver.observe
+				.discoverSession({ cwd, startedAtMs, homePath: homedir() })
+				.then((sessionId: string | null) => {
 					const currentEntry = this.entries.get(taskId);
 					if (!currentEntry?.active || currentEntry.summary.agentSessionId) {
 						return;
@@ -874,7 +843,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 		updateSummary(entry, {
 			state: "running",
-			agentId: null,
+			agentId: entry.summary.agentId || null,
 			workspacePath: request.cwd,
 			pid: session.pid,
 			startedAt: now(),
@@ -931,8 +900,16 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry: SessionEntry,
 		agentIdOverride?: StartTaskSessionRequest["agentId"],
 	): Promise<RuntimeAgentSessionLifecycle> {
-		const agentSessionId = entry.summary.agentSessionId;
+		let agentSessionId = entry.summary.agentSessionId;
 		const agentId = agentIdOverride ?? entry.summary.agentId;
+		const parsedHome = parseHomeAgentSessionId(entry.summary.taskId);
+		if (!agentSessionId && agentId === "claude" && parsedHome) {
+			agentSessionId = deriveHomeAgentClaudeSessionId(
+				parsedHome.workspaceId,
+				agentId,
+				entry.summary.homeAgentSessionGeneration ?? 0,
+			);
+		}
 		const transcript = agentSessionId
 			? await locateAgentTranscript({
 					agentId: agentId ?? "",
@@ -1011,6 +988,14 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 		if (reason !== "hook" && reason !== "needs_input") {
 			return cloneSummary(entry.summary);
+		}
+		if (isHomeAgentSessionId(taskId) && entry.summary.state === "idle") {
+			const summary = updateSummary(entry, {
+				state: "awaiting_review",
+				reviewReason: reason,
+			});
+			this.emitSummary(summary);
+			return cloneSummary(summary);
 		}
 		const before = entry.summary;
 		const summary = this.applySessionEvent(entry, {
@@ -1104,6 +1089,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 		return cloneSummary(summary);
 	}
 
+	getLastProcessedSeq(taskId: string): number {
+		const entry = this.entries.get(taskId);
+		return entry?.lastProcessedSeq ?? 0;
+	}
+
+	setLastProcessedSeq(taskId: string, seq: number): void {
+		const entry = this.entries.get(taskId);
+		if (entry) {
+			entry.lastProcessedSeq = seq;
+		}
+	}
+
 	resumeFromHumanInput(taskId: string): RuntimeTaskSessionSummary | null {
 		const entry = this.entries.get(taskId);
 		if (!entry) {
@@ -1183,6 +1180,10 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry.terminalStateMirror?.dispose();
 		entry.terminalStateMirror = null;
 		entry.restartRequest = null;
+		const parsed = parseHomeAgentSessionId(taskId);
+		const agentId = parsed ? parsed.agentId : null;
+
+		const currentGen = entry.summary.homeAgentSessionGeneration ?? 0;
 		const summary = updateSummary(entry, {
 			state: "idle",
 			pid: null,
@@ -1190,7 +1191,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			exitCode: null,
 			agentSessionId: null,
 			agentSessionLifecycle: "gone",
-			homeAgentSessionGeneration: (entry.summary.homeAgentSessionGeneration ?? 0) + 1,
+			agentId: agentId as any,
+			homeAgentSessionGeneration: currentGen + 1,
 		});
 		this.emitSummary(summary);
 		return cloneSummary(summary);
@@ -1251,6 +1253,10 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return false;
 		}
 		if (entry.listeners.size === 0 || entry.restartRequest?.kind !== "task") {
+			return false;
+		}
+		const isHomeAgentTask = isHomeAgentSessionId(entry.summary.taskId);
+		if (entry.summary.agentSessionLifecycle !== "resumable" && !isHomeAgentTask) {
 			return false;
 		}
 		const currentTime = now();

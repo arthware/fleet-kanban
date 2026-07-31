@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeTaskSessionSummary, RuntimeWorkspaceChangesResponse } from "../../../src/core/api-contract";
+import type {
+	RuntimeTaskSessionSummary,
+	RuntimeWorkspaceChangesResponse,
+	RuntimeWorkspaceStateResponse,
+} from "../../../src/core/api-contract";
 
 const workspaceTaskWorktreeMocks = vi.hoisted(() => ({
 	resolveTaskCwd: vi.fn(),
@@ -48,7 +52,6 @@ async function createTempProjectRoot(): Promise<string> {
 function createWorkspaceApiForTests(): ReturnType<typeof createWorkspaceApi> {
 	return createWorkspaceApi({
 		ensureTerminalManagerForWorkspace: vi.fn(),
-		getScopedClineTaskSessionService: vi.fn(),
 		broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 		broadcastRuntimeProjectsUpdated: vi.fn(),
 		buildWorkspaceStateSnapshot: vi.fn(),
@@ -109,7 +112,6 @@ describe("createWorkspaceApi loadChanges", () => {
 	it("loads working-copy changes from the task fork point", async () => {
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -140,7 +142,6 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -185,7 +186,6 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -234,7 +234,6 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -259,129 +258,6 @@ describe("createWorkspaceApi loadChanges", () => {
 		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).not.toHaveBeenCalled();
 	});
 
-	it("uses native cline session checkpoints when terminal summaries are unavailable", async () => {
-		const terminalManager = {
-			getSummary: vi.fn(() => null),
-		};
-		const clineTaskSessionService = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					latestTurnCheckpoint: {
-						turn: 3,
-						ref: "refs/kanban/checkpoints/task-1/turn/3",
-						commit: "3333333",
-						createdAt: 3,
-					},
-					previousTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "2222222",
-						createdAt: 2,
-					},
-				}),
-			),
-		};
-
-		const api = createWorkspaceApi({
-			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
-			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
-			broadcastRuntimeProjectsUpdated: vi.fn(),
-			buildWorkspaceStateSnapshot: vi.fn(),
-		});
-
-		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
-		);
-
-		expect(clineTaskSessionService.getSummary).toHaveBeenCalledWith("task-1");
-		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
-			cwd: "/tmp/worktree",
-			fromRef: "2222222",
-			toRef: "3333333",
-		});
-	});
-
-	it("prefers the newer live cline summary over a stale terminal summary", async () => {
-		const terminalManager = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					agentId: "claude",
-					updatedAt: 10,
-					latestTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "terminal-2",
-						createdAt: 2,
-					},
-					previousTurnCheckpoint: {
-						turn: 1,
-						ref: "refs/kanban/checkpoints/task-1/turn/1",
-						commit: "terminal-1",
-						createdAt: 1,
-					},
-				}),
-			),
-		};
-		const clineTaskSessionService = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					agentId: "cline",
-					updatedAt: 20,
-					latestTurnCheckpoint: {
-						turn: 3,
-						ref: "refs/kanban/checkpoints/task-1/turn/3",
-						commit: "cline-3",
-						createdAt: 3,
-					},
-					previousTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "cline-2",
-						createdAt: 2,
-					},
-				}),
-			),
-		};
-
-		const api = createWorkspaceApi({
-			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
-			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
-			broadcastRuntimeProjectsUpdated: vi.fn(),
-			buildWorkspaceStateSnapshot: vi.fn(),
-		});
-
-		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
-		);
-
-		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
-			cwd: "/tmp/worktree",
-			fromRef: "cline-2",
-			toRef: "cline-3",
-		});
-	});
-
 	it("returns an empty diff when the task worktree does not exist yet", async () => {
 		workspaceTaskWorktreeMocks.resolveTaskCwd.mockRejectedValue(
 			new Error('Task worktree not found for task "task-1".'),
@@ -392,7 +268,6 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -481,7 +356,6 @@ describe("createWorkspaceApi notifyStateUpdated", () => {
 		const broadcastProjects = vi.fn(async () => {});
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: broadcastWorkspace,
 			broadcastRuntimeProjectsUpdated: broadcastProjects,
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -501,7 +375,6 @@ describe("createWorkspaceApi notifyStateUpdated", () => {
 	it("surfaces a failed workspace-state broadcast instead of reporting success", async () => {
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(async () => {
 				throw new Error("workspace push failed");
 			}),
@@ -533,26 +406,29 @@ describe("createWorkspaceApi ensureWorktree", () => {
 		});
 		const boardPath = join(repoPath, ".cline", "kanban", "board.json");
 		await mkdir(join(repoPath, ".cline", "kanban"), { recursive: true });
-		await writeFile(
-			boardPath,
-			JSON.stringify({
-				revision: 1,
-				columns: [
-					{
-						id: "backlog",
-						cards: [
-							{
-								id: "task-123",
-								prompt: "do something",
-								baseRef: "main",
-								createdAt: Date.now(),
-								updatedAt: Date.now(),
-							},
-						],
-					},
-				],
-			}),
-		);
+		const boardData = {
+			revision: 1,
+			columns: [
+				{
+					id: "backlog",
+					title: "Backlog",
+					cards: [
+						{
+							id: "task-123",
+							prompt: "do something",
+							baseRef: "main",
+							createdAt: Date.now(),
+							updatedAt: Date.now(),
+						},
+					],
+				},
+			],
+		};
+		await writeFile(boardPath, JSON.stringify(boardData));
+
+		const context = await loadWorkspaceContext(repoPath);
+		await mkdir(context.statePath, { recursive: true });
+		await writeFile(join(context.statePath, "board.json"), JSON.stringify(boardData), "utf8");
 
 		workspaceTaskWorktreeMocks.ensureTaskWorktreeIfDoesntExist.mockResolvedValue({
 			ok: true,
@@ -565,7 +441,6 @@ describe("createWorkspaceApi ensureWorktree", () => {
 		const broadcastWorkspace = vi.fn();
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(),
-			getScopedClineTaskSessionService: vi.fn(),
 			broadcastRuntimeWorkspaceStateUpdated: broadcastWorkspace,
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(async () => {
@@ -591,7 +466,7 @@ describe("createWorkspaceApi ensureWorktree", () => {
 						],
 					},
 					sessions: {},
-				} as any;
+				} as unknown as RuntimeWorkspaceStateResponse;
 			}),
 		});
 
@@ -617,7 +492,6 @@ describe("createWorkspaceApi ensureWorktree", () => {
 		expect(broadcastWorkspace).toHaveBeenCalledWith("workspace-123", repoPath);
 
 		// Read sessions.json and check that warningMessage is written!
-		const context = await loadWorkspaceContext(repoPath);
 		const sessionsPath = join(context.statePath, "sessions.json");
 		const sessionsContent = await import("node:fs/promises").then((fs) => fs.readFile(sessionsPath, "utf8"));
 		const sessions = JSON.parse(sessionsContent);

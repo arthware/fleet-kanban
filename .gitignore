@@ -27,3 +27,11 @@ packages/desktop/runtime-child.js
 packages/desktop/runtime-child-env.js
 packages/desktop/desktop-preflight.js
 packages/desktop/cli
+
+# Husky's own generated directory. In a task worktree it is a symlink to the
+# machine that created it, so committing it hands CI a dangling path and npm ci
+# dies in husky's prepare step before a single test runs.
+.husky/_
+
+# Python bytecode from the fleet CLI
+__pycache__/

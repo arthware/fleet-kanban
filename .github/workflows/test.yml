@@ -45,24 +45,5 @@ jobs:
           git config --global user.email "ci@fleet.local"
           git config --global user.name "fleet ci"
 
-      - name: Lint
-        run: npm run lint
-
-      # We run `web:build` instead of full root `npm run build` because:
-      # 1. Full root build triggers Sentry sourcemap upload, which requires secrets and is slow/heavy.
-      # 2. We only need to verify that both the Web UI and root packages compile correctly.
-      - name: Compile Web UI
-        run: npm run web:build
-
-      - name: Typecheck Root
-        run: npm run typecheck
-
-      # Root fast tests include all runtime, utility, and state unit tests.
-      # We intentionally run `npm run test:fast` rather than `npm test` or `npm run test:integration`
-      # because the integration/agent tests spawn real agent CLI binaries (e.g., claude/gemini)
-      # and boot live board/socket infrastructure, which are not CI-safe or available in GitHub Actions.
-      - name: Run Root Fast Tests (CI-Safe)
-        run: npm run test:fast
-
-      - name: Run Web UI Tests
-        run: npm --prefix web-ui run test
+      - name: Verify
+        run: npm run verify

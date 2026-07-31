@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTRPCProxyClient, httpBatchLink, TRPCClientError } from "@trpc/client";
 import type { Command } from "commander";
+import { isClaudeTranscriptPath } from "../agents/claude/paths";
 import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../core/api-contract";
 import { buildKanbanCommandParts } from "../core/kanban-command";
 import { buildKanbanRuntimeUrl, getRuntimeFetch } from "../core/runtime-endpoint";
@@ -15,9 +16,7 @@ import {
 	resolveCodexRolloutFinalMessageForCwd,
 	startCodexSessionWatcher,
 } from "./hook-events/codex-hook-events";
-import { enrichDroidReviewMetadata } from "./hook-events/droid-hook-events";
 import { asRecord, normalizeWhitespace, readNestedString, readStringField } from "./hook-events/hook-utils";
-import { normalizeKiroHookMetadata } from "./hook-events/kiro-hook-events";
 
 export {
 	createCodexWatcherState,
@@ -272,15 +271,8 @@ export function inferHookSourceFromPayload(payload: Record<string, unknown> | nu
 	const transcriptPath = payload
 		? (readStringField(payload, "transcript_path") ?? readStringField(payload, "transcriptPath"))
 		: null;
-	const normalizedTranscriptPath = transcriptPath?.replaceAll("\\", "/").toLowerCase() ?? null;
-	if (normalizedTranscriptPath?.includes("/.claude/")) {
+	if (transcriptPath && isClaudeTranscriptPath(transcriptPath)) {
 		return "claude";
-	}
-	if (normalizedTranscriptPath?.includes("/.kiro/")) {
-		return "kiro";
-	}
-	if (normalizedTranscriptPath?.includes("/.factory/")) {
-		return "droid";
 	}
 	if (payload && readStringField(payload, "type") === "agent-turn-complete") {
 		return "codex";
@@ -294,18 +286,6 @@ function normalizeHookMetadata(
 	flagMetadata: Partial<RuntimeTaskHookActivity>,
 ): Partial<RuntimeTaskHookActivity> | undefined {
 	const inferredSource = inferHookSourceFromPayload(payload);
-	const sourceHint = flagMetadata.source ?? inferredSource;
-	if (sourceHint?.toLowerCase() === "kiro") {
-		const kiroMetadata = normalizeKiroHookMetadata({
-			event,
-			payload,
-			flagMetadata,
-			sourceHint,
-		});
-		if (kiroMetadata) {
-			return kiroMetadata;
-		}
-	}
 
 	const hookEventName = payload
 		? (readStringField(payload, "hook_event_name") ??
@@ -500,8 +480,7 @@ async function runHooksNotify(
 		const stdinPayload = await readStdinText();
 		const parsedArgs = parseHooksIngestArgs(event, options, payloadArg, stdinPayload);
 		const codexEnrichedArgs = await enrichCodexReviewMetadata(parsedArgs, process.cwd());
-		const args = await enrichDroidReviewMetadata(codexEnrichedArgs);
-		await ingestHookEvent(args);
+		await ingestHookEvent(codexEnrichedArgs);
 	} catch {
 		// Best effort only.
 	}
@@ -721,8 +700,7 @@ async function runHooksIngest(
 	try {
 		const stdinPayload = await readStdinText();
 		const parsedArgs = parseHooksIngestArgs(event, options, payloadArg, stdinPayload);
-		const codexEnrichedArgs = await enrichCodexReviewMetadata(parsedArgs, process.cwd());
-		args = await enrichDroidReviewMetadata(codexEnrichedArgs);
+		args = await enrichCodexReviewMetadata(parsedArgs, process.cwd());
 	} catch (error) {
 		process.stderr.write(`kanban hooks ingest: ${formatError(error)}\n`);
 		process.exitCode = 1;

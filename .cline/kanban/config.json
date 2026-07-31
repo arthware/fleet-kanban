@@ -12,6 +12,7 @@
     }
   ],
   "worktree": {
+    "postCreateCommand": "npm --prefix web-ui ci --no-audit --no-fund || npm --prefix web-ui install --no-audit --no-fund",
     "unsharedPaths": [
       "dist",
       "build",

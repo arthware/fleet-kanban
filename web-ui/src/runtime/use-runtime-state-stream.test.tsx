@@ -70,11 +70,12 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 
 	beforeEach(() => {
 		MockWebSocket.instances = [];
-		globalThis.WebSocket = MockWebSocket as any;
+		globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 		useDocumentVisibilityMock.mockReturnValue(true);
 
-		previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
-		(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+		previousActEnvironment = (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+			.IS_REACT_ACT_ENVIRONMENT;
+		(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 		vi.useFakeTimers();
 
@@ -89,7 +90,8 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 		});
 		container.remove();
 		globalThis.WebSocket = originalWebSocket;
-		(globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+		(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+			previousActEnvironment;
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 	});
@@ -118,7 +120,6 @@ describe("useRuntimeStateStream - heartbeat and liveness watchdog", () => {
 				architectWorkspaceId: null,
 				workspaceState: null,
 				workspaceMetadata: null,
-				clineSessionContextVersion: 1,
 			}),
 		});
 	};

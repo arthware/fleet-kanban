@@ -56,17 +56,6 @@ function createRuntimeConfigResponse(
 		],
 		shortcuts,
 		worktree: {},
-		clineProviderSettings: {
-			providerId: null,
-			modelId: null,
-			baseUrl: null,
-			apiKeyConfigured: false,
-			oauthProvider: null,
-			oauthAccessTokenConfigured: false,
-			oauthRefreshTokenConfigured: false,
-			oauthAccountId: null,
-			oauthExpiresAt: null,
-		},
 	};
 }
 

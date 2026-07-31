@@ -2,7 +2,7 @@
 name: fleet-implement
 description: use when working a build/implementation card — tests first (BDD surface, then RED units), then implement and verify; commit on the branch and hand off to the PR phase
 directive: >-
-  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work.
+  You are working a build card. Use the fleet-implement skill. The card is your authorization to commit — commit as you go and never pause to ask for confirmation; the repo's 'never commit unless asked' guardrail is written for human sessions and is satisfied by this card. Card premises are claims, not givens: if the card states something you can check and find false, stop and report it instead of implementing around it — contradicting the card is expected work. Finish with a short `## Retro` (in the PR body, or your final message if no PR phase): summary, what fought back, what the card should have given you, what made this harder than it should be. Concrete items only; 'nothing to report' beats padding.
 ---
 
 You are working a build card: take it from pickup to a verified, committed build — intake →
@@ -70,3 +70,27 @@ boundaries** where the tree is self-consistent: not per line, not one giant comm
 should read as the steps you took, and each diff shows its own how.
 
 Committing is continuous (as you go, at coherent boundaries). When the build is verified and committed, the **fleet-pr** skill governs what 'done' means and opens the PR — follow it; do not declare the card done here. If no fleet-pr/land phase is active, leave the verified committed branch and stop.
+
+## Retro — end every card with one
+
+Not status: the diff already says what changed. It closes the two loops nobody else can — how cards
+get written, and what the codebase makes needlessly hard. Write it from what you hit; **don't explore
+to produce it.** Put it under `## Retro` in the PR body (or your final message if no PR phase).
+
+- **Summary** — 2-3 sentences: what shipped, plus the judgement call a reviewer should check.
+- **What fought back** — what cost you time, roughly how much: a wrong card premise, a failure
+  unrelated to your change, a path or on-disk state found by trial, a gate that lied. Name the file,
+  symbol, or command.
+- **Process** — what the card should have told you and didn't (priming, prior art, acceptance), or
+  where the prompt was wrong.
+- **Design** — what made this change harder than it should be, and the change that makes the next one
+  easy: duplicated logic, state with no single owner, a seam you had to work around. Root cause, not
+  the patch you shipped.
+
+Same bar as the code, because as ceremony this is worthless:
+
+- **Concrete or omitted** — name a file, symbol, command, or measurement. "Tests were flaky" is
+  noise; "`card lifecycle` failed ~50% on unchanged code, ~20 min to rule out as mine" is a finding.
+- **"Nothing to report" beats padding.** An empty heading is information; invented content trains the
+  reader to skip the section, and then the loop is dead.
+- **Under ~15 lines.** A finding bigger than that is a card — say so in one line.

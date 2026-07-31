@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, production-line]
+    branches: [main, production-line, "epic/**"]
   pull_request:
-    branches: [main, production-line]
+    branches: [main, production-line, "epic/**"]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

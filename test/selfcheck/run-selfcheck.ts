@@ -3,15 +3,17 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import {
-	attachContext,
-	createSelfcheckContext,
-	createTrpcScenarioDriver,
-	givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly,
-	givenLifecycleCardWhenCompletedThenLinkedCardStarts,
-	givenReviewHookWhenIngestedThenOverseerIsNotified,
-	givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts,
-} from "./scenario-api";
+import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
+import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
+import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
+import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
+import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
+import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
+import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
+import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
+import { givenRunningCardWhenSteeredThenAgentReceivesSubmittedText } from "./scenarios/givenRunningCardWhenSteeredThenAgentReceivesSubmittedText";
+import { givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts } from "./scenarios/givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts";
 
 interface ScenarioResult {
 	name: string;
@@ -44,14 +46,19 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
-	await runScenario(
-		results,
-		"steer a Review card -> moves to In Progress",
-		async () => {
-			await runBrowserScenario("review-steering");
-		},
-		{ knownFailureIssue: "#180" },
-	);
+	await runScenario(results, "restart a card whose agent is gone", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithGoneAgentWhenStartedThenNewAgentRuns(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "steer a Review card -> moves to In Progress", async () => {
+		await runBrowserScenario("review-steering");
+	});
 	await runScenario(results, "review ping reaches the overseer session", async () => {
 		const context = await createSelfcheckContext();
 		try {
@@ -62,8 +69,51 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
+	await runScenario(results, "an archived card keeps its session pointer", async () => {
+		await givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer();
+	});
+	await runScenario(results, "a card keeps the session id its agent minted, with no browser open", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
+	});
+	await runScenario(results, "a gemini notification parks the card, a steer wakes it", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "a card's model override reaches the CLI", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithModelOverrideWhenStartedThenCliReceivesModel(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "steering a card delivers the text and submits it", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "CLI contract: help and usage exits", async () => {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();
