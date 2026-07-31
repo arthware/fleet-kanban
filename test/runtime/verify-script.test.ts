@@ -19,6 +19,17 @@ interface Workflow {
 	};
 }
 
+interface CiWorkflow {
+	on?: {
+		push?: {
+			branches?: string[];
+		};
+		pull_request?: {
+			branches?: string[];
+		};
+	};
+}
+
 function expandScript(scriptName: string, scripts: Record<string, string>, visited = new Set<string>()): string {
 	if (visited.has(scriptName)) {
 		throw new Error(`Circular dependency detected in scripts: ${[...visited, scriptName].join(" -> ")}`);
@@ -96,6 +107,13 @@ function assertScriptIsSafe(expandedScript: string) {
 	}
 }
 
+function assertCiTriggersOnEpics(parsedCi: CiWorkflow) {
+	const prBranches = parsedCi?.on?.pull_request?.branches;
+	if (!prBranches || !prBranches.includes("epic/**")) {
+		throw new Error("CI workflow pull_request trigger must cover epic/** branches");
+	}
+}
+
 describe("CI Workflow vs Verify Script Alignment", () => {
 	it("givenCiWorkflowWhenComparedToVerifyScriptThenTheyRunTheSameChecks", () => {
 		// 1. Read and parse .github/workflows/test.yml
@@ -133,6 +151,14 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 
 		// Assert transitively expanded verify script is safe
 		assertScriptIsSafe(expandedVerifyScript);
+
+		// 3. Read and parse .github/workflows/ci.yml
+		const ciPath = path.resolve(__dirname, "../../.github/workflows/ci.yml");
+		const ciContent = fs.readFileSync(ciPath, "utf8");
+		const parsedCi = load(ciContent) as CiWorkflow;
+
+		// Assert CI workflow handles epic branch PRs
+		assertCiTriggersOnEpics(parsedCi);
 	});
 });
 
@@ -188,5 +214,18 @@ describe("verify transitive rules assertions", () => {
 		};
 		const expanded = expandScript("verify", mockScripts);
 		expect(() => assertScriptIsSafe(expanded)).not.toThrow();
+	});
+
+	it("givenCiWorkflowMissingEpicBranchesWhenCheckedThenItThrows", () => {
+		const mockCi: CiWorkflow = {
+			on: {
+				pull_request: {
+					branches: ["main", "production-line"],
+				},
+			},
+		};
+		expect(() => assertCiTriggersOnEpics(mockCi)).toThrow(
+			"CI workflow pull_request trigger must cover epic/** branches",
+		);
 	});
 });
