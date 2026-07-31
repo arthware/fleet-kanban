@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { load } from "js-yaml";
@@ -227,5 +228,40 @@ describe("verify transitive rules assertions", () => {
 		expect(() => assertCiTriggersOnEpics(mockCi)).toThrow(
 			"CI workflow pull_request trigger must cover epic/** branches",
 		);
+	});
+});
+
+describe("package.json prepare and hooksPath verification", () => {
+	it("asserts package.json's prepare script sets core.hooksPath to a git-tracked directory", () => {
+		const packageJsonPath = path.resolve(process.cwd(), "package.json");
+		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+		const prepareScript = packageJson.scripts?.prepare;
+
+		expect(prepareScript).toBeDefined();
+		expect(prepareScript).toContain("git config core.hooksPath");
+
+		// Extract the hooks path from the prepare script
+		// Match git config core.hooksPath followed by whitespace and a path
+		const match = prepareScript.match(/git config core\.hooksPath\s+(\S+)/);
+		expect(match).not.toBeNull();
+		if (!match) return;
+		const hooksPath = match[1];
+
+		// Assert that the hooks path contains git-tracked files
+		const lsFilesOutput = execSync(`git ls-files ${hooksPath}`, { encoding: "utf8" }).trim();
+		expect(lsFilesOutput).not.toBe("");
+
+		// Verify that the hooks directory itself is not ignored by git
+		let checkIgnoreOutput = "";
+		try {
+			checkIgnoreOutput = execSync(`git check-ignore ${hooksPath}`, {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim();
+		} catch {
+			// git check-ignore exits with 1 if the path is not ignored, which throws an error.
+			// This is the expected and successful path!
+		}
+		expect(checkIgnoreOutput).toBe("");
 	});
 });
