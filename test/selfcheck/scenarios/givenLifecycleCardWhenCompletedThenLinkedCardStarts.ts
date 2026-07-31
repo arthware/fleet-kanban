@@ -6,16 +6,7 @@ import {
 	seedIsolatedBoardState,
 } from "../../utilities/board-seed";
 import { requestJson } from "../../utilities/trpc-request";
-import {
-	assertOk,
-	completeTask,
-	driverContext,
-	loadState,
-	moveCard,
-	mutateBoard,
-	type ScenarioDriver,
-	waitFor,
-} from "../scenario-api";
+import { assertOk, completeTask, driverContext, moveCard, mutateBoard, type ScenarioDriver } from "../scenario-api";
 
 export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver: ScenarioDriver): Promise<void> {
 	const context = driverContext(driver);
@@ -31,11 +22,7 @@ export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver
 
 	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "backlog");
 	await driver.startCard(STUB_LIFECYCLE_TASK_ID);
-	await waitFor(async () => {
-		const state = await loadState(context);
-		const summary = state.sessions[STUB_LIFECYCLE_TASK_ID];
-		return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
-	}, "stub card to reach review");
+	await driver.expectAgentFinishedCleanly(STUB_LIFECYCLE_TASK_ID);
 	await mutateBoard(context, (board) => moveCard(board, STUB_LIFECYCLE_TASK_ID, "review"));
 	await driver.expectColumn(STUB_LIFECYCLE_TASK_ID, "review");
 	await mutateBoard(context, (board) => completeTask(board, STUB_LIFECYCLE_TASK_ID).board);
@@ -43,12 +30,18 @@ export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver
 	await mutateBoard(context, (board) =>
 		moveCard(moveCard(board, LINKED_PARENT_TASK_ID, "in_progress"), LINKED_PARENT_TASK_ID, "review"),
 	);
-	const completed = completeTask((await loadState(context)).board, LINKED_PARENT_TASK_ID);
-	assertOk(
-		completed.readyTaskIds.includes(LINKED_CHILD_TASK_ID),
-		"Completing the linked parent did not unblock child.",
-	);
-	await mutateBoard(context, () => completed.board);
+	// Complete from the board `mutateBoard` is about to write against, not from a board
+	// read earlier: a completion computed against a stale read would overwrite whatever
+	// landed in between, and on a revision-conflict retry it would replay that same
+	// stale board.
+	let readyTaskIds: readonly string[] = [];
+	await mutateBoard(context, (board) => {
+		const completedParent = completeTask(board, LINKED_PARENT_TASK_ID);
+		readyTaskIds = completedParent.readyTaskIds;
+		return completedParent.board;
+	});
+	assertOk(readyTaskIds.includes(LINKED_CHILD_TASK_ID), "Completing the linked parent did not unblock child.");
 	await driver.startCard(LINKED_CHILD_TASK_ID);
-	await driver.expectColumn(LINKED_CHILD_TASK_ID, "in_progress");
+	await driver.expectEnteredColumn(LINKED_CHILD_TASK_ID, "in_progress");
+	await driver.expectAgentFinishedCleanly(LINKED_CHILD_TASK_ID);
 }
