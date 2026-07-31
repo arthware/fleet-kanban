@@ -165,7 +165,12 @@ export function resolveBinaryExecutable(binary: string): string | null {
 	return null;
 }
 
-function isUnauthenticated(runResult: { error?: any; status: number | null; stdout?: any; stderr?: any }): boolean {
+function isUnauthenticated(runResult: {
+	error?: Error | unknown;
+	status: number | null;
+	stdout?: Buffer | string | null;
+	stderr?: Buffer | string | null;
+}): boolean {
 	if (runResult.error) {
 		return false;
 	}
@@ -303,11 +308,12 @@ export function describeLiveDriverTck(driver: AgentDriver, options: LiveTckOptio
 				}
 
 				summary[driver.id] = { executed: true, skipped: false, reason: "" };
-			} catch (error: any) {
+			} catch (error) {
 				if (summary[driver.id].skipped) {
 					throw error;
 				}
-				summary[driver.id] = { executed: false, skipped: false, reason: `failed: ${error.message}` };
+				const msg = error instanceof Error ? error.message : String(error);
+				summary[driver.id] = { executed: false, skipped: false, reason: `failed: ${msg}` };
 				throw error;
 			}
 		});

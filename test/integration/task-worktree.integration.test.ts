@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { isAbsolute, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-
+import { CLAUDE_SKILLS_RELATIVE_PATH } from "../../src/agents/claude/paths";
 import { deriveTaskBranchName } from "../../src/core/task-ref";
 import {
 	deleteTaskWorktree,
@@ -549,7 +549,7 @@ describe.sequential("task-worktree integration", () => {
 		});
 	});
 
-	it("given a claude card, when setup runs, then skills mount at .claude/skills and are excluded once", async () => {
+	it("given a claude card, when setup runs, then skills mount at the Claude skills relative path and are excluded once", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-claude-skills-");
 			try {
@@ -575,15 +575,17 @@ describe.sequential("task-worktree integration", () => {
 				}
 
 				// The claude harness reads .claude/skills — the location that fails on main.
-				expect(lstatSync(join(ensured.path, ".claude", "skills")).isSymbolicLink()).toBe(true);
-				expect(existsSync(join(ensured.path, ".claude", "skills", "fleet-implement", "SKILL.md"))).toBe(true);
-				expect(existsSync(join(ensured.path, ".claude", "skills", "fleet-pr", "SKILL.md"))).toBe(true);
+				expect(lstatSync(join(ensured.path, CLAUDE_SKILLS_RELATIVE_PATH)).isSymbolicLink()).toBe(true);
+				expect(existsSync(join(ensured.path, CLAUDE_SKILLS_RELATIVE_PATH, "fleet-implement", "SKILL.md"))).toBe(
+					true,
+				);
+				expect(existsSync(join(ensured.path, CLAUDE_SKILLS_RELATIVE_PATH, "fleet-pr", "SKILL.md"))).toBe(true);
 				// The codex/default mount is not created for a claude card.
 				expect(existsSync(join(ensured.path, ".agents", "skills"))).toBe(false);
 
-				expect(readGitPath(ensured.path, "info/exclude")).toContain("/.claude/skills\n");
-				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".claude/skills"])).toBe("");
-				expect(runGit(ensured.path, ["check-ignore", "-v", ".claude/skills"])).toContain("info/exclude");
+				expect(readGitPath(ensured.path, "info/exclude")).toContain(`/${CLAUDE_SKILLS_RELATIVE_PATH}\n`);
+				expect(runGit(ensured.path, ["status", "--porcelain", "--", CLAUDE_SKILLS_RELATIVE_PATH])).toBe("");
+				expect(runGit(ensured.path, ["check-ignore", "-v", CLAUDE_SKILLS_RELATIVE_PATH])).toContain("info/exclude");
 
 				const ensuredAgain = await ensureTaskWorktreeIfDoesntExist({
 					cwd: repoPath,
@@ -594,7 +596,7 @@ describe.sequential("task-worktree integration", () => {
 				expect(ensuredAgain.ok).toBe(true);
 				const claudeExcludeLines = readGitPath(ensured.path, "info/exclude")
 					.split("\n")
-					.filter((line) => line === "/.claude/skills");
+					.filter((line) => line === `/${CLAUDE_SKILLS_RELATIVE_PATH}`);
 				expect(claudeExcludeLines).toHaveLength(1);
 			} finally {
 				cleanup();
@@ -628,7 +630,7 @@ describe.sequential("task-worktree integration", () => {
 				}
 
 				expect(lstatSync(join(ensured.path, ".agents", "skills")).isSymbolicLink()).toBe(true);
-				expect(existsSync(join(ensured.path, ".claude", "skills"))).toBe(false);
+				expect(existsSync(join(ensured.path, CLAUDE_SKILLS_RELATIVE_PATH))).toBe(false);
 				expect(readGitPath(ensured.path, "info/exclude")).toContain("/.agents/skills\n");
 				expect(runGit(ensured.path, ["status", "--porcelain", "--", ".agents/skills"])).toBe("");
 			} finally {

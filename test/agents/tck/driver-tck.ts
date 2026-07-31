@@ -1,10 +1,16 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { AgentDriver, DriverSessionRef } from "../../../src/agents/driver";
 import type { AgentFact, SessionSignal } from "../../../src/agents/session-signal";
+import {
+	getClaudeMockTranscriptPath,
+	getCodexMockTranscriptPath,
+	getGeminiMockTranscriptPath,
+	getGeminiRoot,
+} from "../../fixtures/agent-paths";
 
 export interface DriverSignalFixture {
 	readonly name: string;
@@ -70,17 +76,27 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 
 					// Seed a fixture home in each driver's real layout
 					if (driver.id === "claude") {
-						const projectDir = join(tempHome, ".claude", "projects", "default");
-						mkdirSync(projectDir, { recursive: true });
-						writeFileSync(join(projectDir, `${sessionId}.jsonl`), "{}");
+						const filePath = getClaudeMockTranscriptPath(tempHome, sessionId, "default");
+						mkdirSync(dirname(filePath), { recursive: true });
+						writeFileSync(filePath, "{}");
 					} else if (driver.id === "codex") {
-						const sessionsRoot = join(tempHome, ".codex", "sessions", "2026", "07", "31");
-						mkdirSync(sessionsRoot, { recursive: true });
-						writeFileSync(join(sessionsRoot, `rollout-2026-07-31T12-00-00-${sessionId}.jsonl`), "{}");
+						const filePath = getCodexMockTranscriptPath(
+							tempHome,
+							sessionId,
+							"2026/07/31",
+							`rollout-2026-07-31T12-00-00-${sessionId}.jsonl`,
+						);
+						mkdirSync(dirname(filePath), { recursive: true });
+						writeFileSync(filePath, "{}");
 					} else if (driver.id === "gemini") {
-						const chatsDir = join(tempHome, ".gemini", "tmp", "default", "chats");
-						mkdirSync(chatsDir, { recursive: true });
-						writeFileSync(join(chatsDir, `session-12345678-${sessionId}.jsonl`), "{}");
+						const filePath = getGeminiMockTranscriptPath(
+							tempHome,
+							sessionId,
+							"default",
+							`session-12345678-${sessionId}.jsonl`,
+						);
+						mkdirSync(dirname(filePath), { recursive: true });
+						writeFileSync(filePath, "{}");
 					}
 
 					const foundPath = await driver.observe.artifactPath({ sessionId, homePath: tempHome });
@@ -117,9 +133,13 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 						expect(discovered).toBeNull();
 					} else if (driver.id === "codex") {
 						// Codex records the realDir, but we query with symlinkDir
-						const sessionsRoot = join(tempHome, ".codex", "sessions", "2026", "07", "31");
-						mkdirSync(sessionsRoot, { recursive: true });
-						const rolloutFile = join(sessionsRoot, `rollout-2026-07-31T12-00-00-${sessionId}.jsonl`);
+						const rolloutFile = getCodexMockTranscriptPath(
+							tempHome,
+							sessionId,
+							"2026/07/31",
+							`rollout-2026-07-31T12-00-00-${sessionId}.jsonl`,
+						);
+						mkdirSync(dirname(rolloutFile), { recursive: true });
 						writeFileSync(rolloutFile, `${JSON.stringify({ type: "session_meta", cwd: realDir })}\n`, "utf8");
 
 						const discovered = await driver.observe.discoverSession({
@@ -130,7 +150,7 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 						expect(discovered).toBe(sessionId);
 					} else if (driver.id === "gemini") {
 						// Gemini records the realDir in projects.json (or .project_root), but we query with symlinkDir
-						const geminiRoot = join(tempHome, ".gemini");
+						const geminiRoot = getGeminiRoot(tempHome);
 						const tmpRoot = join(geminiRoot, "tmp");
 						const slug = "workspace-slug";
 						const chatsDir = join(tmpRoot, slug, "chats");

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it, vi } from "vitest";
 
+import { CLAUDE_SKILLS_RELATIVE_PATH } from "../../src/agents/claude/paths";
 import {
 	ensureWorktreeSkillsDirectory,
 	mirrorIgnoredPath,
@@ -233,7 +234,7 @@ describe("worktree skills directory placement", () => {
 		}
 	});
 
-	it("given a claude agent, when skills are placed at .claude/skills, then bundled skill links are created there", async () => {
+	it("given a claude agent, when skills are placed at the Claude skills relative path, then bundled skill links are created there", async () => {
 		const { root, cleanup } = await createSandbox();
 		try {
 			const canonicalSkillsDir = join(root, "board", ".agents", "skills");
@@ -250,7 +251,7 @@ describe("worktree skills directory placement", () => {
 			});
 
 			expect(result).toBe("linked");
-			expect(realpathSync(join(worktreePath, ".claude", "skills", "fleet-smoke"))).toBe(
+			expect(realpathSync(join(worktreePath, CLAUDE_SKILLS_RELATIVE_PATH, "fleet-smoke"))).toBe(
 				realpathSync(canonicalSkillDir),
 			);
 			// The codex/default location is NOT created for a claude card.
@@ -262,8 +263,8 @@ describe("worktree skills directory placement", () => {
 });
 
 describe("resolveWorktreeSkillsRelativePath", () => {
-	it("maps the claude agent to .claude/skills", () => {
-		expect(resolveWorktreeSkillsRelativePath("claude")).toBe(".claude/skills");
+	it("maps the claude agent to the Claude skills relative path", () => {
+		expect(resolveWorktreeSkillsRelativePath("claude")).toBe(CLAUDE_SKILLS_RELATIVE_PATH);
 	});
 
 	it("keeps codex and other agents on .agents/skills", () => {

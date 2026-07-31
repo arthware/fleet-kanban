@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,23 +14,31 @@ vi.mock("@/resize/layout-customizations", () => ({
 
 vi.mock("@radix-ui/react-dropdown-menu", () => {
 	return {
-		Root: ({ children }: any) => {
+		Root: ({ children }: { children?: React.ReactNode }) => {
 			return <div className="mock-dropdown-root">{children}</div>;
 		},
-		Trigger: ({ children }: any) => {
+		Trigger: ({ children }: { children?: React.ReactNode }) => {
 			return children;
 		},
-		Portal: ({ children }: any) => {
+		Portal: ({ children }: { children?: React.ReactNode }) => {
 			return <>{children}</>;
 		},
-		Content: ({ children, className }: any) => {
+		Content: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
 			return (
 				<div className={className} role="menu">
 					{children}
 				</div>
 			);
 		},
-		Item: ({ children, className, onSelect }: any) => {
+		Item: ({
+			children,
+			className,
+			onSelect,
+		}: {
+			children?: React.ReactNode;
+			className?: string;
+			onSelect?: () => void;
+		}) => {
 			return (
 				<button
 					type="button"

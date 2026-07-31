@@ -1,15 +1,21 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createCodexDriver } from "../../../src/agents/codex/driver";
+import { getCodexMockTranscriptPath } from "../../fixtures/agent-paths";
 import { describeDriverTck } from "../tck/driver-tck";
 
 const homePath = mkdtempSync(join(tmpdir(), "codex-tck-"));
 const sessionId = "codex-session-1";
-const sessionDir = join(homePath, ".codex", "sessions", "2026", "07");
-mkdirSync(sessionDir, { recursive: true });
+const expectedPath = getCodexMockTranscriptPath(
+	homePath,
+	sessionId,
+	"2026/07/29",
+	`rollout-2026-07-29T10-00-00-${sessionId}.jsonl`,
+);
+mkdirSync(dirname(expectedPath), { recursive: true });
 writeFileSync(
-	join(sessionDir, `rollout-2026-07-29T10-00-00-${sessionId}.jsonl`),
+	expectedPath,
 	JSON.stringify({
 		type: "response_item",
 		timestamp: "2026-07-29T10:00:00.000Z",

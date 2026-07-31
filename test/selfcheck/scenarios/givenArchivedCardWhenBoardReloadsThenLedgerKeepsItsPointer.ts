@@ -86,7 +86,7 @@ export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer
 		await stream.close();
 
 		// Stop the card and overseer sessions explicitly so no child processes are left running
-		const stopCard = await requestJson<any>({
+		const stopCard = await requestJson<unknown>({
 			baseUrl: context.baseUrl,
 			procedure: "runtime.stopTaskSession",
 			type: "mutation",
@@ -95,7 +95,7 @@ export async function givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer
 		});
 		assertOk(stopCard.status === 200, "Could not stop card task session.");
 
-		const stopOverseer = await requestJson<any>({
+		const stopOverseer = await requestJson<unknown>({
 			baseUrl: context.baseUrl,
 			procedure: "runtime.stopTaskSession",
 			type: "mutation",

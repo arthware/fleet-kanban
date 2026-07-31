@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeTaskSessionSummary, RuntimeWorkspaceChangesResponse } from "../../../src/core/api-contract";
+import type {
+	RuntimeTaskSessionSummary,
+	RuntimeWorkspaceChangesResponse,
+	RuntimeWorkspaceStateResponse,
+} from "../../../src/core/api-contract";
 
 const workspaceTaskWorktreeMocks = vi.hoisted(() => ({
 	resolveTaskCwd: vi.fn(),
@@ -462,7 +466,7 @@ describe("createWorkspaceApi ensureWorktree", () => {
 						],
 					},
 					sessions: {},
-				} as any;
+				} as unknown as RuntimeWorkspaceStateResponse;
 			}),
 		});
 

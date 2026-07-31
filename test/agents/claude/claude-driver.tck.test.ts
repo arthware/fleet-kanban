@@ -1,15 +1,16 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createClaudeDriver } from "../../../src/agents/claude/driver";
+import { getClaudeMockTranscriptPath } from "../../fixtures/agent-paths";
 import { describeDriverTck } from "../tck/driver-tck";
 
 const homePath = mkdtempSync(join(tmpdir(), "claude-tck-"));
 const sessionId = "claude-session-1";
-const projectDir = join(homePath, ".claude", "projects", "some-proj");
-mkdirSync(projectDir, { recursive: true });
+const expectedPath = getClaudeMockTranscriptPath(homePath, sessionId, "some-proj");
+mkdirSync(dirname(expectedPath), { recursive: true });
 writeFileSync(
-	join(projectDir, `${sessionId}.jsonl`),
+	expectedPath,
 	JSON.stringify({
 		type: "user",
 		timestamp: "2026-07-29T10:00:00.000Z",

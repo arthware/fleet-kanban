@@ -7,12 +7,7 @@ import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
-import {
-	buildHookCommand,
-	buildHooksCommand,
-	getHookAgentDirectory,
-	toBracketedPaste,
-} from "../../terminal/agent-session-adapters";
+import { getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import {
 	isClaudeCloudProviderBackend,
 	resolveClaudePermissionStrategy,
@@ -22,7 +17,6 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
-	DiscoverSessionInput,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,

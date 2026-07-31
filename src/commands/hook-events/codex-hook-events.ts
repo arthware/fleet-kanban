@@ -1,8 +1,5 @@
-import type { Dirent, Stats } from "node:fs";
-import { realpathSync } from "node:fs";
-import { open, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import type { Stats } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import {
 	encodedCwdCandidates,
 	findCodexRolloutFileForCwd,
@@ -15,7 +12,7 @@ import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../../core/api-c
 const CODEX_LOG_POLL_INTERVAL_MS = 200;
 const CODEX_ROLLOUT_POLL_INTERVAL_MS = 1000;
 const MAX_CODEX_ROLLOUT_FILES_TO_SCAN = 250;
-const CODEX_ROLLOUT_FILE_FRESH_WINDOW_MS = 10 * 60 * 1000;
+const _CODEX_ROLLOUT_FILE_FRESH_WINDOW_MS = 10 * 60 * 1000;
 const CODEX_ROLLOUT_MATCH_SCAN_BYTES = 256 * 1024;
 const CODEX_ROLLOUT_TAIL_SCAN_BYTES = 2 * 1024 * 1024;
 const CODEX_ROLLOUT_INITIAL_BACKLOG_BYTES = 256 * 1024;

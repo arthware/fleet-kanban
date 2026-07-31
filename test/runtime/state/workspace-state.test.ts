@@ -563,7 +563,7 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 
 		// 1. Load a persisted state with 200 records and 4 cards -> 4 (+ this workspace's overseer) survive
 		// 2. Load a state containing another workspace's card record -> dropped
-		const sessions: Record<string, any> = {
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
 			[canonicalHomeAgentId]: createSession(canonicalHomeAgentId, { agentSessionId: "home-session" }),
 			[foreignHomeAgentId]: createSession(foreignHomeAgentId, { agentSessionId: "other-home-session" }),
 			"card-1": createSession("card-1", { agentSessionId: "session-1" }),
@@ -622,7 +622,7 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 
 		// Write sessions.json with:
 		// - running-card as running (process is dead, so it should flip to interrupted)
-		const sessions: Record<string, any> = {
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
 			"running-card": createSession("running-card", {
 				state: "running",
 				pid: 99999,
@@ -690,7 +690,7 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 
 		const hugeString = "A".repeat(50000); // 50 KB
 
-		const sessions: Record<string, any> = {
+		const sessions: Record<string, RuntimeTaskSessionSummary> = {
 			"active-card": createSession("active-card", {
 				agentSessionId: "active-session-id",
 				latestHookActivity: {
@@ -709,15 +709,18 @@ describe("workspace sessions scoping, pruning, and liveness reconciliation", () 
 		await migrateAllWorkspaceAgentSessions();
 
 		const migrated = await readSessionsJson(context.workspaceId);
-		const activity = (migrated["active-card"] as any).latestHookActivity;
+		const activity = (migrated["active-card"] as RuntimeTaskSessionSummary)?.latestHookActivity;
 
 		expect(activity).toBeDefined();
-		expect(activity.activityText.length).toBeLessThan(1100);
-		expect(activity.activityText).toContain("...");
-		expect(activity.toolInputSummary.length).toBeLessThan(1100);
-		expect(activity.toolInputSummary).toContain("...");
-		expect(activity.finalMessage.length).toBeLessThan(1100);
-		expect(activity.finalMessage).toContain("...");
+		expect(activity).not.toBeNull();
+		if (activity) {
+			expect(activity.activityText?.length).toBeLessThan(1100);
+			expect(activity.activityText).toContain("...");
+			expect(activity.toolInputSummary?.length).toBeLessThan(1100);
+			expect(activity.toolInputSummary).toContain("...");
+			expect(activity.finalMessage?.length).toBeLessThan(1100);
+			expect(activity.finalMessage).toContain("...");
+		}
 
 		// Size assertion: serialized JSON of the session is way below the original oversized 150+ KB
 		const serializedSize = JSON.stringify(migrated).length;
@@ -755,13 +758,17 @@ describe("mutateWorkspaceStateById", () => {
 
 		const board1 = (await readJson(
 			join(tempRoot, "home", "kanban", "workspaces", context1.workspaceId, "board.json"),
-		)) as any;
+		)) as RuntimeBoardData;
 		const board2 = (await readJson(
 			join(tempRoot, "home", "kanban", "workspaces", context2.workspaceId, "board.json"),
-		)) as any;
+		)) as RuntimeBoardData;
 
-		const backlogCards1 = board1.columns.find((col: any) => col.id === "backlog").cards.map((c: any) => c.id);
-		const backlogCards2 = board2.columns.find((col: any) => col.id === "backlog").cards.map((c: any) => c.id);
+		const backlogCol1 = board1.columns.find((col) => col.id === "backlog");
+		const backlogCol2 = board2.columns.find((col) => col.id === "backlog");
+		expect(backlogCol1).toBeDefined();
+		expect(backlogCol2).toBeDefined();
+		const backlogCards1 = backlogCol1?.cards.map((c) => c.id);
+		const backlogCards2 = backlogCol2?.cards.map((c) => c.id);
 
 		expect(backlogCards1).toEqual(["task-1", "task-new"]);
 		expect(backlogCards2).toEqual(["task-2"]);

@@ -29,8 +29,8 @@ import type { CardPrRef } from "../../../src/workspace/card-pr-url";
 
 const mockMutateWorkspaceState = vi.fn();
 vi.mock("../../../src/state/workspace-state", () => ({
-	mutateWorkspaceState: (...args: any[]) => mockMutateWorkspaceState(...args),
-	mutateWorkspaceStateById: (...args: any[]) => mockMutateWorkspaceState(...args),
+	mutateWorkspaceState: (...args: unknown[]) => mockMutateWorkspaceState(...args),
+	mutateWorkspaceStateById: (...args: unknown[]) => mockMutateWorkspaceState(...args),
 }));
 
 const monitorMockState = vi.hoisted(() => ({
@@ -345,7 +345,7 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a card in in_progress transitioning to awaiting_review, when projected, then it moves to review and broadcasts update", async () => {
 		const board = boardWithCard("in_progress");
-		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
@@ -368,7 +368,7 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a card in review transitioning to running, when projected, then it moves to in_progress and broadcasts update", async () => {
 		const board = boardWithCard("review");
-		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
@@ -391,7 +391,7 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {
 		const board = boardWithCard("review");
-		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
@@ -431,7 +431,7 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a summary with workspacePath of a worktree, when projected, then it mutates the actual workspace repo path and NOT the worktree path", async () => {
 		const board = boardWithCard("in_progress");
-		mockMutateWorkspaceState.mockImplementation(async (id, mutate) => {
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});

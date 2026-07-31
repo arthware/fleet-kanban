@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedIsolatedBoardState } from "../utilities/board-seed";
 import { createGitTestEnv } from "../utilities/git-env";
-import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
+import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
 import { createTempDir } from "../utilities/temp-dir";
 import { requestJson } from "../utilities/trpc-request";
 
@@ -99,7 +99,7 @@ function assertPostCreateCommandRan(worktreePath: string): void {
 }
 
 describe.sequential("worktree shapes integration suite", () => {
-	let instance: any;
+	let instance: IsolatedKanbanInstance;
 	let runtimeBaseUrl: string;
 	let sandbox: { path: string; cleanup: () => void };
 	let repoPath: string;
@@ -338,7 +338,10 @@ describe.sequential("worktree shapes integration suite", () => {
 
 		const epicWs = projectsRes.payload.projects.find((p) => p.epic && p.epic.name === "cool-epic");
 		expect(epicWs).toBeDefined();
-		const epicWorkspaceId = epicWs!.id;
+		if (!epicWs) {
+			throw new Error("Epic workspace not found");
+		}
+		const epicWorkspaceId = epicWs.id;
 
 		// 2. Seed a card on the epic workspace board
 		seedIsolatedBoardState({
