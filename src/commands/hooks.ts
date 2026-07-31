@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTRPCProxyClient, httpBatchLink, TRPCClientError } from "@trpc/client";
 import type { Command } from "commander";
+import { isClaudeTranscriptPath } from "../agents/claude/paths";
 import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../core/api-contract";
 import { buildKanbanCommandParts } from "../core/kanban-command";
 import { buildKanbanRuntimeUrl, getRuntimeFetch } from "../core/runtime-endpoint";
@@ -270,8 +271,7 @@ export function inferHookSourceFromPayload(payload: Record<string, unknown> | nu
 	const transcriptPath = payload
 		? (readStringField(payload, "transcript_path") ?? readStringField(payload, "transcriptPath"))
 		: null;
-	const normalizedTranscriptPath = transcriptPath?.replaceAll("\\", "/").toLowerCase() ?? null;
-	if (normalizedTranscriptPath?.includes("/.claude/")) {
+	if (transcriptPath && isClaudeTranscriptPath(transcriptPath)) {
 		return "claude";
 	}
 	if (payload && readStringField(payload, "type") === "agent-turn-complete") {

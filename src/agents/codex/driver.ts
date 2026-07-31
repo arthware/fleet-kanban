@@ -1,7 +1,8 @@
-import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import type { Dirent, Stats } from "node:fs";
+import { realpathSync } from "node:fs";
+import { open, readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
-
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
@@ -11,6 +12,7 @@ import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
 import type {
 	AgentDriver,
 	AgentObservationMessage,
+	DiscoverSessionInput,
 	LaunchIdentityPlan,
 	LaunchPlan,
 	ObservationRequest,
@@ -20,6 +22,7 @@ import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption } from "../shared/launch";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
+import { findCodexRolloutFileForCwd, getCodexSessionsRoot } from "./paths";
 
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 	return {
@@ -193,6 +196,17 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
 				return loc.present ? loc.path : null;
+			},
+			discoverSession: async (input) => {
+				const sessionsRoot = getCodexSessionsRoot(input.homePath);
+				const rolloutPath = await findCodexRolloutFileForCwd(input.cwd, input.startedAtMs, sessionsRoot);
+				if (!rolloutPath) {
+					return null;
+				}
+				const match = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/.exec(
+					rolloutPath,
+				);
+				return match ? match[1] : null;
 			},
 		},
 		signals: {
@@ -584,3 +598,5 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 	const value = record[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
+
+export { getCodexSessionsRoot } from "./paths";

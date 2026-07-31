@@ -26,14 +26,7 @@ vi.mock("../../../src/terminal/agent-transcript-locator.js", () => ({
 	locateAgentTranscript: locateAgentTranscriptMock,
 }));
 
-vi.mock("../../../src/terminal/codex-session-capture.js", () => ({
-	captureCodexSessionId: captureCodexSessionIdMock,
-}));
-
-vi.mock("../../../src/terminal/gemini-session-capture.js", () => ({
-	captureGeminiSessionId: captureGeminiSessionIdMock,
-}));
-
+import { DRIVERS } from "../../../src/agents/driver";
 import { createHomeAgentSessionId } from "../../../src/core/home-agent-session";
 import { deriveHomeAgentClaudeSessionId } from "../../../src/terminal/home-agent-session-id";
 import { TerminalSessionManager } from "../../../src/terminal/session-manager";
@@ -67,6 +60,8 @@ beforeEach(async () => {
 	locateAgentTranscriptMock.mockResolvedValue({ present: false });
 	captureCodexSessionIdMock.mockResolvedValue(null);
 	captureGeminiSessionIdMock.mockResolvedValue(null);
+	vi.spyOn(DRIVERS.codex.observe, "discoverSession").mockImplementation(captureCodexSessionIdMock);
+	vi.spyOn(DRIVERS.gemini.observe, "discoverSession").mockImplementation(captureGeminiSessionIdMock);
 	prepareAgentLaunchMock.mockImplementation(async (input: { args: string[]; binary?: string }) => ({
 		binary: input.binary,
 		args: [...input.args],

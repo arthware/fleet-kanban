@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { DRIVERS, type DriverSessionRef } from "../agents/driver";
 import type {
+	RuntimeAgentId,
 	RuntimeAgentSessionLifecycle,
 	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
@@ -26,9 +27,7 @@ import {
 	stopWorkspaceTrustTimers,
 	WORKSPACE_TRUST_CONFIRM_DELAY_MS,
 } from "./claude-workspace-trust";
-import { captureCodexSessionId } from "./codex-session-capture";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust";
-import { captureGeminiSessionId } from "./gemini-session-capture";
 import { deriveHomeAgentClaudeSessionId } from "./home-agent-session-id";
 import { stripAnsi } from "./output-utils";
 import { PtySession } from "./pty-session";
@@ -375,7 +374,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			throw new Error(`Failed to resolve launch identity: ${identityResult.reason}`);
 		}
 
-		const { agentSessionId: launchSessionId, resumeSession } = identityResult.value;
+		const { agentSessionId: launchSessionId, resumeSession, discoverAfterSpawn } = identityResult.value;
 
 		// Persist the resolved session id so the board/UI and lifecycle see a
 		// resumable session instead of an uncaptured (null) one.
@@ -654,22 +653,21 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 		this.emitSummary(entry.summary);
 
-		// Codex assigns its own session id, written to a rollout file once it
-		// boots. Discover it in the background so a later start can resume by id.
-		if (request.agentId === "codex" && !launchSessionId) {
-			this.captureCodexSessionIdInBackground(request.taskId, request.cwd, startedAt);
-		}
-
-		// Gemini assigns its own session id, written to a transcript file once it
-		// boots. Discover it in the background so a later start can resume by id.
-		if (request.agentId === "gemini" && !launchSessionId) {
-			this.captureGeminiSessionIdInBackground(request.taskId, request.cwd, startedAt);
+		// If the driver requests background session discovery (e.g. Codex/Gemini assigning its own session id on boot),
+		// discover it in the background so a later start can resume by id.
+		if (discoverAfterSpawn && !launchSessionId) {
+			this.captureSessionIdInBackground(request.taskId, request.agentId, request.cwd, startedAt);
 		}
 
 		return cloneSummary(entry.summary);
 	}
 
-	private captureGeminiSessionIdInBackground(taskId: string, cwd: string, startedAtMs: number): void {
+	private captureSessionIdInBackground(
+		taskId: string,
+		agentId: RuntimeAgentId,
+		cwd: string,
+		startedAtMs: number,
+	): void {
 		const maxAttempts = 20;
 		const intervalMs = 500;
 		let attempts = 0;
@@ -681,45 +679,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 			if (!entry?.active || entry.summary.agentSessionId) {
 				return;
 			}
-			captureGeminiSessionId({ cwd, startedAtMs })
-				.then((sessionId) => {
-					const currentEntry = this.entries.get(taskId);
-					if (!currentEntry?.active || currentEntry.summary.agentSessionId) {
-						return;
-					}
-					if (sessionId) {
-						const summary = updateSummary(currentEntry, { agentSessionId: sessionId });
-						this.emitSummary(summary);
-						return;
-					}
-					if (attempts < maxAttempts) {
-						setTimeout(attempt, intervalMs).unref();
-					}
-				})
-				.catch(() => {
-					if (attempts < maxAttempts) {
-						setTimeout(attempt, intervalMs).unref();
-					}
-				});
-		};
-
-		setTimeout(attempt, intervalMs).unref();
-	}
-
-	private captureCodexSessionIdInBackground(taskId: string, cwd: string, startedAtMs: number): void {
-		const maxAttempts = 20;
-		const intervalMs = 500;
-		let attempts = 0;
-
-		const attempt = (): void => {
-			attempts += 1;
-			const entry = this.entries.get(taskId);
-			// Stop if the session is gone or the id was captured another way.
-			if (!entry?.active || entry.summary.agentSessionId) {
+			const driver = (DRIVERS as Record<RuntimeAgentId, any>)[agentId];
+			if (!driver) {
 				return;
 			}
-			captureCodexSessionId({ cwd, startedAtMs })
-				.then((sessionId) => {
+			driver.observe
+				.discoverSession({ cwd, startedAtMs, homePath: homedir() })
+				.then((sessionId: string | null) => {
 					const currentEntry = this.entries.get(taskId);
 					if (!currentEntry?.active || currentEntry.summary.agentSessionId) {
 						return;

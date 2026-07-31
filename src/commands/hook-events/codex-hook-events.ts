@@ -3,7 +3,13 @@ import { realpathSync } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
+import {
+	encodedCwdCandidates,
+	findCodexRolloutFileForCwd,
+	getCodexSessionsRoot,
+	listCodexRolloutFiles,
+	readFilePrefix,
+} from "../../agents/codex/paths";
 import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../../core/api-contract";
 
 const CODEX_LOG_POLL_INTERVAL_MS = 200;
@@ -101,41 +107,6 @@ function isCodexUserInputToolName(name: string | null): boolean {
 	return name !== null && CODEX_USER_INPUT_TOOL_NAMES.has(name);
 }
 
-function normalizePathForComparison(path: string): string {
-	return path.replaceAll("\\", "/");
-}
-
-/**
- * The cwd string Codex records is the one its own process resolved, which on macOS
- * is the real path (`/private/var/...`) while the runtime commonly holds the symlink
- * it launched through (`/var/...`). Comparing those as plain strings silently fails
- * to match, so a session's transcript is never found. Match on either spelling.
- */
-function encodedCwdCandidates(cwd: string): string[] {
-	const candidates = new Set<string>([normalizePathForComparison(cwd)]);
-	try {
-		candidates.add(normalizePathForComparison(realpathSync(cwd)));
-	} catch {
-		// The worktree may be gone; the unresolved spelling is still worth matching.
-	}
-	return Array.from(candidates, (candidate) => `"cwd":${JSON.stringify(candidate)}`);
-}
-
-async function readFilePrefix(filePath: string, byteLength: number): Promise<string> {
-	if (byteLength <= 0) {
-		return "";
-	}
-	let handle: Awaited<ReturnType<typeof open>> | null = null;
-	try {
-		handle = await open(filePath, "r");
-		const buffer = Buffer.alloc(byteLength);
-		const readResult = await handle.read(buffer, 0, byteLength, 0);
-		return buffer.subarray(0, readResult.bytesRead).toString("utf8");
-	} finally {
-		await handle?.close();
-	}
-}
-
 async function readFileTail(filePath: string, fileSize: number, maxBytes: number): Promise<string> {
 	if (fileSize <= 0 || maxBytes <= 0) {
 		return "";
@@ -151,39 +122,6 @@ async function readFileTail(filePath: string, fileSize: number, maxBytes: number
 	} finally {
 		await handle?.close();
 	}
-}
-
-async function listCodexRolloutFiles(rootPath: string): Promise<string[]> {
-	const stack = [rootPath];
-	const files: string[] = [];
-
-	while (stack.length > 0) {
-		const current = stack.pop();
-		if (!current) {
-			continue;
-		}
-
-		let entries: Dirent[];
-		try {
-			entries = await readdir(current, { withFileTypes: true });
-		} catch {
-			continue;
-		}
-
-		for (const entry of entries) {
-			const entryPath = join(current, entry.name);
-			if (entry.isDirectory()) {
-				stack.push(entryPath);
-				continue;
-			}
-			if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
-				files.push(entryPath);
-			}
-		}
-	}
-
-	files.sort((a, b) => b.localeCompare(a));
-	return files;
 }
 
 function extractFinalMessageFromRolloutLine(lineRecord: Record<string, unknown>): string | null {
@@ -288,7 +226,7 @@ function extractRolloutCommandFromPayload(payload: Record<string, unknown>): str
 
 export async function resolveCodexRolloutFinalMessageForCwd(
 	cwd: string,
-	sessionsRoot = join(homedir(), ".codex", "sessions"),
+	sessionsRoot = getCodexSessionsRoot(),
 ): Promise<string | null> {
 	if (!cwd.trim()) {
 		return null;
@@ -334,42 +272,6 @@ export async function resolveCodexRolloutFinalMessageForCwd(
 			if (finalMessage) {
 				return finalMessage;
 			}
-		}
-	}
-
-	return null;
-}
-
-export async function findCodexRolloutFileForCwd(
-	cwd: string,
-	sessionStartedAtMs: number,
-	sessionsRoot: string,
-): Promise<string | null> {
-	if (!cwd.trim()) {
-		return null;
-	}
-	const encodedCwds = encodedCwdCandidates(cwd);
-	const rolloutFiles = (await listCodexRolloutFiles(sessionsRoot)).slice(0, MAX_CODEX_ROLLOUT_FILES_TO_SCAN);
-
-	for (const filePath of rolloutFiles) {
-		let fileStat: Stats;
-		try {
-			fileStat = await stat(filePath);
-			if (fileStat.mtimeMs < sessionStartedAtMs - CODEX_ROLLOUT_FILE_FRESH_WINDOW_MS) {
-				continue;
-			}
-		} catch {
-			continue;
-		}
-
-		let prefix = "";
-		try {
-			prefix = await readFilePrefix(filePath, Math.min(fileStat.size, CODEX_ROLLOUT_MATCH_SCAN_BYTES));
-		} catch {
-			continue;
-		}
-		if (encodedCwds.some((encodedCwd) => prefix.includes(encodedCwd))) {
-			return filePath;
 		}
 	}
 
@@ -885,7 +787,7 @@ export async function startCodexSessionWatcher(
 ): Promise<() => Promise<void>> {
 	const state = createCodexWatcherState();
 	const watcherCwd = options.cwd?.trim() ?? "";
-	const sessionsRoot = options.sessionsRoot ?? join(homedir(), ".codex", "sessions");
+	const sessionsRoot = options.sessionsRoot ?? getCodexSessionsRoot();
 	const rolloutPollIntervalMs = options.rolloutPollIntervalMs ?? CODEX_ROLLOUT_POLL_INTERVAL_MS;
 	const watcherStartedAtMs = Date.now();
 	let rolloutLogPath = "";

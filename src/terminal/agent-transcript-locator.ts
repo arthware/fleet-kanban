@@ -34,7 +34,7 @@ export async function locateAgentTranscript(input: LocateAgentTranscriptInput): 
 	}
 
 	const driver = DRIVERS[input.agentId as RuntimeAgentId];
-	if (!driver || !driver.observe.artifactPath) {
+	if (!driver) {
 		return ABSENT;
 	}
 

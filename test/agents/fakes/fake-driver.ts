@@ -85,6 +85,7 @@ export function createFakeAgentDriver(): AgentDriver {
 					costUsd: null,
 				}),
 			artifactPath: async () => null,
+			discoverSession: async () => null,
 		},
 		signals: {
 			mapNativeSignal: mapFakeNativeSignal,
