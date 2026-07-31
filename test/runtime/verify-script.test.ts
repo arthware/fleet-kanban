@@ -40,14 +40,50 @@ function assertScriptIsSafe(expandedScript: string) {
 		throw new Error("verify script must not reference test:integration");
 	}
 
-	// Allowed vitest run command is exactly test:fast:
-	// "vitest run test/runtime test/utilities test/agents --exclude "**/*.live.test.ts""
-	const sanitized = expandedScript.replace(
-		/vitest\s+run\s+test\/runtime\s+test\/utilities\s+test\/agents\s+--exclude\s+"[^"']+"/g,
-		"",
-	);
-	if (sanitized.includes("vitest run")) {
-		throw new Error("verify script must not reference unscoped vitest run");
+	// Rule-based vitest checker: Find all vitest run invocations
+	const vitestRunRegex = /vitest\s+run\b([^&|;\n()]*)/g;
+	let match = vitestRunRegex.exec(expandedScript);
+	while (match !== null) {
+		const argsStr = match[1];
+		const argTokens = argsStr
+			.trim()
+			.split(/\s+/)
+			.filter((t) => t.length > 0);
+
+		// Extract positional arguments (which must be path-like arguments, not option flags or option values)
+		const positionalArgs: string[] = [];
+		for (let i = 0; i < argTokens.length; i++) {
+			const token = argTokens[i];
+			if (token.startsWith("-")) {
+				// skip any option value if option takes one
+				if (token === "--config" || token === "-c" || token === "--exclude" || token === "--reporter") {
+					i++;
+				}
+			} else {
+				positionalArgs.push(token);
+			}
+		}
+
+		if (positionalArgs.length === 0) {
+			throw new Error("vitest run must name explicit path arguments rather than sweeping the repo");
+		}
+
+		// Verify that it excludes live tests
+		let hasExcludeLive = false;
+		for (let i = 0; i < argTokens.length; i++) {
+			if (argTokens[i] === "--exclude" && i + 1 < argTokens.length) {
+				const excludeVal = argTokens[i + 1];
+				if (excludeVal.includes(".live.test.ts")) {
+					hasExcludeLive = true;
+				}
+			}
+		}
+
+		if (!hasExcludeLive) {
+			throw new Error("vitest run must exclude live tests (**/*.live.test.ts)");
+		}
+
+		match = vitestRunRegex.exec(expandedScript);
 	}
 
 	// Also check for unscoped root npm run test or npm test
@@ -101,7 +137,7 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 });
 
 describe("verify transitive rules assertions", () => {
-	it("should throw when expanding a script that references test:integration", () => {
+	it("givenScriptReferencingTestIntegrationWhenCheckedThenItThrows", () => {
 		const mockScripts = {
 			verify: "npm run verify:precommit",
 			"verify:precommit": "npm run test:integration",
@@ -110,16 +146,27 @@ describe("verify transitive rules assertions", () => {
 		expect(() => assertScriptIsSafe(expanded)).toThrow("verify script must not reference test:integration");
 	});
 
-	it("should throw when expanding a script that references unscoped vitest run", () => {
+	it("givenScriptReferencingUnscopedVitestRunWhenCheckedThenItThrows", () => {
 		const mockScripts = {
 			verify: "npm run verify:precommit",
 			"verify:precommit": "vitest run",
 		};
 		const expanded = expandScript("verify", mockScripts);
-		expect(() => assertScriptIsSafe(expanded)).toThrow("verify script must not reference unscoped vitest run");
+		expect(() => assertScriptIsSafe(expanded)).toThrow(
+			"vitest run must name explicit path arguments rather than sweeping the repo",
+		);
 	});
 
-	it("should throw when expanding a script that references unscoped root npm run test", () => {
+	it("givenScriptMissingExcludeLiveWhenCheckedThenItThrows", () => {
+		const mockScripts = {
+			verify: "npm run verify:precommit",
+			"verify:precommit": "vitest run test/runtime",
+		};
+		const expanded = expandScript("verify", mockScripts);
+		expect(() => assertScriptIsSafe(expanded)).toThrow("vitest run must exclude live tests (**/*.live.test.ts)");
+	});
+
+	it("givenScriptReferencingUnscopedRootTestWhenCheckedThenItThrows", () => {
 		const mockScripts = {
 			verify: "npm run verify:precommit",
 			"verify:precommit": "npm run test",
@@ -130,7 +177,7 @@ describe("verify transitive rules assertions", () => {
 		);
 	});
 
-	it("should not throw when expanding a valid scoped script chain", () => {
+	it("givenValidScopedScriptChainWhenCheckedThenItDoesNotThrow", () => {
 		const mockScripts = {
 			verify: "npm run verify:precommit && npm run web:build",
 			"verify:precommit": "npm run lint && npm run typecheck && npm run test:fast && npm --prefix web-ui run test",
