@@ -14,7 +14,12 @@ import { createUniqueTaskId } from "./task-id";
 import { normalizeBoardTransitionsAndOrdering, sortCardsForColumn } from "./task-lifecycle";
 import { resolveTaskTitle } from "./task-title";
 
-export { getTaskCompletedAt, getTaskStartedAt, normalizeBoardTransitionsAndOrdering } from "./task-lifecycle";
+export {
+	getTaskCompletedAt,
+	getTaskStartedAt,
+	hasTaskEnteredColumn,
+	normalizeBoardTransitionsAndOrdering,
+} from "./task-lifecycle";
 
 export interface RuntimeCreateTaskInput {
 	taskId?: string;

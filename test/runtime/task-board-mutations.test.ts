@@ -8,6 +8,7 @@ import {
 	deleteTasksFromBoard,
 	getTaskCompletedAt,
 	getTaskStartedAt,
+	hasTaskEnteredColumn,
 	moveTaskToColumn,
 	trashTaskAndGetReadyLinkedTaskIds,
 	updateTask,
@@ -221,6 +222,37 @@ describe("task lifecycle transitions", () => {
 		expect(getTaskStartedAt(done.task)).toBe(20);
 		expect(getTaskCompletedAt(done.task)).toBe(40);
 		expect(getTaskCompletedAt(created.task)).toBeUndefined();
+	});
+
+	it("still reports a column the task has left, because transitions are append-only", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+		const inProgress = moveTaskToColumn(created.board, created.task.id, "in_progress", 20);
+
+		const review = moveTaskToColumn(inProgress.board, created.task.id, "review", 30);
+
+		expect(review.task).not.toBeNull();
+		if (!review.task) {
+			throw new Error("Expected moved task.");
+		}
+		expect(hasTaskEnteredColumn(review.task, "in_progress")).toBe(true);
+	});
+
+	it("reports a column the task never entered as not entered", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{ prompt: "Task", baseRef: "main" },
+			() => "aaaaa111",
+			10,
+		);
+
+		expect(hasTaskEnteredColumn(created.task, "in_progress")).toBe(false);
 	});
 
 	it("sorts done cards by completedAt after several bulk-style completions", () => {

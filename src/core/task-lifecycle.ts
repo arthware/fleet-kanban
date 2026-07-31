@@ -20,6 +20,20 @@ export interface BoardLifecycleData<Card extends BoardLifecycleCard = BoardLifec
 	columns: Array<BoardLifecycleColumn<Card>>;
 }
 
+/**
+ * Whether the card's lifecycle records it ever entering `columnId`.
+ *
+ * `transitions` is append-only — a later move adds an entry, it never rewrites or
+ * removes an earlier one — so this answers an *edge* ("did it get there") where the
+ * card's current column only answers a *level* ("is it there now"). Anything checking
+ * lifecycle progress wants the edge: a card can pass through In Progress and be moved
+ * on by the runtime within a few hundred milliseconds, and a level check that arrives
+ * after that reports a false negative for a step that plainly happened.
+ */
+export function hasTaskEnteredColumn(card: BoardLifecycleCard, columnId: BoardLifecycleColumnId): boolean {
+	return card.transitions?.some((transition) => transition.column === columnId) ?? false;
+}
+
 export function getTaskStartedAt(card: BoardLifecycleCard): number | undefined {
 	return card.transitions?.find((transition) => transition.column === "in_progress")?.at;
 }
