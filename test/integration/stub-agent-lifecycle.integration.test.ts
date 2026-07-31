@@ -17,6 +17,7 @@ import type {
 import {
 	completeTaskAndGetReadyLinkedTaskIds,
 	getTaskColumnId,
+	hasTaskEnteredColumn,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
 import {
@@ -298,10 +299,14 @@ describe.sequential("GIVEN an isolated board seeded with a pet repo and a test-o
 			});
 			await startBoardTask({ baseUrl: runtimeBaseUrl, workspaceId, card: linkedChild });
 
+			// The child only passes through `in_progress`: its stub agent exits ~100ms after
+			// boot and the runtime projects the finished session onto `review`. Assert the
+			// permanent record that it got there — the card's transition history — and that
+			// its agent really ran, instead of polling for a column it has already left.
 			const childStartedState = await waitFor(async () => {
 				const current = await loadState(runtimeBaseUrl, workspaceId);
 				const summary = current.sessions[LINKED_CHILD_TASK_ID];
-				return getTaskColumnId(current.board, LINKED_CHILD_TASK_ID) === "in_progress" &&
+				return hasTaskEnteredColumn(findCard(current.board, LINKED_CHILD_TASK_ID), "in_progress") &&
 					(summary?.state === "running" || summary?.state === "awaiting_review")
 					? current
 					: null;

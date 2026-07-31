@@ -20,6 +20,7 @@ import type {
 import {
 	completeTaskAndGetReadyLinkedTaskIds,
 	getTaskColumnId,
+	hasTaskEnteredColumn,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
 import { startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
@@ -40,6 +41,8 @@ export interface ScenarioDriver {
 	startCard(taskId: string): Promise<void>;
 	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectEnteredColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectAgentFinishedCleanly(taskId: string): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
 	killAgentProcess(taskId: string): Promise<void>;
 	expectSessionGone(taskId: string): Promise<void>;
@@ -241,6 +244,26 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				const state = await loadState(context);
 				return getTaskColumnId(state.board, taskId) === column ? true : null;
 			}, `card ${taskId} to be in ${column}`);
+		},
+		// Use this — not `expectColumn` — for any column a running card only passes
+		// through. `in_progress` is one: a card whose agent exits lands in `review`
+		// within a few hundred milliseconds, and the runtime does that on its own
+		// (session state -> column projection). `expectColumn` polls for where the card
+		// *is*, so it only sees `in_progress` if it happens to look inside that window —
+		// a check that races the very session the scenario just started. The card's
+		// transition history records the move permanently, so asserting on it cannot be
+		// lost to whatever the runtime does next.
+		expectEnteredColumn: async (taskId, column) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				return hasTaskEnteredColumn(findCard(state.board, taskId), column) ? true : null;
+			}, `card ${taskId} to have entered ${column}`);
+		},
+		expectAgentFinishedCleanly: async (taskId) => {
+			await waitFor(async () => {
+				const summary = (await loadState(context)).sessions[taskId];
+				return summary?.state === "awaiting_review" && summary.exitCode === 0 ? true : null;
+			}, `agent for ${taskId} to finish cleanly`);
 		},
 		expectOverseerNotified: async (taskId) => {
 			if (!stream) {
