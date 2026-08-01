@@ -1,7 +1,10 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
@@ -23,16 +26,188 @@ import type {
 	SteerPlan,
 	SteerStep,
 } from "../driver";
-import { supported } from "../driver";
+import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 import { buildClaudeHookSettings } from "./hook-settings";
 
+const execFileAsync = promisify(execFile);
+
+async function getClaudeToken(): Promise<string | null> {
+	if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+		return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+	}
+
+	// Try macOS Keychain
+	if (process.platform === "darwin") {
+		try {
+			const { stdout } = await execFileAsync(
+				"security",
+				["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+				{ timeout: 8000 },
+			);
+			const raw = stdout.trim();
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				const token = parsed?.claudeAiOauth?.accessToken;
+				if (token) {
+					return token;
+				}
+			}
+		} catch {
+			// Ignore keychain failures
+		}
+	}
+
+	// Fallback to ~/.claude/.credentials.json
+	try {
+		const credPath = join(homedir(), ".claude", ".credentials.json");
+		const content = await readFile(credPath, "utf8");
+		const parsed = JSON.parse(content);
+		const token = parsed?.claudeAiOauth?.accessToken;
+		if (token) {
+			return token;
+		}
+	} catch {
+		// Ignore file-read failures
+	}
+
+	return null;
+}
+
+function isoToUnix(s: string | null | undefined): number | null {
+	if (!s) return null;
+	try {
+		const ms = Date.parse(s);
+		if (Number.isNaN(ms)) return null;
+		return Math.floor(ms / 1000);
+	} catch {
+		return null;
+	}
+}
+
+function parseWindowValue(val: unknown): { used: number; remaining: number } | null {
+	if (val === null || val === undefined || typeof val === "boolean") {
+		return null;
+	}
+	const parsed = Number(val);
+	if (Number.isNaN(parsed)) {
+		return null;
+	}
+	const u = Math.max(0.0, Math.min(100.0, Math.round(parsed * 10) / 10));
+	const rem = Math.round((100.0 - u) * 10) / 10;
+	return { used: u, remaining: rem };
+}
+
+async function fetchAnthropicGet(url: string, token: string): Promise<any> {
+	const response = await fetch(url, {
+		method: "GET",
+		headers: {
+			Authorization: `Bearer ${token}`,
+			"anthropic-beta": "oauth-2025-04-20",
+			"User-Agent": "fleet-budget",
+		},
+	});
+	if (!response.ok) {
+		throw new Error(`HTTP ${response.status}`);
+	}
+	return await response.json();
+}
+
 export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 	return {
 		id: "claude",
 		catalog: catalogEntryById("claude"),
+		budget: {
+			read: async () => {
+				const token = await getClaudeToken();
+				if (!token) {
+					return unsupported("no Claude Code auth found (sign in with `claude`)");
+				}
+
+				let usage: any;
+				try {
+					usage = await fetchAnthropicGet("https://api.anthropic.com/api/oauth/usage", token);
+				} catch (e: any) {
+					let hint = "";
+					if (e.message && (e.message.includes("401") || e.message.includes("403"))) {
+						hint = " — token expired, run `claude` to refresh";
+					}
+					return unsupported(`${e.message || e}${hint}`);
+				}
+
+				let plan: string | null = null;
+				try {
+					const prof = await fetchAnthropicGet("https://api.anthropic.com/api/oauth/profile", token);
+					const acct = prof?.account || {};
+					if (acct.has_claude_max) {
+						plan = "max";
+					} else if (acct.has_claude_pro) {
+						plan = "pro";
+					}
+				} catch {
+					// Best effort
+				}
+
+				const windows: {
+					name: string;
+					remainingPercent: number | null;
+					resetsAt: number | null;
+					detail?: string;
+				}[] = [];
+
+				const addWindow = (name: string, blk: any) => {
+					if (!blk) return;
+					const p = parseWindowValue(blk.utilization);
+					windows.push({
+						name,
+						remainingPercent: p ? p.remaining : null,
+						resetsAt: isoToUnix(blk.resets_at),
+					});
+				};
+
+				addWindow("5h", usage.five_hour);
+				addWindow("week", usage.seven_day);
+				addWindow("week-opus", usage.seven_day_opus);
+				addWindow("week-sonnet", usage.seven_day_sonnet);
+
+				const ex = usage.extra_usage;
+				if (ex?.is_enabled) {
+					let remPercent: number | null = null;
+					let detail = "";
+					if (ex.used_credits !== undefined && ex.monthly_limit) {
+						const usedCredits = Number(ex.used_credits);
+						const monthlyLimit = Number(ex.monthly_limit);
+						if (!Number.isNaN(usedCredits) && !Number.isNaN(monthlyLimit) && monthlyLimit > 0) {
+							const derivedUsed = (usedCredits / monthlyLimit) * 100;
+							const p = parseWindowValue(derivedUsed);
+							if (p) {
+								remPercent = p.remaining;
+							}
+						}
+						detail = `${ex.used_credits}/${ex.monthly_limit} ${ex.currency || ""}`.trim();
+					} else if (ex.utilization !== null && ex.utilization !== undefined) {
+						const p = parseWindowValue(ex.utilization);
+						if (p) {
+							remPercent = p.remaining;
+						}
+					}
+					windows.push({
+						name: "extra",
+						remainingPercent: remPercent,
+						resetsAt: null,
+						detail: detail || undefined,
+					});
+				}
+
+				return supported({
+					plan,
+					staleSeconds: 0,
+					windows,
+				});
+			},
+		},
 		launch: {
 			preflight: () => binaryPreflight("claude"),
 			prepare: async (input) => {

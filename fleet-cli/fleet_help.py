@@ -85,7 +85,11 @@ def parse_args(args_list):
         run_command([sys.executable, str(fleet_py), "--help"])
 
     elif cmd in ("budget", "limits", "usage"):
-        run_command([sys.executable, str(budget_py), "--help"])
+        kanban = find_kanban_bin()
+        if kanban:
+            run_command([kanban, "budget", "--help"])
+        else:
+            print("kanban binary not found")
 
     elif cmd in ("port",):
         run_command([sys.executable, str(port_for), "--help"])

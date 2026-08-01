@@ -1,161 +1,122 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { DRIVERS, supported, unsupported } from "../../../src/agents/driver";
+import { getAgentBudget, getAggregatedBudget, resetAgentBudgetCacheForTests } from "../../../src/server/agent-budget";
 
-import { getAgentBudget, resetAgentBudgetCacheForTests } from "../../../src/server/agent-budget";
+describe("Agent Budget Aggregator & Drivers", () => {
+	const originalClaudeRead = DRIVERS.claude.budget.read;
+	const originalCodexRead = DRIVERS.codex.budget.read;
+	const originalGeminiRead = DRIVERS.gemini.budget.read;
 
-const FIXTURE_STDOUT = JSON.stringify({
-	generated_at: 1784812901,
-	providers: [
-		{
-			provider: "claude",
-			plan: "max",
-			stale_seconds: 0,
-			windows: [
-				{ name: "5h", remaining_percent: 95.0, resets_at: 1784829600 },
-				{ name: "week", remaining_percent: 55.0, resets_at: 1785203999 },
-			],
-			worst_remaining_percent: 55.0,
-		},
-		{
-			provider: "codex",
-			plan: "plus",
-			stale_seconds: 60342,
-			windows: [{ name: "week", remaining_percent: 6.0, resets_at: 1785262088 }],
-			worst_remaining_percent: 6.0,
-		},
-		{
-			provider: "cursor",
-			error: "no Cursor auth found (is the desktop app signed in?)",
-		},
-	],
-});
-
-function makeCountingRun(stdout: string) {
-	let calls = 0;
-	const run = async (_binary: string, _args: string[]) => {
-		calls += 1;
-		return { stdout };
-	};
-	return { run, callCount: () => calls };
-}
-
-describe("getAgentBudget", () => {
 	beforeEach(() => {
 		resetAgentBudgetCacheForTests();
+		DRIVERS.claude.budget.read = originalClaudeRead;
+		DRIVERS.codex.budget.read = originalCodexRead;
+		DRIVERS.gemini.budget.read = originalGeminiRead;
 	});
 
-	it("given a captured fleet budget --json fixture, when resolved, then it maps to the camelCase provider shape and drops errored providers", async () => {
-		const { run } = makeCountingRun(FIXTURE_STDOUT);
+	it("given mock drivers returning valid budgets, when aggregated, then it normalizes and returns them correctly", async () => {
+		DRIVERS.claude.budget.read = async () =>
+			supported({
+				plan: "max",
+				staleSeconds: 0,
+				windows: [
+					{ name: "5h", remainingPercent: 68.0, resetsAt: 1785573600 },
+					{ name: "week", remainingPercent: 40.0, resetsAt: 1785583600 },
+				],
+			});
 
-		const result = await getAgentBudget({ binary: "stub-fleet", run });
+		DRIVERS.codex.budget.read = async () =>
+			supported({
+				plan: "plus",
+				staleSeconds: 3600,
+				windows: [{ name: "5h", remainingPercent: 79.0, resetsAt: 1785573600 }],
+			});
 
-		expect(result).toEqual({
-			available: true,
-			generatedAt: 1784812901,
-			providers: [
-				{
-					provider: "claude",
-					plan: "max",
-					staleSeconds: 0,
-					worstRemainingPercent: 55.0,
-					windows: [
-						{ name: "5h", remainingPercent: 95.0, resetsAt: 1784829600 },
-						{ name: "week", remainingPercent: 55.0, resetsAt: 1785203999 },
-					],
-				},
-				{
-					provider: "codex",
-					plan: "plus",
-					staleSeconds: 60342,
-					worstRemainingPercent: 6.0,
-					windows: [{ name: "week", remainingPercent: 6.0, resetsAt: 1785262088 }],
-				},
-			],
-		});
+		const report = await getAggregatedBudget();
+
+		const claude = report.providers.find((p) => p.provider === "claude");
+		expect(claude).toBeDefined();
+		expect(claude?.plan).toBe("max");
+		expect(claude?.worstRemainingPercent).toBe(40.0);
+		expect(claude?.windows).toHaveLength(2);
+
+		const codex = report.providers.find((p) => p.provider === "codex");
+		expect(codex).toBeDefined();
+		expect(codex?.plan).toBe("plus");
+		expect(codex?.worstRemainingPercent).toBe(79.0);
+		expect(codex?.staleSeconds).toBe(3600);
 	});
 
-	it("given the fleet binary cannot be resolved, when getAgentBudget is called, then it returns unavailable instead of throwing", async () => {
-		const result = await getAgentBudget({ binary: null });
+	it("given a driver budget window with null or missing remainingPercent, when computed, then worstRemainingPercent is correct and does not throw", async () => {
+		DRIVERS.claude.budget.read = async () =>
+			supported({
+				plan: "pro",
+				staleSeconds: 0,
+				windows: [
+					{ name: "5h", remainingPercent: null, resetsAt: null },
+					{ name: "week", remainingPercent: 12.5, resetsAt: 1785583600 },
+				],
+			});
 
-		expect(result).toEqual({ available: false, generatedAt: null, providers: [] });
+		const report = await getAggregatedBudget();
+		const claude = report.providers.find((p) => p.provider === "claude");
+		expect(claude?.worstRemainingPercent).toBe(12.5);
 	});
 
-	it("given the CLI exits non-zero, when getAgentBudget is called, then it returns unavailable instead of throwing", async () => {
-		const run = async () => {
-			throw new Error("boom: non-zero exit");
+	it("given one driver throws or is unsupported, when aggregated, then other drivers still succeed and the error is captured", async () => {
+		DRIVERS.claude.budget.read = async () => {
+			throw new Error("api offline");
 		};
 
-		const result = await getAgentBudget({ binary: "stub-fleet", run });
+		DRIVERS.codex.budget.read = async () =>
+			supported({
+				plan: "plus",
+				staleSeconds: 120,
+				windows: [{ name: "5h", remainingPercent: 90.0, resetsAt: null }],
+			});
 
-		expect(result).toEqual({ available: false, generatedAt: null, providers: [] });
+		const report = await getAggregatedBudget();
+
+		const claude = report.providers.find((p) => p.provider === "claude");
+		expect(claude).toBeDefined();
+		expect(claude?.error).toContain("api offline");
+
+		const codex = report.providers.find((p) => p.provider === "codex");
+		expect(codex?.worstRemainingPercent).toBe(90.0);
 	});
 
-	it("given a fresh cache within the TTL, when getAgentBudget is called again, then the CLI is not re-invoked", async () => {
-		const { run, callCount } = makeCountingRun(FIXTURE_STDOUT);
-		let now = 0;
-		const nowFn = () => now;
+	it("given getAgentBudget is called on the server, then it filters out errored/empty providers and returns camelCase", async () => {
+		DRIVERS.claude.budget.read = async () =>
+			supported({
+				plan: "max",
+				staleSeconds: 0,
+				windows: [{ name: "5h", remainingPercent: 68.0, resetsAt: null }],
+			});
 
-		await getAgentBudget({ binary: "stub-fleet", run, now: nowFn });
-		now += 1_000; // well within the 10-minute TTL
-		await getAgentBudget({ binary: "stub-fleet", run, now: nowFn });
+		DRIVERS.codex.budget.read = async () => unsupported("no sessions found");
 
-		expect(callCount()).toBe(1);
+		const response = await getAgentBudget();
+		expect(response.available).toBe(true);
+		expect(response.providers).toHaveLength(1);
+		expect(response.providers[0].provider).toBe("claude");
+		expect(response.providers[0].worstRemainingPercent).toBe(68.0);
 	});
 
-	it("given a stale cache, when getAgentBudget is called, then it awaits the refresh and returns the newly-refreshed value", async () => {
-		const { run: firstRun } = makeCountingRun(FIXTURE_STDOUT);
-		let now = 0;
-		const nowFn = () => now;
-
-		const first = await getAgentBudget({ binary: "stub-fleet", run: firstRun, now: nowFn });
-		expect(first.available).toBe(true);
-
-		now += 11 * 60 * 1000; // past the 10-minute TTL
-		const secondStdout = JSON.stringify({
-			generated_at: 1784812901,
-			providers: [
-				{
-					provider: "claude",
-					plan: "max",
-					stale_seconds: 0,
-					windows: [{ name: "5h", remaining_percent: 25.0, resets_at: 1784829600 }],
-					worst_remaining_percent: 25.0,
-				},
-			],
-		});
-		const { run: secondRun } = makeCountingRun(secondStdout);
-
-		const staleRead = await getAgentBudget({ binary: "stub-fleet", run: secondRun, now: nowFn });
-
-		expect(staleRead.providers[0]?.worstRemainingPercent).toBe(25.0);
-	});
-
-	it("given a stale cache, when the subsequent refresh fails, then it falls back to the prior good value", async () => {
-		const { run: firstRun } = makeCountingRun(FIXTURE_STDOUT);
-		let now = 0;
-		const nowFn = () => now;
-
-		const first = await getAgentBudget({ binary: "stub-fleet", run: firstRun, now: nowFn });
-		expect(first.available).toBe(true);
-
-		now += 11 * 60 * 1000; // past the 10-minute TTL
-		const secondRun = async () => {
-			throw new Error("CLI failure");
+	it("given a cold cache, when getAgentBudget is called concurrently, then it shares the in-flight promise and resolves identically", async () => {
+		let callCount = 0;
+		DRIVERS.claude.budget.read = async () => {
+			callCount += 1;
+			return supported({
+				plan: "pro",
+				staleSeconds: 0,
+				windows: [{ name: "5h", remainingPercent: 50.0, resetsAt: null }],
+			});
 		};
 
-		const staleRead = await getAgentBudget({ binary: "stub-fleet", run: secondRun, now: nowFn });
+		const [r1, r2] = await Promise.all([getAgentBudget(), getAgentBudget()]);
 
-		expect(staleRead).toEqual(first);
-	});
-
-	it("given concurrent calls on a cold cache, when getAgentBudget is called twice without awaiting, then only one CLI call is made", async () => {
-		const { run, callCount } = makeCountingRun(FIXTURE_STDOUT);
-
-		const [a, b] = await Promise.all([
-			getAgentBudget({ binary: "stub-fleet", run }),
-			getAgentBudget({ binary: "stub-fleet", run }),
-		]);
-
-		expect(callCount()).toBe(1);
-		expect(a).toEqual(b);
+		expect(callCount).toBe(1);
+		expect(r1).toEqual(r2);
+		expect(r1.providers[0]?.worstRemainingPercent).toBe(50.0);
 	});
 });

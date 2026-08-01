@@ -138,6 +138,23 @@ export interface ControlPort {
 	interrupt(): Promise<Capability<SteerPlan>>;
 }
 
+export interface AgentBudgetWindow {
+	readonly name: string;
+	readonly remainingPercent: number | null;
+	readonly resetsAt: number | null; // unix timestamp in seconds, or null
+	readonly detail?: string;
+}
+
+export interface AgentBudget {
+	readonly plan?: string | null;
+	readonly staleSeconds?: number | null;
+	readonly windows: readonly AgentBudgetWindow[];
+}
+
+export interface BudgetPort {
+	read(): Promise<Capability<AgentBudget>>;
+}
+
 export interface AgentDriver {
 	readonly id: RuntimeAgentId;
 	/** Static facts about the CLI, co-located with the behaviour they describe. */
@@ -147,6 +164,7 @@ export interface AgentDriver {
 	readonly observe: ObservationPort;
 	readonly signals: SignalPort;
 	readonly control: ControlPort;
+	readonly budget: BudgetPort;
 }
 
 export const DRIVERS = {

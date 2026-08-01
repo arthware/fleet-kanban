@@ -118,11 +118,6 @@ export interface WorktreeMirrorRules {
  * unshared list, or when it sits inside a tracked source tree.
  */
 export function shouldMirrorIgnoredPathIntoWorktree(relativePath: string, rules: WorktreeMirrorRules): boolean {
-	const segments = toPlatformRelativePath(relativePath).split("/").filter(Boolean);
-	if (segments.some((segment) => segment === "node_modules")) {
-		return false;
-	}
-
 	if (rules.sharedPaths && isPathCoveredBySharedPaths(relativePath, rules.sharedPaths)) {
 		return true;
 	}

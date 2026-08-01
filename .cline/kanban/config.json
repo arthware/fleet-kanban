@@ -12,6 +12,20 @@
     }
   ],
   "worktree": {
-    "postCreateCommand": "(npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && (npm --prefix web-ui ci --no-audit --no-fund || npm --prefix web-ui install --no-audit --no-fund)"
+    "postCreateCommand": "npm --prefix web-ui ci --no-audit --no-fund || npm --prefix web-ui install --no-audit --no-fund",
+    "unsharedPaths": [
+      "dist",
+      "build",
+      "out",
+      ".next",
+      ".turbo",
+      ".cache",
+      ".vite",
+      ".parcel-cache",
+      ".svelte-kit",
+      ".nuxt",
+      ".output",
+      "*.tsbuildinfo"
+    ]
   }
 }

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero } from "./scenarios/givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero";
 import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
 import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
@@ -117,6 +118,9 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "CLI contract: help and usage exits", async () => {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();
+	});
+	await runScenario(results, "CLI budget contract: unknown not zero", async () => {
+		await givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero();
 	});
 
 	for (const result of results) {

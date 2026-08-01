@@ -53,7 +53,6 @@ export function resolveWorktreeSkillsRelativePath(agentId?: RuntimeAgentId | nul
 
 const SYMLINK_PATH_SEGMENT_BLACKLIST = new Set([
 	".git",
-	"node_modules",
 	".DS_Store",
 	"Thumbs.db",
 	"Desktop.ini",

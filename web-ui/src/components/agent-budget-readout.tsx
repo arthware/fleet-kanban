@@ -58,7 +58,14 @@ export function agentBudgetHealthClassName(remainingPercent: number | null): str
 function AgentBudgetPill({ provider }: { provider: RuntimeAgentBudgetProvider }): React.ReactElement {
 	const isStale = provider.staleSeconds !== null && provider.staleSeconds > STALE_THRESHOLD_SECONDS;
 	const nowSeconds = Math.floor(Date.now() / 1000);
-	const title = provider.windows.map((w) => windowTooltipEntry(w, nowSeconds)).join(" · ");
+	const baseTitle = provider.windows.map((w) => windowTooltipEntry(w, nowSeconds)).join(" · ");
+	let staleAgeText = "";
+	if (provider.staleSeconds !== null && provider.staleSeconds > STALE_THRESHOLD_SECONDS) {
+		const mins = Math.floor(provider.staleSeconds / 60);
+		const age = mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m` : `${mins}m`;
+		staleAgeText = ` (snapshot ${age} old)`;
+	}
+	const title = baseTitle + staleAgeText;
 
 	let displayPercent = provider.worstRemainingPercent;
 	let weekSuffix = "";
