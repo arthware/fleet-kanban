@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
@@ -18,6 +18,13 @@ import type {
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption } from "../shared/launch";
+import {
+	deriveFromTranscript,
+	selectFromTranscriptTail,
+	type TranscriptDerivation,
+	type TranscriptRecord,
+	type TranscriptTailQuery,
+} from "../shared/observe";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 import { findCodexRolloutFileForCwd, getCodexSessionsRoot } from "./paths";
 
@@ -138,57 +145,31 @@ export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseCodexTranscript(records);
-					return supported(mapToObservationMessages(richMsgs));
-				} catch {
-					return supported([]);
-				}
+				const richMsgs = await deriveFromTranscript(loc.path, CODEX_TRANSCRIPT);
+				return supported(mapToObservationMessages(richMsgs));
 			},
 			transcript: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseCodexTranscript(records);
-					return supported(richMsgs);
-				} catch {
-					return supported([]);
-				}
+				return supported(await deriveFromTranscript(loc.path, CODEX_TRANSCRIPT));
 			},
 			usage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported({ inputTokens: 0, outputTokens: 0 });
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported({ inputTokens: 0, outputTokens: 0 });
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveCodexUsage(records);
-					if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
-					return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
-				} catch {
-					return supported({ inputTokens: 0, outputTokens: 0 });
-				}
+				const usage = await selectFromTranscriptTail(loc.path, CODEX_USAGE);
+				if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
+				return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 			},
 			richUsage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported(null);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported(null);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveCodexUsage(records);
-					return supported(usage);
-				} catch {
-					return supported(null);
-				}
+				return supported(await selectFromTranscriptTail(loc.path, CODEX_USAGE));
 			},
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
@@ -359,23 +340,43 @@ async function readDirEntries(dirPath: string): Promise<Dirent[]> {
 
 // --- Parsing ---------------------------------------------------------------
 
-function parseJsonlRecords(raw: string): Record<string, unknown>[] {
-	const records: Record<string, unknown>[] = [];
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			continue;
-		}
-		try {
-			const parsed: unknown = JSON.parse(trimmed);
-			if (isRecord(parsed)) {
-				records.push(parsed);
-			}
-		} catch {
-			// Tolerate a partially-flushed / corrupt trailing line.
-		}
+/** The full conversation — the on-demand path, taken when a card is opened. */
+const CODEX_TRANSCRIPT: TranscriptDerivation<RuntimeTaskChatMessage[]> = {
+	id: "codex-transcript",
+	derive: (records) => parseCodexTranscript([...records]),
+};
+
+/**
+ * Codex emits a `token_count` event carrying the session's running totals, so the
+ * newest one already holds the cumulative figure. That makes usage a tail read:
+ * bounded work, whatever the session's history weighs.
+ */
+const CODEX_USAGE: TranscriptTailQuery<RuntimeTaskTokenUsage> = {
+	id: "codex-usage",
+	select: (record) => selectCodexUsage(record),
+};
+
+function selectCodexUsage(record: TranscriptRecord): RuntimeTaskTokenUsage | null {
+	if (readString(record, "type") !== "event_msg") {
+		return null;
 	}
-	return records;
+	const payload = asRecord(record.payload);
+	if (!payload || readString(payload, "type") !== "token_count") {
+		return null;
+	}
+	const info = asRecord(payload.info);
+	const total = info ? asRecord(info.total_token_usage) : null;
+	if (!total) {
+		return null;
+	}
+	const cachedInputTokens = readNumber(total, "cached_input_tokens");
+	return {
+		inputTokens: readNumber(total, "input_tokens") - cachedInputTokens,
+		outputTokens: readNumber(total, "output_tokens"),
+		cacheReadTokens: cachedInputTokens,
+		cacheCreationTokens: 0,
+		costUsd: null,
+	};
 }
 
 function parseCodexTranscript(records: Record<string, unknown>[]): RuntimeTaskChatMessage[] {
@@ -471,36 +472,15 @@ function isCodexPreamble(text: string): boolean {
 	);
 }
 
+/** The same "newest totals win" rule as {@link CODEX_USAGE}, over records already in hand. */
 export function deriveCodexUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
-	let latestTotal: Record<string, unknown> | null = null;
-
-	for (const record of records) {
-		if (readString(record, "type") !== "event_msg") {
-			continue;
-		}
-		const payload = asRecord(record.payload);
-		if (!payload || readString(payload, "type") !== "token_count") {
-			continue;
-		}
-		const info = asRecord(payload.info);
-		const total = info ? asRecord(info.total_token_usage) : null;
-		if (total) {
-			latestTotal = total;
+	for (let index = records.length - 1; index >= 0; index -= 1) {
+		const usage = selectCodexUsage(records[index]);
+		if (usage) {
+			return usage;
 		}
 	}
-
-	if (!latestTotal) {
-		return null;
-	}
-
-	const cachedInputTokens = readNumber(latestTotal, "cached_input_tokens");
-	return {
-		inputTokens: readNumber(latestTotal, "input_tokens") - cachedInputTokens,
-		outputTokens: readNumber(latestTotal, "output_tokens"),
-		cacheReadTokens: cachedInputTokens,
-		cacheCreationTokens: 0,
-		costUsd: null,
-	};
+	return null;
 }
 
 // --- Mapping ---------------------------------------------------------------
