@@ -36,6 +36,11 @@ export async function givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved(): 
 			USERPROFILE: instance.homeDir,
 			GIT_ALLOW_PROTOCOL: "file",
 			KANBAN_URL: baseUrl,
+			// `fleet` shells out to the kanban CLI, which it resolves from
+			// KANBAN_SOURCE/dist/cli.js first. Without this it falls back to a
+			// globally-installed kanban — present on a dev machine, absent in CI,
+			// where it fails with "kanban not installed". Point it at this checkout.
+			KANBAN_SOURCE: process.cwd(),
 		};
 
 		// --- Scenario 1: Create cool-epic ---
