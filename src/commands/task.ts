@@ -394,7 +394,7 @@ export function formatCliTokenUsage(usage: RuntimeTaskTokenUsage | null, hasSess
 	if (!usage) {
 		return "?";
 	}
-	const realWork = usage.inputTokens + usage.outputTokens;
+	const realWork = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
 	if (realWork === 0) {
 		return "0";
 	}
@@ -514,6 +514,20 @@ function findTasksInColumn(
 	}));
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`Timeout of ${timeoutMs}ms exceeded`)), timeoutMs);
+	});
+	try {
+		return await Promise.race([promise, timeoutPromise]);
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
+		}
+	}
+}
+
 async function listTasks(input: { cwd: string; projectPath?: string; column?: ListTaskColumn }): Promise<JsonRecord> {
 	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd, {
 		autoCreateIfMissing: false,
@@ -535,12 +549,12 @@ async function listTasks(input: { cwd: string; projectPath?: string; column?: Li
 	let tokenUsages: Record<string, RuntimeTaskTokenUsage | null> = {};
 	if (taskIds.length > 0) {
 		try {
-			const usageResult = await runtimeClient.runtime.getTaskTokenUsage.query({ taskIds });
+			const usageResult = await withTimeout(runtimeClient.runtime.getTaskTokenUsage.query({ taskIds }), 500);
 			if (usageResult.ok && usageResult.usage) {
 				tokenUsages = usageResult.usage;
 			}
-		} catch (error) {
-			// Degrade gracefully so we don't block
+		} catch {
+			// Degrade gracefully to preserve fast task list behavior
 		}
 	}
 

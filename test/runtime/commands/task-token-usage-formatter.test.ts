@@ -13,16 +13,29 @@ describe("formatCliTokenUsage", () => {
 		expect(result).toBe("?");
 	});
 
-	it("returns '0' when there is a session, usage is present, but conversational work is exactly 0", () => {
+	it("returns '0' when there is a session, usage is present, but total token usage is exactly 0", () => {
 		const usage: RuntimeTaskTokenUsage = {
 			inputTokens: 0,
 			outputTokens: 0,
-			cacheReadTokens: 1000, // separate cache lane doesn't count as real conversational work
-			cacheCreationTokens: 50,
+			cacheReadTokens: 0,
+			cacheCreationTokens: 0,
 			costUsd: null,
 		};
 		const result = formatCliTokenUsage(usage, true);
 		expect(result).toBe("0");
+	});
+
+	it("includes cacheReadTokens and cacheCreationTokens in the grand total compact count", () => {
+		const usage: RuntimeTaskTokenUsage = {
+			inputTokens: 1000,
+			outputTokens: 50,
+			cacheReadTokens: 5000,
+			cacheCreationTokens: 200,
+			costUsd: null,
+		};
+		// Total: 1000 + 50 + 5000 + 200 = 6250 => "6.3k"
+		const result = formatCliTokenUsage(usage, true);
+		expect(result).toBe("6.3k");
 	});
 
 	it("renders numbers below 1,000 as raw rounded integers", () => {
