@@ -135,8 +135,7 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 					runCmd.includes("npm ci") ||
 					runCmd.includes("git config") ||
 					runCmd.includes("npm i") ||
-					runCmd.includes("npm install") ||
-					runCmd.includes("playwright install");
+					runCmd.includes("npm install");
 
 				if (!isInstallOrSetup) {
 					expect(runCmd).toContain("npm run verify");

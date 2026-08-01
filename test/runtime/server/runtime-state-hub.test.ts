@@ -13,7 +13,7 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 } from "../../../src/core/api-contract";
-import { runtimeBoardCardSchema } from "../../../src/core/api-contract";
+import { runtimeBoardCardSchema, runtimeBoardDataSchema } from "../../../src/core/api-contract";
 import { addTaskToColumn, moveTaskToColumn } from "../../../src/core/task-board-mutations";
 import {
 	applyPersistedCardPrToBoard,
@@ -69,7 +69,7 @@ const CLOSED_PR: CardPrRef = {
 const COLUMN_IDS: RuntimeBoardColumnId[] = ["backlog", "in_progress", "review", "done", "trash"];
 
 function boardWithCard(columnId: RuntimeBoardColumnId): RuntimeBoardData {
-	return {
+	return runtimeBoardDataSchema.parse({
 		columns: COLUMN_IDS.map((id) => ({
 			id,
 			title: id,
@@ -90,11 +90,16 @@ function boardWithCard(columnId: RuntimeBoardColumnId): RuntimeBoardData {
 					: [],
 		})),
 		dependencies: [],
-	};
+	});
 }
 
 function cardColumnId(board: RuntimeBoardData, taskId: string): RuntimeBoardColumnId | null {
 	return board.columns.find((column) => column.cards.some((card) => card.id === taskId))?.id ?? null;
+}
+
+function cardTransitions(board: RuntimeBoardData, taskId: string): RuntimeBoardColumnId[] {
+	const card = board.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
+	return card?.transitions?.map((transition) => transition.column) ?? [];
 }
 
 function emptyBoard(): RuntimeBoardData {
@@ -291,6 +296,7 @@ describe("applyPersistedCardPrToBoard", () => {
 
 		expect(result.updated).toBe(true);
 		expect(cardColumnId(result.board, "task-1")).toBe("done");
+		expect(cardTransitions(result.board, "task-1")).toEqual(["backlog", "review", "done"]);
 		expect(result.board.columns.find((column) => column.id === "done")?.cards[0]?.prState).toBe("merged");
 	});
 
@@ -299,6 +305,7 @@ describe("applyPersistedCardPrToBoard", () => {
 
 		expect(result.updated).toBe(true);
 		expect(cardColumnId(result.board, "task-1")).toBe("trash");
+		expect(cardTransitions(result.board, "task-1")).toEqual(["backlog", "review", "trash"]);
 		expect(result.board.columns.find((column) => column.id === "trash")?.cards[0]?.prState).toBe("closed");
 	});
 
@@ -307,6 +314,7 @@ describe("applyPersistedCardPrToBoard", () => {
 
 		expect(result.updated).toBe(true);
 		expect(cardColumnId(result.board, "task-1")).toBe("done");
+		expect(cardTransitions(result.board, "task-1")).toEqual(["backlog", "in_progress", "done"]);
 	});
 
 	it("given a card already in done, when the monitor persists a terminal PR state, then the card stays in done", () => {
@@ -345,8 +353,10 @@ describe("projectSessionSummaryColumn", () => {
 
 	it("given a card in in_progress transitioning to awaiting_review, when projected, then it moves to review and broadcasts update", async () => {
 		const board = boardWithCard("in_progress");
+		let projectedBoard: RuntimeBoardData | null = null;
 		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			projectedBoard = res.board;
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
@@ -364,12 +374,19 @@ describe("projectSessionSummaryColumn", () => {
 		expect(result).toBe(true);
 		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+		expect(projectedBoard ? cardTransitions(projectedBoard, "task-1") : []).toEqual([
+			"backlog",
+			"in_progress",
+			"review",
+		]);
 	});
 
 	it("given a card in review transitioning to running, when projected, then it moves to in_progress and broadcasts update", async () => {
 		const board = boardWithCard("review");
+		let projectedBoard: RuntimeBoardData | null = null;
 		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
 			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			projectedBoard = res.board;
 			return { value: res.value, state: createWorkspaceState("/path/to/workspace", res.board), saved: res.save };
 		});
 		const mockWorkspaceRegistry = {
@@ -387,6 +404,11 @@ describe("projectSessionSummaryColumn", () => {
 		expect(result).toBe(true);
 		expect(mockMutateWorkspaceState).toHaveBeenCalledWith("workspace-1", expect.any(Function));
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
+		expect(projectedBoard ? cardTransitions(projectedBoard, "task-1") : []).toEqual([
+			"backlog",
+			"review",
+			"in_progress",
+		]);
 	});
 
 	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {

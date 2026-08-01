@@ -42,6 +42,7 @@ export interface ScenarioDriver {
 	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectEnteredColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectEnteredColumnTimes(taskId: string, column: RuntimeBoardColumnId, count: number): Promise<void>;
 	expectAgentFinishedCleanly(taskId: string): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
 	killAgentProcess(taskId: string): Promise<void>;
@@ -259,6 +260,15 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				return hasTaskEnteredColumn(findCard(state.board, taskId), column) ? true : null;
 			}, `card ${taskId} to have entered ${column}`);
 		},
+		expectEnteredColumnTimes: async (taskId, column, count) => {
+			await waitFor(async () => {
+				const state = await loadState(context);
+				const entries = findCard(state.board, taskId).transitions?.filter(
+					(transition) => transition.column === column,
+				);
+				return entries?.length === count ? true : null;
+			}, `card ${taskId} to have entered ${column} ${count} time(s)`);
+		},
 		expectAgentFinishedCleanly: async (taskId) => {
 			await waitFor(async () => {
 				const summary = (await loadState(context)).sessions[taskId];
@@ -435,6 +445,7 @@ export async function mutateBoard(
 }
 
 function placeCard(board: RuntimeBoardData, card: RuntimeBoardCard, columnId: RuntimeBoardColumnId): RuntimeBoardData {
+	const sourceColumnId = card.transitions?.at(-1)?.column ?? columnId;
 	const withoutCard: RuntimeBoardData = {
 		...board,
 		columns: board.columns.map((column) => ({
@@ -442,12 +453,20 @@ function placeCard(board: RuntimeBoardData, card: RuntimeBoardCard, columnId: Ru
 			cards: column.cards.filter((candidate) => candidate.id !== card.id),
 		})),
 	};
-	return {
+	const seededBoard: RuntimeBoardData = {
 		...withoutCard,
 		columns: withoutCard.columns.map((column) =>
-			column.id === columnId ? { ...column, cards: [card, ...column.cards] } : column,
+			column.id === sourceColumnId ? { ...column, cards: [card, ...column.cards] } : column,
 		),
 	};
+	if (sourceColumnId === columnId) {
+		return seededBoard;
+	}
+	const moved = moveTaskToColumn(seededBoard, card.id, columnId);
+	if (!moved.moved) {
+		throw new ScenarioAssertionError(`Task ${card.id} did not move to initial column ${columnId}.`);
+	}
+	return moved.board;
 }
 
 function findCard(board: RuntimeBoardData, taskId: string): RuntimeBoardCard {

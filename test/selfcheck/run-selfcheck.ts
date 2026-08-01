@@ -1,8 +1,3 @@
-import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
 import { givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory } from "./scenarios/givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory";
 import { givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero } from "./scenarios/givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero";
@@ -14,6 +9,7 @@ import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./sc
 import { givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved } from "./scenarios/givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved";
 import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
+import { givenReviewCardWhenSteeredThenMovesToInProgress } from "./scenarios/givenReviewCardWhenSteeredThenMovesToInProgress";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
 import { givenRunningCardWhenSteeredThenAgentReceivesSubmittedText } from "./scenarios/givenRunningCardWhenSteeredThenAgentReceivesSubmittedText";
 import { givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts } from "./scenarios/givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts";
@@ -25,16 +21,6 @@ interface ScenarioResult {
 	error?: string;
 	artifactPath?: string;
 	knownFailureIssue?: string;
-}
-
-class SelfcheckScenarioError extends Error {
-	readonly artifactPath?: string;
-
-	constructor(message: string, options: { artifactPath?: string } = {}) {
-		super(message);
-		this.name = "SelfcheckScenarioError";
-		this.artifactPath = options.artifactPath;
-	}
 }
 
 async function main(): Promise<void> {
@@ -60,7 +46,14 @@ async function main(): Promise<void> {
 		}
 	});
 	await runScenario(results, "steer a Review card -> moves to In Progress", async () => {
-		await runBrowserScenario("review-steering");
+		const context = await createSelfcheckContext();
+		try {
+			await givenReviewCardWhenSteeredThenMovesToInProgress(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "review ping reaches the overseer session", async () => {
 		const context = await createSelfcheckContext();
@@ -186,68 +179,6 @@ async function runScenario(
 	process.stdout.write(`${formatScenarioResult(result)}\n`);
 }
 
-async function runBrowserScenario(name: string): Promise<void> {
-	const context = await createSelfcheckContext();
-	const artifactDir = resolve(process.cwd(), ".selfcheck-artifacts", `${name}-${Date.now()}`);
-	try {
-		await ensureBuiltUi();
-		await mkdir(artifactDir, { recursive: true });
-		const result = spawnSync(
-			"npm",
-			[
-				"exec",
-				"--",
-				"playwright",
-				"test",
-				"tests/selfcheck.spec.ts",
-				"--config",
-				"playwright.selfcheck.config.ts",
-				"--reporter",
-				"list",
-			],
-			{
-				cwd: resolve(process.cwd(), "web-ui"),
-				encoding: "utf8",
-				env: {
-					...process.env,
-					KANBAN_SELFCHECK_BASE_URL: context.baseUrl,
-					KANBAN_SELFCHECK_WORKSPACE_ID: context.workspaceId,
-					KANBAN_SELFCHECK_HOME: context.instance.homeDir,
-					KANBAN_SELFCHECK_ARTIFACT_DIR: artifactDir,
-				},
-			},
-		);
-		if (result.status !== 0) {
-			const output = `${result.stdout}\n${result.stderr}`;
-			await writeFile(resolve(artifactDir, "playwright-output.txt"), output, "utf8");
-			if (output.includes("Executable doesn't exist") || output.includes("playwright install")) {
-				throw new SelfcheckScenarioError(
-					"Chromium is missing; run: npm --prefix web-ui exec playwright install chromium.",
-					{ artifactPath: artifactDir },
-				);
-			}
-			throw new SelfcheckScenarioError("Review card did not move to In Progress after steering.", {
-				artifactPath: artifactDir,
-			});
-		}
-	} finally {
-		await context.stop();
-	}
-}
-
-async function ensureBuiltUi(): Promise<void> {
-	if (existsSync(resolve(process.cwd(), "web-ui/dist/index.html"))) {
-		return;
-	}
-	const result = spawnSync("npm", ["--prefix", "web-ui", "run", "build"], {
-		encoding: "utf8",
-		env: process.env,
-	});
-	if (result.status !== 0) {
-		throw new Error(`web-ui build failed: ${compactCommandOutput(`${result.stdout}\n${result.stderr}`)}`);
-	}
-}
-
 function formatScenarioResult(result: ScenarioResult): string {
 	if (result.status === "pass") {
 		return `PASS ${result.name} ${result.durationMs}ms`;
@@ -272,20 +203,9 @@ function formatError(error: unknown): string {
 }
 
 function extractArtifactPath(error: unknown): string | undefined {
-	if (error instanceof SelfcheckScenarioError) {
-		return error.artifactPath;
-	}
 	const message = error instanceof Error ? error.message : String(error);
 	const match = message.match(/artifact=([^;\s]+)/);
 	return match?.[1] ?? undefined;
-}
-
-function compactCommandOutput(output: string): string {
-	const lines = output
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0);
-	return lines.slice(-4).join(" | ");
 }
 
 void main().catch((error) => {
