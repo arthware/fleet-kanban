@@ -389,6 +389,58 @@ describe("projectSessionSummaryColumn", () => {
 		expect(mockBroadcast).toHaveBeenCalledWith("workspace-1", "/path/to/workspace");
 	});
 
+	it("given a steered review card returns to review, when projected from session state, then transitions record both review entries", async () => {
+		vi.useFakeTimers();
+		try {
+			const created = addTaskToColumn(
+				emptyBoard(),
+				"backlog",
+				{ taskId: "task-1", prompt: "Ship a feature", baseRef: "main" },
+				() => "task-1",
+				1,
+			);
+			const firstReview = moveTaskToColumn(created.board, "task-1", "review", 2);
+			let board = firstReview.board;
+			mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+				const res = mutate(createWorkspaceState("/path/to/workspace", board));
+				if (res.board) {
+					board = res.board;
+				}
+				return { value: res.value, state: createWorkspaceState("/path/to/workspace", board), saved: res.save };
+			});
+			const mockWorkspaceRegistry = {
+				getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+			};
+			const mockBroadcast = vi.fn();
+
+			vi.setSystemTime(3);
+			await projectSessionSummaryColumn(
+				"workspace-1",
+				{ taskId: "task-1", state: "running" },
+				mockWorkspaceRegistry,
+				mockBroadcast,
+			);
+			vi.setSystemTime(4);
+			await projectSessionSummaryColumn(
+				"workspace-1",
+				{ taskId: "task-1", state: "awaiting_review" },
+				mockWorkspaceRegistry,
+				mockBroadcast,
+			);
+
+			const card = board.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === "task-1");
+			expect(card?.transitions?.map((transition) => transition.column)).toEqual([
+				"backlog",
+				"review",
+				"in_progress",
+				"review",
+			]);
+			expect(card?.transitions?.filter((transition) => transition.column === "review")).toHaveLength(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("given a card already in the target column, when projected, then it no-ops and returns false", async () => {
 		const board = boardWithCard("review");
 		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {

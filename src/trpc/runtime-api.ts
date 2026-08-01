@@ -91,6 +91,17 @@ export interface CreateRuntimeApiDependencies {
 	delay?: (ms: number) => Promise<void>;
 }
 
+function resumeSessionForHumanInput(
+	terminalManager: TerminalSessionManager,
+	taskId: string,
+	summary: RuntimeTaskSessionSummary,
+): RuntimeTaskSessionSummary {
+	if (summary.state !== "awaiting_review") {
+		return summary;
+	}
+	return terminalManager.resumeFromHumanInput(taskId) ?? summary;
+}
+
 async function resolveExistingTaskCwdOrEnsure(options: {
 	cwd: string;
 	taskId: string;
@@ -168,6 +179,15 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			// Submit-only path: if body.text is empty, write a lone \r directly and return.
 			if (body.text === "") {
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
+				const existingSummary = terminalManager.getSummary(body.taskId);
+				if (!existingSummary) {
+					return {
+						ok: false,
+						summary: null,
+						error: "Task session is not running.",
+					};
+				}
+				const resumedSummary = resumeSessionForHumanInput(terminalManager, body.taskId, existingSummary);
 				const summary = terminalManager.writeInput(body.taskId, Buffer.from("\r", "utf8"));
 				if (!summary) {
 					return {
@@ -176,13 +196,9 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						error: "Task session is not running.",
 					};
 				}
-				const resumedSummary =
-					summary.state === "awaiting_review"
-						? (terminalManager.resumeFromHumanInput(body.taskId) ?? summary)
-						: summary;
 				return {
 					ok: true,
-					summary: resumedSummary,
+					summary: summary.state === resumedSummary.state ? summary : resumedSummary,
 				};
 			}
 
@@ -195,6 +211,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					error: "Task session is not running.",
 				};
 			}
+			summary = resumeSessionForHumanInput(terminalManager, body.taskId, summary);
 
 			if (body.bracketedPaste) {
 				const agentId = summary.agentId;
@@ -253,9 +270,6 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						error: "Task session is not running.",
 					};
 				}
-			}
-			if (summary.state === "awaiting_review") {
-				summary = terminalManager.resumeFromHumanInput(body.taskId) ?? summary;
 			}
 			return {
 				ok: true,
