@@ -38,6 +38,11 @@ jobs:
       - name: Install Web UI Dependencies
         run: npm ci --prefix web-ui
 
+      # The selfcheck scenarios drive a real browser (see the review-steering
+      # scenario), so CI needs Playwright's Chromium available.
+      - name: Install Playwright Chromium
+        run: npm --prefix web-ui exec playwright install --with-deps chromium
+
       # Configuring a global git identity is required because some fast tests
       # query git history, verify workspace post-create hooks, or commit to mock/temp repositories.
       - name: Configure Git Identity
