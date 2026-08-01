@@ -62,7 +62,7 @@
     "format": "npx @biomejs/biome check --write .",
     "check": "npm run verify",
     "verify:precommit": "node scripts/check-agent-paths.mjs && npm run lint && npm run typecheck && npm run test:fast && npm --prefix web-ui run test",
-    "verify": "npm run verify:precommit && npm run web:build && npm run selfcheck",
+    "verify": "npm run verify:precommit && npm run build && npm run selfcheck",
     "test": "vitest run",
     "test:fast": "vitest run test/runtime test/utilities test/agents --exclude \"**/*.live.test.ts\"",
     "tck:live": "vitest run test/agents/tck/live-conformance.live.test.ts",
