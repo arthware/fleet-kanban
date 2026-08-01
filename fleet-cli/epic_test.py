@@ -144,11 +144,26 @@ class TestEpicCommand(unittest.TestCase):
             mock_projects_payload if path == "projects.list" else {"ok": True}
         )
 
+        # Mock git calls for clean status, merge-base, diff --name-only, and diff --quiet (not contained)
+        def git_run_side_effect(repo_path, args, check=True):
+            if "status" in args:
+                return MagicMock(returncode=0, stdout="")
+            elif "merge-base" in args:
+                return MagicMock(returncode=0, stdout="merge-base-sha")
+            elif "diff" in args and "--name-only" in args:
+                return MagicMock(returncode=0, stdout="file.txt")
+            elif "diff" in args and "--quiet" in args:
+                return MagicMock(returncode=1) # Not contained
+            elif "worktree" in args and "remove" in args:
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0, stdout="")
+        mock_git.side_effect = git_run_side_effect
+
         # Mock gh pr create run
         mock_sub_run.return_value = MagicMock(returncode=0, stdout="https://github.com/mock/pr/1")
 
         # Act (When)
-        res = fleet.epic_complete("cool-feature", "my-repo", self.cfg)
+        res = fleet.epic_complete("cool-feature", "my-repo", self.cfg, force=True)
 
         # Assert (Then)
         self.assertEqual(res, 0)
@@ -433,6 +448,164 @@ class TestEpicCommand(unittest.TestCase):
 
         # Act
         res = fleet.epic_sync("cool-feature", "my-repo", self.cfg)
+
+        # Assert
+        self.assertEqual(res, 1)
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_given_already_merged_epic_when_epic_complete_then_skips_pr_creation(
+        self, mock_exists, mock_sub_run, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When the epic branch is already merged/contained, skip PR creation but archive and remove worktree."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_exists.return_value = True
+        mock_socket.return_value = MagicMock()
+        mock_projects_payload = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
+
+        # Mock git showing branch is fully contained (diff --quiet returns 0)
+        def git_run_side_effect(repo_path, args, check=True):
+            if "status" in args:
+                return MagicMock(returncode=0, stdout="")
+            elif "merge-base" in args:
+                return MagicMock(returncode=0, stdout="merge-base-sha")
+            elif "diff" in args and "--name-only" in args:
+                return MagicMock(returncode=0, stdout="file.txt")
+            elif "diff" in args and "--quiet" in args:
+                return MagicMock(returncode=0) # Contained!
+            elif "worktree" in args and "remove" in args:
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0, stdout="")
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_complete("cool-feature", "my-repo", self.cfg)
+
+        # Assert
+        self.assertEqual(res, 0)
+        # Verify PR creation (subprocess.run) was NOT called
+        mock_sub_run.assert_not_called()
+        # Verify archive call via setEpic
+        mock_trpc.assert_any_call(self.cfg, "projects.setEpic", {
+            "workspaceId": "epic-ws-id",
+            "epic": {
+                "name": "cool-feature",
+                "branch": "epic/cool-feature",
+                "base": "production-line",
+                "archived": True
+            }
+        })
+        # Verify worktree removal
+        mock_git.assert_any_call(self.repo_path, ["worktree", "remove", "/mock/project/cline/epics/my-repo@cool-feature"], check=False)
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    @patch("pathlib.Path.exists")
+    def test_given_uncommitted_changes_when_epic_complete_without_force_then_returns_error(
+        self, mock_exists, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When completing an epic with uncommitted changes without force, it fails."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_exists.return_value = True
+        mock_socket.return_value = MagicMock()
+        mock_projects_payload = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
+
+        # Mock git showing dirty worktree status
+        def git_run_side_effect(repo_path, args, check=True):
+            if "status" in args:
+                return MagicMock(returncode=0, stdout="M file.txt")
+            return MagicMock(returncode=0, stdout="")
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_complete("cool-feature", "my-repo", self.cfg, force=False)
+
+        # Assert
+        self.assertEqual(res, 1)
+
+    @patch("fleet._resolve_repo")
+    @patch("fleet.git_run")
+    @patch("fleet.trpc_call")
+    @patch("socket.socket")
+    @patch("pathlib.Path.exists")
+    def test_given_unmerged_commits_when_epic_complete_without_force_then_returns_error(
+        self, mock_exists, mock_socket, mock_trpc, mock_git, mock_resolve
+    ):
+        """Unit: When completing an epic with unmerged/uncontained commits without force, it fails."""
+        # Arrange
+        mock_resolve.return_value = self.repo_path
+        mock_exists.return_value = True
+        mock_socket.return_value = MagicMock()
+        mock_projects_payload = {
+            "projects": [
+                {
+                    "id": "epic-ws-id",
+                    "path": "/mock/project/cline/epics/my-repo@cool-feature",
+                    "epic": {
+                        "name": "cool-feature",
+                        "branch": "epic/cool-feature",
+                        "base": "production-line"
+                    }
+                }
+            ]
+        }
+        mock_trpc.side_effect = lambda cfg, path, data=None, timeout=10: (
+            mock_projects_payload if path == "projects.list" else {"ok": True}
+        )
+
+        # Mock git showing uncontained commits (diff --quiet returns 1)
+        def git_run_side_effect(repo_path, args, check=True):
+            if "status" in args:
+                return MagicMock(returncode=0, stdout="")
+            elif "merge-base" in args:
+                return MagicMock(returncode=0, stdout="merge-base-sha")
+            elif "diff" in args and "--name-only" in args:
+                return MagicMock(returncode=0, stdout="file.txt")
+            elif "diff" in args and "--quiet" in args:
+                return MagicMock(returncode=1) # Not contained!
+            return MagicMock(returncode=0, stdout="")
+        mock_git.side_effect = git_run_side_effect
+
+        # Act
+        res = fleet.epic_complete("cool-feature", "my-repo", self.cfg, force=False)
 
         # Assert
         self.assertEqual(res, 1)
