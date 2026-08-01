@@ -77,7 +77,7 @@ export async function givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtif
 	}
 }
 
-function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
+export function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
 	const fleetProjectDir = join(root, "fleet_project");
 	const depPath = join(root, "dependency-repo");
 	const repoPath = join(fleetProjectDir, "main-repo");

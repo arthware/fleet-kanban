@@ -9,6 +9,7 @@ import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./sc
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
 import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
 import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
+import { givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved } from "./scenarios/givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved";
 import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
@@ -85,6 +86,13 @@ async function main(): Promise<void> {
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
 	});
+	await runScenario(
+		results,
+		"completing an epic removes its worktree and hides archived epic workspaces from listing",
+		async () => {
+			await givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved();
+		},
+	);
 	await runScenario(results, "a gemini notification parks the card, a steer wakes it", async () => {
 		const context = await createSelfcheckContext();
 		try {

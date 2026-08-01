@@ -1001,7 +1001,7 @@ def epic_complete(name: str, repo: str, cfg: dict, force: bool = False):
 
     # 1. Durability Gate: Check uncommitted changes in epic worktree
     if wt_path.exists():
-        status_res = git_run(wt_path, ["status", "--porcelain"], check=False)
+        status_res = git_run(wt_path, ["status", "--porcelain", "-uno"], check=False)
         if status_res.returncode == 0 and status_res.stdout.strip():
             if not force:
                 print(f"{RED}Error: Epic worktree has uncommitted changes at '{wt_path}'. Use --force to complete anyway.{RESET}", file=sys.stderr)
@@ -1074,10 +1074,7 @@ def epic_complete(name: str, repo: str, cfg: dict, force: bool = False):
     # 5. Remove git worktree
     if wt_path.exists():
         print(f"Removing epic worktree at {wt_path}...")
-        remove_args = ["worktree", "remove"]
-        if force:
-            remove_args.append("--force")
-        remove_args.append(str(wt_path))
+        remove_args = ["worktree", "remove", "--force", str(wt_path)]
         
         wt_remove_res = git_run(rp, remove_args, check=False)
         if wt_remove_res.returncode != 0:
