@@ -2,18 +2,17 @@ import { assertOk, createSelfcheckCard, driverContext, loadState, type ScenarioD
 
 export async function givenReviewCardWhenSteeredThenMovesToInProgress(driver: ScenarioDriver): Promise<void> {
 	const taskId = "selfcheck-steer-review";
+	await createReviewSteeringCard(driver, taskId);
+	await driver.steerCard(taskId, "Continue after review.");
+	await driver.expectEnteredColumn(taskId, "in_progress");
+}
+
+export async function givenSteeredReviewCardWhenReturnsToReviewThenTransitionsRecordRoundTrip(
+	driver: ScenarioDriver,
+): Promise<void> {
+	const taskId = "selfcheck-steer-review-history";
 	const context = driverContext(driver);
-	await driver.createCard({
-		column: "backlog",
-		card: createSelfcheckCard({
-			id: taskId,
-			title: "Selfcheck steer review",
-			agentId: "claude",
-			prompt: "Wait for steering input.",
-		}),
-	});
-	await driver.startCard(taskId);
-	await driver.expectColumn(taskId, "review");
+	await createReviewSteeringCard(driver, taskId);
 	await driver.steerCard(taskId, "Continue after review.");
 	await driver.expectEnteredColumn(taskId, "in_progress");
 	await driver.ingestNativeHook(taskId, {
@@ -29,4 +28,18 @@ export async function givenReviewCardWhenSteeredThenMovesToInProgress(driver: Sc
 		const columns = task.transitions?.map((transition) => transition.column) ?? [];
 		return columns.join(" > ") === "backlog > in_progress > review > in_progress > review" ? true : null;
 	}, `${taskId} to record a full review steering round-trip`);
+}
+
+async function createReviewSteeringCard(driver: ScenarioDriver, taskId: string): Promise<void> {
+	await driver.createCard({
+		column: "backlog",
+		card: createSelfcheckCard({
+			id: taskId,
+			title: "Selfcheck steer review",
+			agentId: "claude",
+			prompt: "Wait for steering input.",
+		}),
+	});
+	await driver.startCard(taskId);
+	await driver.expectColumn(taskId, "review");
 }
