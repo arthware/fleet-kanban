@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import { estimateAgentCostUsd, RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { buildHooksCommand, getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import { createHookRuntimeEnv } from "../../terminal/hook-runtime-context";
@@ -407,12 +407,16 @@ function selectGeminiUsage(record: TranscriptRecord): RuntimeTaskTokenUsage | nu
 	if (!tokens) {
 		return null;
 	}
-	return {
+	const modelId = readString(record, "model") ?? null;
+	const sums = {
 		inputTokens: readNumber(tokens, "input"),
 		outputTokens: readNumber(tokens, "output"),
 		cacheReadTokens: readNumber(tokens, "cached"),
 		cacheCreationTokens: 0,
-		costUsd: null,
+	};
+	return {
+		...sums,
+		costUsd: estimateAgentCostUsd("gemini", modelId, sums),
 	};
 }
 
