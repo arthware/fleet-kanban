@@ -29,6 +29,13 @@ import type {
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
+import {
+	deriveFromTranscript,
+	foldTranscript,
+	type TranscriptDerivation,
+	type TranscriptFold,
+	type TranscriptRecord,
+} from "../shared/observe";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 import { buildClaudeHookSettings } from "./hook-settings";
 
@@ -352,57 +359,31 @@ export function createClaudeDriver(context?: ObservationRequest): AgentDriver {
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseClaudeTranscript(records);
-					return supported(mapToObservationMessages(richMsgs));
-				} catch {
-					return supported([]);
-				}
+				const richMsgs = await deriveFromTranscript(loc.path, CLAUDE_TRANSCRIPT);
+				return supported(mapToObservationMessages(richMsgs));
 			},
 			transcript: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseClaudeTranscript(records);
-					return supported(richMsgs);
-				} catch {
-					return supported([]);
-				}
+				return supported(await deriveFromTranscript(loc.path, CLAUDE_TRANSCRIPT));
 			},
 			usage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported({ inputTokens: 0, outputTokens: 0 });
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported({ inputTokens: 0, outputTokens: 0 });
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveClaudeUsage(records);
-					if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
-					return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
-				} catch {
-					return supported({ inputTokens: 0, outputTokens: 0 });
-				}
+				const usage = await foldTranscript(loc.path, CLAUDE_USAGE);
+				if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
+				return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 			},
 			richUsage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported(null);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported(null);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveClaudeUsage(records);
-					return supported(usage);
-				} catch {
-					return supported(null);
-				}
+				return supported(await foldTranscript(loc.path, CLAUDE_USAGE));
 			},
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
@@ -560,24 +541,11 @@ async function isFile(filePath: string): Promise<boolean> {
 
 // --- Parsing ---------------------------------------------------------------
 
-function parseJsonlRecords(raw: string): Record<string, unknown>[] {
-	const records: Record<string, unknown>[] = [];
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			continue;
-		}
-		try {
-			const parsed: unknown = JSON.parse(trimmed);
-			if (isRecord(parsed)) {
-				records.push(parsed);
-			}
-		} catch {
-			// Tolerate a partially-flushed / corrupt trailing line.
-		}
-	}
-	return records;
-}
+/** The full conversation — the on-demand path, taken when a card is opened. */
+const CLAUDE_TRANSCRIPT: TranscriptDerivation<RuntimeTaskChatMessage[]> = {
+	id: "claude-transcript",
+	derive: (records) => parseClaudeTranscript([...records]),
+};
 
 function parseClaudeTranscript(records: Record<string, unknown>[]): RuntimeTaskChatMessage[] {
 	const messages: RuntimeTaskChatMessage[] = [];
@@ -674,44 +642,82 @@ function extractClaudeText(content: unknown): string {
 	return parts.join("\n").trim();
 }
 
+/**
+ * Claude reports per-message usage, never a running total, so the session's
+ * cumulative figure is a genuine sum over history — it cannot be read from the
+ * tail. It is expressed as a fold instead: the shared transcript source keeps the
+ * accumulator behind a byte-offset cursor, so history is summed once per file and
+ * every later observation folds only the records appended since.
+ */
+interface ClaudeUsageTotals {
+	readonly seen: Set<string>;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheCreationTokens: number;
+	counted: number;
+	modelId: string | null;
+}
+
+const CLAUDE_USAGE: TranscriptFold<ClaudeUsageTotals, RuntimeTaskTokenUsage | null> = {
+	id: "claude-usage",
+	seed: () => ({
+		seen: new Set<string>(),
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
+		counted: 0,
+		modelId: null,
+	}),
+	step: (totals, record) => addClaudeUsageRecord(totals, record),
+	finish: (totals) => {
+		if (totals.counted === 0) {
+			return null;
+		}
+		const sums = {
+			inputTokens: totals.inputTokens,
+			outputTokens: totals.outputTokens,
+			cacheReadTokens: totals.cacheReadTokens,
+			cacheCreationTokens: totals.cacheCreationTokens,
+		};
+		return { ...sums, costUsd: estimateClaudeCostUsd(sums, totals.modelId) };
+	},
+};
+
+/**
+ * Add one record's usage to the running totals, ignoring anything that is not a
+ * billable assistant turn. Retries re-log the same message, so a message is
+ * counted once per `(message id, request id)` pair.
+ */
+function addClaudeUsageRecord(totals: ClaudeUsageTotals, record: TranscriptRecord): ClaudeUsageTotals {
+	if (readString(record, "type") !== "assistant" || record.isSidechain === true || record.isMeta === true) {
+		return totals;
+	}
+	const message = asRecord(record.message);
+	const usage = message ? asRecord(message.usage) : null;
+	if (!message || !usage) {
+		return totals;
+	}
+
+	const dedupeKey = `${readString(message, "id") ?? ""} ${readString(record, "requestId") ?? ""}`;
+	if (totals.seen.has(dedupeKey)) {
+		return totals;
+	}
+	totals.seen.add(dedupeKey);
+
+	totals.inputTokens += readNumber(usage, "input_tokens");
+	totals.outputTokens += readNumber(usage, "output_tokens");
+	totals.cacheReadTokens += readNumber(usage, "cache_read_input_tokens");
+	totals.cacheCreationTokens += readNumber(usage, "cache_creation_input_tokens");
+	totals.modelId = readString(message, "model") ?? totals.modelId;
+	totals.counted += 1;
+	return totals;
+}
+
+/** The same sum as {@link CLAUDE_USAGE}, over records already in hand. */
 export function deriveClaudeUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
-	const seen = new Set<string>();
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let cacheReadTokens = 0;
-	let cacheCreationTokens = 0;
-	let counted = 0;
-	let modelId: string | null = null;
-
-	for (const record of records) {
-		if (readString(record, "type") !== "assistant" || record.isSidechain === true || record.isMeta === true) {
-			continue;
-		}
-		const message = asRecord(record.message);
-		const usage = message ? asRecord(message.usage) : null;
-		if (!message || !usage) {
-			continue;
-		}
-
-		const dedupeKey = `${readString(message, "id") ?? ""} ${readString(record, "requestId") ?? ""}`;
-		if (seen.has(dedupeKey)) {
-			continue;
-		}
-		seen.add(dedupeKey);
-
-		inputTokens += readNumber(usage, "input_tokens");
-		outputTokens += readNumber(usage, "output_tokens");
-		cacheReadTokens += readNumber(usage, "cache_read_input_tokens");
-		cacheCreationTokens += readNumber(usage, "cache_creation_input_tokens");
-		modelId = readString(message, "model") ?? modelId;
-		counted += 1;
-	}
-
-	if (counted === 0) {
-		return null;
-	}
-	const totals = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
-	return { ...totals, costUsd: estimateClaudeCostUsd(totals, modelId) };
+	return CLAUDE_USAGE.finish(records.reduce(addClaudeUsageRecord, CLAUDE_USAGE.seed()));
 }
 
 // --- Mapping ---------------------------------------------------------------

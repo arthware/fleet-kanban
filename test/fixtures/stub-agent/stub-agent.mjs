@@ -53,7 +53,11 @@ const markerPath = join(cwd, "stub-agent-output.txt");
 // the discovery path has something real to find and the id it settles on is
 // known to the scenario asserting on it.
 const STUB_DISCOVERED_SESSION_ID = "5e1fc4ec-0000-4000-8000-000000000001";
-if (taskId === "selfcheck-discovered-session-id" && process.env.HOME) {
+// Scenarios that assert on a discovered session — or on what the board does with
+// the transcript behind it. One list, because both halves of the impersonation
+// (write the rollout, stay alive for the discovery poll) must cover the same tasks.
+const DISCOVERABLE_SESSION_TASK_IDS = new Set(["selfcheck-discovered-session-id", "selfcheck-transcript-read-cost"]);
+if (DISCOVERABLE_SESSION_TASK_IDS.has(taskId) && process.env.HOME) {
 	const sessionsDir = join(process.env.HOME, ".codex", "sessions", "2026", "07", "30");
 	mkdirSync(sessionsDir, { recursive: true });
 	writeFileSync(
@@ -91,7 +95,7 @@ run("git", ["commit", "-qm", `stub agent commit for ${taskId}`], { cwd });
 // asserts on it needs the stub to stay up rather than exit in 100ms.
 const sleepMs =
 	taskId === "selfcheck-restart-after-gone" ||
-	taskId === "selfcheck-discovered-session-id" ||
+	DISCOVERABLE_SESSION_TASK_IDS.has(taskId) ||
 	taskId.includes("steer") ||
 	taskId.startsWith("gemini-test")
 		? 60000

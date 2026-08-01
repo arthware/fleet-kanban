@@ -170,7 +170,7 @@ function assertShapeExplicitlyShared(worktreePath: string): void {
 	assertOk(isSymlink === false, "node_modules must not be a symlink even when explicitly listed in sharedPaths.");
 }
 
-function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
+export function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
 	const fleetProjectDir = join(root, "fleet_project");
 	const depPath = join(root, "dependency-repo");
 	const repoPath = join(fleetProjectDir, "main-repo");

@@ -17,11 +17,16 @@ import { computeGitDirToken } from "../workspace/git-dir-token";
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync";
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree";
 
-export const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
+// Each tick probes git state and PR state for every tracked card, which means
+// subprocess work proportional to board size. None of it needs second-level
+// granularity: a card's ahead/behind counts and PR status are things an operator
+// reads, not reacts to within a second. Five seconds cuts that work 5x for no
+// perceptible loss.
+export const WORKSPACE_METADATA_POLL_INTERVAL_MS = 5_000;
 export const PR_STATE_REFRESH_MIN_MS = 60_000;
 // A card that reaches review without a PR yet is re-checked at most this often,
 // so a review card lacking a pushed PR does not spawn a `gh` subprocess on every
-// one-second poll. Capturing a found PR is idempotent and never re-runs.
+// poll. Capturing a found PR is idempotent and never re-runs.
 const PR_RESOLVE_RETRY_INTERVAL_MS = 30_000;
 
 interface TrackedTaskWorkspace {

@@ -4,12 +4,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory } from "./scenarios/givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory";
 import { givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero } from "./scenarios/givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero";
 import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
 import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
 import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
 import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
+import { givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved } from "./scenarios/givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved";
 import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
@@ -86,6 +88,13 @@ async function main(): Promise<void> {
 	await runScenario(results, "worktree shapes keep env, submodules, and exclude heavy artifacts", async () => {
 		await givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts();
 	});
+	await runScenario(
+		results,
+		"completing an epic removes its worktree and hides archived epic workspaces from listing",
+		async () => {
+			await givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved();
+		},
+	);
 	await runScenario(results, "a gemini notification parks the card, a steer wakes it", async () => {
 		const context = await createSelfcheckContext();
 		try {
@@ -116,6 +125,16 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
+	await runScenario(results, "polling a card stays cheap as its transcript grows", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
 	await runScenario(results, "CLI contract: help and usage exits", async () => {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();
 	});
@@ -123,10 +142,12 @@ async function main(): Promise<void> {
 		await givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero();
 	});
 
-	for (const result of results) {
-		process.stdout.write(`${formatScenarioResult(result)}\n`);
-	}
-	if (results.some((result) => result.status === "fail" || result.status === "unexpected-pass")) {
+	const passed = results.filter((r) => r.status === "pass").length;
+	const failed = results.filter((r) => r.status === "fail" || r.status === "unexpected-pass").length;
+	const knownFailed = results.filter((r) => r.status === "known-fail").length;
+	process.stdout.write(`\nSelfcheck completed: ${passed} passed, ${failed} failed, ${knownFailed} known-failed\n`);
+
+	if (failed > 0) {
 		process.exitCode = 1;
 	}
 }
@@ -137,10 +158,12 @@ async function runScenario(
 	run: () => Promise<void>,
 	options: { knownFailureIssue?: string } = {},
 ): Promise<void> {
+	process.stdout.write(`START: ${name}\n`);
 	const startedAt = Date.now();
+	let result: ScenarioResult;
 	try {
 		await run();
-		results.push({
+		result = {
 			name,
 			status: options.knownFailureIssue ? "unexpected-pass" : "pass",
 			durationMs: Date.now() - startedAt,
@@ -148,17 +171,19 @@ async function runScenario(
 			error: options.knownFailureIssue
 				? `Known failure ${options.knownFailureIssue} passed; remove the marker.`
 				: undefined,
-		});
+		};
 	} catch (error) {
-		results.push({
+		result = {
 			name,
 			status: options.knownFailureIssue ? "known-fail" : "fail",
 			durationMs: Date.now() - startedAt,
 			error: formatError(error),
 			artifactPath: extractArtifactPath(error),
 			knownFailureIssue: options.knownFailureIssue,
-		});
+		};
 	}
+	results.push(result);
+	process.stdout.write(`${formatScenarioResult(result)}\n`);
 }
 
 async function runBrowserScenario(name: string): Promise<void> {

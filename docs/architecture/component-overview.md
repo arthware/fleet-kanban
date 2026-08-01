@@ -140,6 +140,7 @@ Streams live state, keys the architect chat to a workspace, drives PTYs, issues 
 | How **durable session metrics/pointers are harvested/stored** | `src/core/session-ledger.ts` (`harvestActiveTaskSession`) |
 | Add support for a **new agent CLI** (e.g. gemini) | `src/agents/` (new driver directory) + `terminal/agent-session-adapters.ts` (new adapter + `ADAPTERS`) + `core/agent-catalog` + `agent-registry.ts` + (resume) `agent-transcript-locator.ts` & `agent-session-launch.ts` |
 | **Transcript-locator** matching / add a read-only transcript read path | `src/agents/<agent>/driver.ts` (observe.transcript) + a new tRPC read proc + client fetch |
+| **Reading a transcript at all** (usage, conversation, liveness) | `src/agents/shared/observe.ts` — the ONE owner; add a tail query / fold / derivation, never a file read in a driver |
 | Shared driver logic for port member X | `src/agents/shared/X.ts` |
 | **Resume-vs-fresh** / session lifecycle rules | `terminal/agent-session-launch.ts` |
 | **Architect detection** / containment | `server/architect-workspace.ts` (`classifyArchitectWorkspace`) |

@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { AgentDriver, DriverSessionRef } from "../../../src/agents/driver";
 import type { AgentFact, SessionSignal } from "../../../src/agents/session-signal";
+import { forgetTranscripts, getTranscriptReadCost, resetTranscriptReadCost } from "../../../src/agents/shared/observe";
 import {
 	getClaudeMockTranscriptPath,
 	getCodexMockTranscriptPath,
@@ -59,6 +60,44 @@ export function findDriverIntegrationScopeViolations(input: DriverIntegrationDif
 	return input.changedFiles.filter(
 		(file) => !file.startsWith(driverPrefix) && !file.startsWith(fixturePrefix) && !allowedFiles.has(file),
 	);
+}
+
+/**
+ * Where a driver's harness would store the transcript for `sessionId` under a
+ * throwaway home. Mirrors the layouts the locate test seeds, in one place so the
+ * cost gate can grow transcripts without re-deriving each harness's paths.
+ */
+function mockTranscriptPathFor(driverId: string, homePath: string, sessionId: string): string | null {
+	if (driverId === "claude") {
+		return getClaudeMockTranscriptPath(homePath, sessionId, "default");
+	}
+	if (driverId === "codex") {
+		return getCodexMockTranscriptPath(
+			homePath,
+			sessionId,
+			"2026/07/31",
+			`rollout-2026-07-31T12-00-00-${sessionId}.jsonl`,
+		);
+	}
+	if (driverId === "gemini") {
+		return getGeminiMockTranscriptPath(homePath, sessionId, "default", `session-12345678-${sessionId}.jsonl`);
+	}
+	return null;
+}
+
+/** A record every harness parser ignores — pure bulk, so size is the only variable. */
+function paddingLine(index: number): string {
+	return `${JSON.stringify({ type: "tck-padding", index, pad: "x".repeat(512) })}\n`;
+}
+
+function seedTranscript(path: string, targetBytes: number): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const perLine = paddingLine(0).length;
+	let buffer = "";
+	for (let index = 0; index < Math.ceil(targetBytes / perLine); index += 1) {
+		buffer += paddingLine(index);
+	}
+	writeFileSync(path, buffer, "utf8");
 }
 
 export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures): void {
@@ -181,6 +220,56 @@ export function describeDriverTck(driver: AgentDriver, fixtures: DriverFixtures)
 					}
 				} finally {
 					rmSync(tempHome, { recursive: true, force: true });
+				}
+			},
+		);
+
+		// THE cost gate. Every previous freeze fix asserted the returned VALUE and
+		// passed cleanly against whole-file re-parsing. This asserts what the
+		// observation cost: a driver that reads its transcript from byte zero fails
+		// here the moment its transcript outgrows a 256 KB transcript's.
+		it.skipIf(driver.catalog.binary === "fake-agent")(
+			"givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory",
+			async () => {
+				const sessionId = "0badc0de-abcd-ef01-2345-6789abcdef01";
+				const largeHome = mkdtempSync(join(tmpdir(), `tck-cost-large-${driver.id}-`));
+				const smallHome = mkdtempSync(join(tmpdir(), `tck-cost-small-${driver.id}-`));
+				const largePath = mockTranscriptPathFor(driver.id, largeHome, sessionId);
+				const smallPath = mockTranscriptPathFor(driver.id, smallHome, sessionId);
+				expect(largePath).not.toBeNull();
+				expect(smallPath).not.toBeNull();
+				if (!largePath || !smallPath) {
+					return;
+				}
+
+				try {
+					seedTranscript(largePath, 20 * 1024 * 1024);
+					seedTranscript(smallPath, 256 * 1024);
+					forgetTranscripts();
+
+					// One warm observation each, then both grow by the same single record.
+					await driver.observe.richUsage({ sessionId, homePath: largeHome });
+					await driver.observe.richUsage({ sessionId, homePath: smallHome });
+					appendFileSync(largePath, paddingLine(1_000_000), "utf8");
+					appendFileSync(smallPath, paddingLine(1_000_000), "utf8");
+
+					resetTranscriptReadCost();
+					await driver.observe.richUsage({ sessionId, homePath: largeHome });
+					const largeCost = getTranscriptReadCost();
+					resetTranscriptReadCost();
+					await driver.observe.richUsage({ sessionId, homePath: smallHome });
+					const smallCost = getTranscriptReadCost();
+
+					// The large transcript holds ~80x the records of the small one. Both
+					// observations must read the same bytes and parse the same handful:
+					// window boundaries fall on different line offsets in the two files,
+					// so parse counts may differ by a line or two — never by a magnitude.
+					expect(largeCost.bytesRead).toBe(smallCost.bytesRead);
+					expect(largeCost.bytesRead).toBeLessThan(512 * 1024);
+					expect(largeCost.recordsParsed).toBeLessThan(smallCost.recordsParsed + 16);
+				} finally {
+					rmSync(largeHome, { recursive: true, force: true });
+					rmSync(smallHome, { recursive: true, force: true });
 				}
 			},
 		);

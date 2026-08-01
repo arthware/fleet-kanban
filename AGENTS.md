@@ -134,6 +134,13 @@ Misc. tribal knowledge
 - A repo's `.cline/kanban/config.json` can carry `worktree.postCreateCommand`, an auto-running command executed once after Kanban creates a new task worktree; review changes to that file like executable project config.
 - If CI hangs on Node 22 after tests seem to finish, suspect a live subprocess or SDK-host startup path before assuming a slow test body. Read `.plan/docs/node22-ci-hanging-tests-investigation.md` before repeating that investigation. `test/runtime/cline-sdk/cline-task-session-service.test.ts` was the big prior culprit because a unit-style suite was still booting the real Cline SDK host.
 - When Kanban runs on a headless remote Linux instance (for example over SSH+tunnel), native folder picker commands may be unavailable (`zenity`/`kdialog`). Treat this as a normal remote-runtime limitation and use manual path entry fallback instead of requiring desktop packages.
+- **Never read an agent transcript from a driver — and never on a path the board polls.** All
+  transcript access belongs to `src/agents/shared/observe.ts` (see
+  `docs/architecture/concepts/transcript-source.md`). Transcripts reach tens of megabytes, so a
+  whole-file read on a polled path saturates the event loop and the board stops answering HTTP while
+  still holding its socket — it looks alive to every liveness check. This exact freeze was fixed five
+  times, once per driver, because each driver carried its own copy of the read. The driver TCK now
+  asserts what an observation *cost*, not just what it returned; if that test fails, you reintroduced it.
 - **Do not put a scratch script in a gitignored directory of a card worktree.** Several of them (`.selfcheck-artifacts`, `node_modules`, …) are symlinks into the shared epic checkout, so a script there resolves `../src` and `../test` to *that* checkout — it silently runs unmodified code and happily "verifies" a fix that was never loaded. Put scratch runners in a real directory in the worktree (and delete them before committing); `ls -l` the directory first if unsure.
 - **A card that is `in_progress` is passing through, not resting there.** When a session ends, the runtime projects the session state onto the column (`src/server/runtime-state-hub.ts` → `projectSessionSummaryColumn`), so a card whose agent exits reaches `review` on its own within a few hundred ms — and the stub agent exits ~100ms after boot. Any check that polls for the *current* column races that. Assert on the card's append-only `transitions` history instead (`hasTaskEnteredColumn`); it records the move permanently.
 
@@ -143,7 +150,10 @@ Card Types
 - **How:** `fleet card-type new <name>`, edit the manifest's phases/skills, then `fleet task create --type <name>`. See **`docs/card-types.md`** for the full guide.
 
 Verification (there is exactly one definition of green in this repo: npm run verify)
-- **Run the full verification command:** ALWAYS run `npm run verify` to make sure your changes pass all local and CI checks. It covers repo-wide linting, compiling web-ui, typechecking, and fast tests (excluding live-only or integration tests that hang in agent worktrees).
+- **Run the full verification command:** ALWAYS run `npm run verify` to make sure your changes pass all local and CI checks. It covers repo-wide linting, compiling web-ui, typechecking, fast tests, and the `selfcheck` end-to-end scenarios suite (which proves actual board and agent behavior).
+- **Understand the verification tiers:**
+  - `verify:precommit`: Fast check (lint, typecheck, fast tests, web tests) run automatically on commit. It takes ~20 seconds. **Passing pre-commit checks does NOT guarantee the scenarios passed.**
+  - `selfcheck`: Running `npm run selfcheck` executes 11 end-to-end headless scenario tests which take ~4.25 minutes. It is excluded from the pre-commit hook to keep the developer loop fast, but is executed as part of `npm run verify` and validated on every CI run.
 - **Never run full repo-root `npx vitest run` or `npm run test:integration`** in your inner loop — they sweep in `test/integration/*` server-boot tests that time out in agent worktrees and produce phantom failures. Use `npm run verify` instead.
 - **CLI-entry warning/bootstrap logic must be unit-testable without the entry.** Extract helpers (e.g. the DEP-warning filter) into a **non-entry module**; **never import `src/cli.ts` in a unit test** — importing the entry drags in the whole bootstrap.
 - **`test/integration/task-command-exit.integration.test.ts` runs sequentially**, not in parallel with `test:fast`.

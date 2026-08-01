@@ -1824,6 +1824,8 @@ export function registerTaskCommand(program: Command): void {
 			'Per-card model for the CLI agent (claude/codex/…), e.g. claude-haiku-4-5. Use "default" to clear. Only valid while the task is in backlog.',
 		)
 		.option("--skill <name>", 'Per-card Agent Skills / SKILL.md pointer. Use "default" to clear.')
+		.option("--type <name>", 'Card type / manifest pointer. Use "default" to clear.')
+		.option("--card-type <name>", "Alias for --type.")
 		.option(
 			"--external-issue <ref>",
 			'External issue ref: Linear ENG-123 or URL; GitHub #123, 123, owner/repo#123, or issue URL. Use "default" to clear. Bare Linear keys use KANBAN_LINEAR_WORKSPACE.',
@@ -1841,6 +1843,8 @@ export function registerTaskCommand(program: Command): void {
 				agentId?: string;
 				agentModel?: string;
 				skill?: string;
+				type?: string;
+				cardType?: string;
 				externalIssue?: string;
 				issue?: string;
 			}) => {
@@ -1858,6 +1862,7 @@ export function registerTaskCommand(program: Command): void {
 							agentId: parseAgentId(options.agentId),
 							agentModel: parseOptionalStringOrDefault(options.agentModel),
 							skill: parseOptionalStringOrDefault(options.skill),
+							cardType: parseOptionalStringOrDefault(options.type ?? options.cardType),
 							externalIssueRef: parseOptionalStringOrDefault(options.externalIssue ?? options.issue),
 						}),
 				);
