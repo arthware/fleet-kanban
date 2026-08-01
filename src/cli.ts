@@ -7,6 +7,7 @@ import { Command, Option } from "commander";
 import ora, { type Ora } from "ora";
 import packageJson from "../package.json" with { type: "json" };
 import "./cli-warning-filter";
+import { registerBudgetCommand } from "./commands/budget";
 import { registerCardTypeCommand } from "./commands/card-type";
 import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
@@ -711,6 +712,7 @@ function createProgram(invocationArgs: string[]): Command {
 	registerTaskCommand(program);
 	registerHooksCommand(program);
 	registerCardTypeCommand(program);
+	registerBudgetCommand(program);
 
 	program
 		.command("mcp")

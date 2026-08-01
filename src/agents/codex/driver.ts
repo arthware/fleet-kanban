@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
@@ -28,10 +28,141 @@ import {
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 import { findCodexRolloutFileForCwd, getCodexSessionsRoot } from "./paths";
 
+async function getRolloutFilesSorted(dir: string): Promise<string[]> {
+	const files: { path: string; mtimeMs: number }[] = [];
+	const walk = async (currentDir: string) => {
+		try {
+			const entries = await readdir(currentDir, { withFileTypes: true });
+			for (const entry of entries) {
+				const fullPath = join(currentDir, entry.name);
+				if (entry.isDirectory()) {
+					await walk(fullPath);
+				} else if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
+					try {
+						const s = await stat(fullPath);
+						files.push({ path: fullPath, mtimeMs: s.mtimeMs });
+					} catch {
+						// Ignore stat errors
+					}
+				}
+			}
+		} catch {
+			// Ignore read errors
+		}
+	};
+	await walk(dir);
+	return files.sort((a, b) => b.mtimeMs - a.mtimeMs).map((f) => f.path);
+}
+
+function isoToUnix(s: string | null | undefined): number | null {
+	if (!s) return null;
+	try {
+		const ms = Date.parse(s);
+		if (Number.isNaN(ms)) return null;
+		return Math.floor(ms / 1000);
+	} catch {
+		return null;
+	}
+}
+
+function parseWindowValue(val: unknown): { used: number; remaining: number } | null {
+	if (val === null || val === undefined || typeof val === "boolean") {
+		return null;
+	}
+	const parsed = Number(val);
+	if (Number.isNaN(parsed)) {
+		return null;
+	}
+	const u = Math.max(0.0, Math.min(100.0, Math.round(parsed * 10) / 10));
+	const rem = Math.round((100.0 - u) * 10) / 10;
+	return { used: u, remaining: rem };
+}
+
+async function lastRateLimits(rolloutPath: string): Promise<{ rateLimits: any; timestamp: number | null } | null> {
+	try {
+		const content = await readFile(rolloutPath, "utf8");
+		const lines = content.split("\n");
+		let foundRl: any = null;
+		let foundTs: number | null = null;
+		for (const line of lines) {
+			if (!line.includes('"rate_limits"')) {
+				continue;
+			}
+			try {
+				const obj = JSON.parse(line);
+				const rl = obj?.payload?.rate_limits;
+				if (rl) {
+					foundRl = rl;
+					const tsStr = obj?.timestamp;
+					foundTs = tsStr ? isoToUnix(tsStr) : null;
+				}
+			} catch {
+				// Ignore parse errors on partial lines
+			}
+		}
+		if (foundRl) {
+			return { rateLimits: foundRl, timestamp: foundTs };
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
+
 export function createCodexDriver(context?: ObservationRequest): AgentDriver {
 	return {
 		id: "codex",
 		catalog: catalogEntryById("codex"),
+		budget: {
+			read: async () => {
+				const sessionsRoot = getCodexSessionsRoot();
+				try {
+					const s = await stat(sessionsRoot);
+					if (!s.isDirectory()) {
+						return unsupported(`no sessions dir at ${sessionsRoot}`);
+					}
+				} catch {
+					return unsupported(`no sessions dir at ${sessionsRoot}`);
+				}
+
+				try {
+					const rollouts = await getRolloutFilesSorted(sessionsRoot);
+					for (const path of rollouts) {
+						const snapshot = await lastRateLimits(path);
+						if (snapshot) {
+							const nowSec = Math.floor(Date.now() / 1000);
+							const names: Record<number, string> = { 300: "5h", 10080: "week" };
+							const windows: { name: string; remainingPercent: number | null; resetsAt: number | null }[] = [];
+
+							for (const key of ["primary", "secondary"]) {
+								const w = snapshot.rateLimits[key];
+								if (!w) {
+									continue;
+								}
+								const usedVal = w.used_percent;
+								const p = parseWindowValue(usedVal);
+								const mins = w.window_minutes;
+								const name = names[mins] || (mins ? `${mins}m` : key);
+								windows.push({
+									name,
+									remainingPercent: p ? p.remaining : null,
+									resetsAt: w.resets_at ?? null,
+								});
+							}
+
+							return supported({
+								plan: snapshot.rateLimits.plan_type ?? null,
+								staleSeconds: snapshot.timestamp ? Math.max(0, nowSec - snapshot.timestamp) : null,
+								windows,
+							});
+						}
+					}
+					return unsupported("no rate-limit snapshot in any rollout yet");
+				} catch (e: any) {
+					return unsupported(`error scanning rollouts: ${e?.message || e}`);
+				}
+			},
+		},
 		launch: {
 			preflight: () => binaryPreflight("codex"),
 			prepare: async (input) => {

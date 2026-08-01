@@ -51,6 +51,9 @@ export function createFakeAgentDriver(): AgentDriver {
 			autonomousArgs: [],
 			installUrl: "https://example.invalid/fake-agent",
 		},
+		budget: {
+			read: async () => unsupported("Fake driver does not support budget"),
+		},
 		launch: {
 			preflight: async () => supported({ ok: true }),
 			prepare: async (input) =>

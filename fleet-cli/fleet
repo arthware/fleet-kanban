@@ -720,6 +720,11 @@ fleet_update() {
   dim "  consumer projects use it on their next 'fleet kanban start' (dogfood keeps its own source override)"
 }
 
+fleet_budget() {
+  local bin; bin="$(kanban_bin)" || { dim "kanban not installed — run: fleet kanban install"; return 1; }
+  exec "$bin" budget "$@"
+}
+
 # Make the project root a thin git repo so the board registers it as the architect
 # workspace (a workspace whose path contains the others is detected as the architect).
 # No-op if it's already a repo — never touch an existing one. Nested work repos and
@@ -1368,9 +1373,10 @@ B="\033[1m";D="\033[2m";R="\033[0m";C="\033[36m";Y="\033[33m";RED="\033[31m"
 # dispatch on it. Best-effort + cached (short TTL): a slow or failed budget read must
 # never delay or break the task list itself.
 try:
-    sys.path.insert(0, os.environ["FLEET_SELF"])
-    import budget as _b
-    print(_b.format_banner(_b.get_report(use_cache=True, ttl=60), color=True));print()
+    out = subprocess.run([bin_, "budget", "--banner"], env=env, capture_output=True, text=True, timeout=5).stdout
+    if out.strip():
+        print(out.rstrip())
+        print()
 except Exception:
     pass
 projects=json.loads(os.environ["FLEET_PROJECTS"])["result"]["data"]["projects"]
@@ -2216,6 +2222,6 @@ case "$cmd" in
   xtools|xtool|x) fleet_xtools "$@"; exit $?;;
   init) fleet_init "$@"; exit $?;;
   update) fleet_update "$@"; exit $?;;
-  budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
+  budget|limits|usage) fleet_budget "$@";;
   *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools workspace)" >&2; exit 1;;
 esac

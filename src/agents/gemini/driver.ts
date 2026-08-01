@@ -32,6 +32,9 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 	return {
 		id: "gemini",
 		catalog: catalogEntryById("gemini"),
+		budget: {
+			read: async () => unsupported("Gemini CLI exposes no quota surface"),
+		},
 		launch: {
 			preflight: () => binaryPreflight("gemini"),
 			prepare: async (input) => {
