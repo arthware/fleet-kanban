@@ -119,10 +119,12 @@ async function main(): Promise<void> {
 		await givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly();
 	});
 
-	for (const result of results) {
-		process.stdout.write(`${formatScenarioResult(result)}\n`);
-	}
-	if (results.some((result) => result.status === "fail" || result.status === "unexpected-pass")) {
+	const passed = results.filter((r) => r.status === "pass").length;
+	const failed = results.filter((r) => r.status === "fail" || r.status === "unexpected-pass").length;
+	const knownFailed = results.filter((r) => r.status === "known-fail").length;
+	process.stdout.write(`\nSelfcheck completed: ${passed} passed, ${failed} failed, ${knownFailed} known-failed\n`);
+
+	if (failed > 0) {
 		process.exitCode = 1;
 	}
 }
@@ -133,10 +135,12 @@ async function runScenario(
 	run: () => Promise<void>,
 	options: { knownFailureIssue?: string } = {},
 ): Promise<void> {
+	process.stdout.write(`START: ${name}\n`);
 	const startedAt = Date.now();
+	let result: ScenarioResult;
 	try {
 		await run();
-		results.push({
+		result = {
 			name,
 			status: options.knownFailureIssue ? "unexpected-pass" : "pass",
 			durationMs: Date.now() - startedAt,
@@ -144,17 +148,19 @@ async function runScenario(
 			error: options.knownFailureIssue
 				? `Known failure ${options.knownFailureIssue} passed; remove the marker.`
 				: undefined,
-		});
+		};
 	} catch (error) {
-		results.push({
+		result = {
 			name,
 			status: options.knownFailureIssue ? "known-fail" : "fail",
 			durationMs: Date.now() - startedAt,
 			error: formatError(error),
 			artifactPath: extractArtifactPath(error),
 			knownFailureIssue: options.knownFailureIssue,
-		});
+		};
 	}
+	results.push(result);
+	process.stdout.write(`${formatScenarioResult(result)}\n`);
 }
 
 async function runBrowserScenario(name: string): Promise<void> {
