@@ -134,6 +134,13 @@ Misc. tribal knowledge
 - A repo's `.cline/kanban/config.json` can carry `worktree.postCreateCommand`, an auto-running command executed once after Kanban creates a new task worktree; review changes to that file like executable project config.
 - If CI hangs on Node 22 after tests seem to finish, suspect a live subprocess or SDK-host startup path before assuming a slow test body. Read `.plan/docs/node22-ci-hanging-tests-investigation.md` before repeating that investigation. `test/runtime/cline-sdk/cline-task-session-service.test.ts` was the big prior culprit because a unit-style suite was still booting the real Cline SDK host.
 - When Kanban runs on a headless remote Linux instance (for example over SSH+tunnel), native folder picker commands may be unavailable (`zenity`/`kdialog`). Treat this as a normal remote-runtime limitation and use manual path entry fallback instead of requiring desktop packages.
+- **Never read an agent transcript from a driver — and never on a path the board polls.** All
+  transcript access belongs to `src/agents/shared/observe.ts` (see
+  `docs/architecture/concepts/transcript-source.md`). Transcripts reach tens of megabytes, so a
+  whole-file read on a polled path saturates the event loop and the board stops answering HTTP while
+  still holding its socket — it looks alive to every liveness check. This exact freeze was fixed five
+  times, once per driver, because each driver carried its own copy of the read. The driver TCK now
+  asserts what an observation *cost*, not just what it returned; if that test fails, you reintroduced it.
 - **Do not put a scratch script in a gitignored directory of a card worktree.** Several of them (`.selfcheck-artifacts`, `node_modules`, …) are symlinks into the shared epic checkout, so a script there resolves `../src` and `../test` to *that* checkout — it silently runs unmodified code and happily "verifies" a fix that was never loaded. Put scratch runners in a real directory in the worktree (and delete them before committing); `ls -l` the directory first if unsure.
 - **A card that is `in_progress` is passing through, not resting there.** When a session ends, the runtime projects the session state onto the column (`src/server/runtime-state-hub.ts` → `projectSessionSummaryColumn`), so a card whose agent exits reaches `review` on its own within a few hundred ms — and the stub agent exits ~100ms after boot. Any check that polls for the *current* column races that. Assert on the card's append-only `transitions` history instead (`hasTaskEnteredColumn`); it records the move permanently.
 

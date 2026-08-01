@@ -18,6 +18,14 @@ import type {
 import { supported, unsupported } from "../driver";
 import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
+import {
+	deriveFromTranscript,
+	readFirstTranscriptRecord,
+	selectFromTranscriptTail,
+	type TranscriptDerivation,
+	type TranscriptRecord,
+	type TranscriptTailQuery,
+} from "../shared/observe";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 
 export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
@@ -157,57 +165,31 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseGeminiTranscript(records);
-					return supported(mapToObservationMessages(richMsgs));
-				} catch {
-					return supported([]);
-				}
+				const richMsgs = await deriveFromTranscript(loc.path, GEMINI_TRANSCRIPT);
+				return supported(mapToObservationMessages(richMsgs));
 			},
 			transcript: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported([]);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported([]);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const richMsgs = parseGeminiTranscript(records);
-					return supported(richMsgs);
-				} catch {
-					return supported([]);
-				}
+				return supported(await deriveFromTranscript(loc.path, GEMINI_TRANSCRIPT));
 			},
 			usage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported({ inputTokens: 0, outputTokens: 0 });
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported({ inputTokens: 0, outputTokens: 0 });
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveGeminiUsage(records);
-					if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
-					return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
-				} catch {
-					return supported({ inputTokens: 0, outputTokens: 0 });
-				}
+				const usage = await selectFromTranscriptTail(loc.path, GEMINI_USAGE);
+				if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
+				return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 			},
 			richUsage: async (input) => {
 				const ctx = input ?? context;
 				if (!ctx) return supported(null);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported(null);
-				try {
-					const raw = await readFile(loc.path, "utf8");
-					const records = parseJsonlRecords(raw);
-					const usage = deriveGeminiUsage(records);
-					return supported(usage);
-				} catch {
-					return supported(null);
-				}
+				return supported(await selectFromTranscriptTail(loc.path, GEMINI_USAGE));
 			},
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
@@ -248,17 +230,8 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 					return null;
 				}
 
-				const newestFile = filesWithMtime[0].file;
-				try {
-					const content = await readFile(newestFile, "utf8");
-					const firstLine = content.split("\n")[0];
-					const parsed = JSON.parse(firstLine);
-					if (parsed && typeof parsed === "object" && typeof parsed.sessionId === "string") {
-						return parsed.sessionId;
-					}
-				} catch {}
-
-				return null;
+				const first = await readFirstTranscriptRecord(filesWithMtime[0].file);
+				return first ? readString(first, "sessionId") : null;
 			},
 		},
 		signals: {
@@ -407,23 +380,37 @@ async function readDirEntries(dirPath: string): Promise<Dirent[]> {
 
 // --- Parsing ---------------------------------------------------------------
 
-function parseJsonlRecords(raw: string): Record<string, unknown>[] {
-	const records: Record<string, unknown>[] = [];
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			continue;
-		}
-		try {
-			const parsed: unknown = JSON.parse(trimmed);
-			if (isRecord(parsed)) {
-				records.push(parsed);
-			}
-		} catch {
-			// Tolerate a partially-flushed / corrupt trailing line.
-		}
+/** The full conversation — the on-demand path, taken when a card is opened. */
+const GEMINI_TRANSCRIPT: TranscriptDerivation<RuntimeTaskChatMessage[]> = {
+	id: "gemini-transcript",
+	derive: (records) => parseGeminiTranscript([...records]),
+};
+
+/**
+ * Gemini restates the session's running totals on every model turn, so the newest
+ * record carrying `tokens` already holds the cumulative figure. That makes usage a
+ * tail read: bounded work, whatever the session's history weighs.
+ */
+const GEMINI_USAGE: TranscriptTailQuery<RuntimeTaskTokenUsage> = {
+	id: "gemini-usage",
+	select: (record) => selectGeminiUsage(record),
+};
+
+function selectGeminiUsage(record: TranscriptRecord): RuntimeTaskTokenUsage | null {
+	if (readString(record, "type") !== "gemini") {
+		return null;
 	}
-	return records;
+	const tokens = asRecord(record.tokens);
+	if (!tokens) {
+		return null;
+	}
+	return {
+		inputTokens: readNumber(tokens, "input"),
+		outputTokens: readNumber(tokens, "output"),
+		cacheReadTokens: readNumber(tokens, "cached"),
+		cacheCreationTokens: 0,
+		costUsd: null,
+	};
 }
 
 function parseGeminiTranscript(records: Record<string, unknown>[]): RuntimeTaskChatMessage[] {
@@ -471,30 +458,15 @@ function parseGeminiTranscript(records: Record<string, unknown>[]): RuntimeTaskC
 	return messages;
 }
 
+/** The same "newest totals win" rule as {@link GEMINI_USAGE}, over records already in hand. */
 export function deriveGeminiUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
-	let latestTokens: Record<string, unknown> | null = null;
-
-	for (const record of records) {
-		if (readString(record, "type") !== "gemini") {
-			continue;
-		}
-		const tokens = asRecord(record.tokens);
-		if (tokens) {
-			latestTokens = tokens;
+	for (let index = records.length - 1; index >= 0; index -= 1) {
+		const usage = selectGeminiUsage(records[index]);
+		if (usage) {
+			return usage;
 		}
 	}
-
-	if (!latestTokens) {
-		return null;
-	}
-
-	return {
-		inputTokens: readNumber(latestTokens, "input"),
-		outputTokens: readNumber(latestTokens, "output"),
-		cacheReadTokens: readNumber(latestTokens, "cached"),
-		cacheCreationTokens: 0,
-		costUsd: null,
-	};
+	return null;
 }
 
 // --- Mapping ---------------------------------------------------------------
