@@ -70,11 +70,104 @@ export async function givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtif
 			"epic/cool-epic",
 		);
 		assertShape(shape3Path);
+
+		// Test config shape 2: Omitting node_modules from unsharedPaths
+		const configPath = join(repoPath, ".cline", "kanban", "config.json");
+		writeFileSync(
+			configPath,
+			JSON.stringify(
+				{
+					worktree: {
+						postCreateCommand: "echo 'hook-ran' > post-create-marker.txt",
+						unsharedPaths: ["dist", ".turbo"],
+					},
+				},
+				null,
+				2,
+			),
+			"utf8",
+		);
+		const shapeOmittedPath = await ensureWorktree(
+			baseUrl,
+			workspaceId,
+			instance.homeDir,
+			"task-card-omitted",
+			"main",
+		);
+		assertShapeOmitted(shapeOmittedPath);
+
+		// Test config shape 3: Explicitly trying to share node_modules via sharedPaths
+		writeFileSync(
+			configPath,
+			JSON.stringify(
+				{
+					worktree: {
+						postCreateCommand: "echo 'hook-ran' > post-create-marker.txt",
+						unsharedPaths: ["dist", ".turbo"],
+						sharedPaths: ["node_modules"],
+					},
+				},
+				null,
+				2,
+			),
+			"utf8",
+		);
+		const shapeSharedPath = await ensureWorktree(baseUrl, workspaceId, instance.homeDir, "task-card-shared", "main");
+		assertShapeExplicitlyShared(shapeSharedPath);
+
 		void depPath;
 	} finally {
 		await instance?.stop();
 		sandbox.cleanup();
 	}
+}
+
+function assertShapeOmitted(worktreePath: string): void {
+	assertOk(
+		existsSync(join(worktreePath, ".env")) && lstatSync(join(worktreePath, ".env")).isSymbolicLink(),
+		".env was not a symlink.",
+	);
+	assertOk(
+		existsSync(join(worktreePath, ".env.local")) && lstatSync(join(worktreePath, ".env.local")).isSymbolicLink(),
+		".env.local was not a symlink.",
+	);
+	assertOk(existsSync(join(worktreePath, "vendor", "submodule", "dep-file.txt")), "Submodule was not checked out.");
+	for (const path of ["dist", ".turbo"]) {
+		assertOk(!existsSync(join(worktreePath, path)), `${path} should not be present in worktree.`);
+	}
+	let isSymlink = false;
+	try {
+		isSymlink = lstatSync(join(worktreePath, "node_modules")).isSymbolicLink();
+	} catch (err) {
+		if (!err || typeof err !== "object" || !("code" in err) || err.code !== "ENOENT") {
+			throw err;
+		}
+	}
+	assertOk(isSymlink === false, "node_modules must not be a symlink when omitted from unsharedPaths.");
+}
+
+function assertShapeExplicitlyShared(worktreePath: string): void {
+	assertOk(
+		existsSync(join(worktreePath, ".env")) && lstatSync(join(worktreePath, ".env")).isSymbolicLink(),
+		".env was not a symlink.",
+	);
+	assertOk(
+		existsSync(join(worktreePath, ".env.local")) && lstatSync(join(worktreePath, ".env.local")).isSymbolicLink(),
+		".env.local was not a symlink.",
+	);
+	assertOk(existsSync(join(worktreePath, "vendor", "submodule", "dep-file.txt")), "Submodule was not checked out.");
+	for (const path of ["dist", ".turbo"]) {
+		assertOk(!existsSync(join(worktreePath, path)), `${path} should not be present in worktree.`);
+	}
+	let isSymlink = false;
+	try {
+		isSymlink = lstatSync(join(worktreePath, "node_modules")).isSymbolicLink();
+	} catch (err) {
+		if (!err || typeof err !== "object" || !("code" in err) || err.code !== "ENOENT") {
+			throw err;
+		}
+	}
+	assertOk(isSymlink === false, "node_modules must not be a symlink even when explicitly listed in sharedPaths.");
 }
 
 export function createWorktreeShapeRepos(root: string): { repoPath: string; depPath: string } {
