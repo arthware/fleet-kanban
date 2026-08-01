@@ -370,3 +370,262 @@ export async function deriveFromTranscript<T>(path: string, derivation: Transcri
 	remember(derivations, key, { identity, value }, MAX_CACHED_DERIVATIONS);
 	return value;
 }
+
+// --- Struggle/Thrashing detection fold ------------------------------------
+
+export interface StruggleAnalysis {
+	readonly struggling: boolean;
+	readonly reasons: readonly string[];
+	readonly repeatsCount: number;
+	readonly failureRate: number;
+	readonly maxEditChurn: number;
+	readonly details: {
+		readonly repeatingTool?: string;
+		readonly churningFile?: string;
+		readonly failureCount?: string;
+	};
+}
+
+export interface StruggleAccumulator {
+	readonly recentCalls: Array<{
+		readonly name: string;
+		readonly inputStr: string;
+		readonly fileEdited: string | null;
+		failed: boolean;
+	}>;
+	consecutiveRepeats: number;
+	lastCallKey: string | null;
+	lastCallName: string | null;
+}
+
+interface ToolCallInfo {
+	readonly name: string;
+	readonly input: unknown;
+}
+
+function extractToolCalls(record: TranscriptRecord): ToolCallInfo[] {
+	const calls: ToolCallInfo[] = [];
+
+	// Claude format: assistant with message.content array
+	if (record.type === "assistant" && record.message && typeof record.message === "object") {
+		const message = record.message as Record<string, unknown>;
+		if (Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (block && typeof block === "object") {
+					const b = block as Record<string, unknown>;
+					if (b.type === "tool_use" && typeof b.name === "string") {
+						calls.push({ name: b.name, input: b.input });
+					}
+				}
+			}
+		}
+	}
+
+	// Codex format: response_item with payload
+	if (record.type === "response_item" && record.payload && typeof record.payload === "object") {
+		const payload = record.payload as Record<string, unknown>;
+		if (
+			(payload.type === "function_call" || payload.type === "custom_tool_call") &&
+			typeof payload.name === "string"
+		) {
+			calls.push({ name: payload.name, input: payload.arguments ?? payload.input });
+		}
+	}
+
+	return calls;
+}
+
+function extractEditedFilePath(call: ToolCallInfo): string | null {
+	const editTools = [
+		"replace",
+		"write_file",
+		"mcp_pencil_batch_design",
+		"patch",
+		"mcp_pencil_replace_all_matching_properties",
+	];
+	if (!editTools.includes(call.name)) {
+		return null;
+	}
+	if (call.input && typeof call.input === "object") {
+		const inp = call.input as Record<string, unknown>;
+		if (typeof inp.file_path === "string") return inp.file_path;
+		if (typeof inp.filePath === "string") return inp.filePath;
+		if (typeof inp.path === "string") return inp.path;
+	}
+	return null;
+}
+
+function extractToolResultText(record: TranscriptRecord): string | null {
+	// Claude format
+	if (record.type === "user" && record.message && typeof record.message === "object") {
+		const message = record.message as Record<string, unknown>;
+		if (Array.isArray(message.content)) {
+			const parts: string[] = [];
+			for (const block of message.content) {
+				if (block && typeof block === "object") {
+					const b = block as Record<string, unknown>;
+					if (b.type === "tool_result") {
+						if (typeof b.content === "string") {
+							parts.push(b.content);
+						} else if (Array.isArray(b.content)) {
+							for (const sub of b.content) {
+								if (sub && typeof sub === "object") {
+									const s = sub as Record<string, unknown>;
+									if (s.type === "text" && typeof s.text === "string") {
+										parts.push(s.text);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			if (parts.length > 0) {
+				return parts.join("\n");
+			}
+		}
+	}
+
+	// Codex format
+	if (record.type === "response_item" && record.payload && typeof record.payload === "object") {
+		const payload = record.payload as Record<string, unknown>;
+		if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
+			const output = payload.output;
+			if (typeof output === "string") {
+				return output;
+			}
+			if (output && typeof output === "object") {
+				const outRec = output as Record<string, unknown>;
+				if (typeof outRec.content === "string") {
+					return outRec.content;
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
+function isToolFailure(text: string): boolean {
+	const lower = text.toLowerCase();
+	if (
+		lower.includes("error:") ||
+		lower.includes("failed:") ||
+		lower.includes("exception:") ||
+		lower.includes("exit code:") ||
+		lower.includes("command failed")
+	) {
+		return true;
+	}
+	if (lower.includes("fail") && (lower.includes("tests") || lower.includes("spec"))) {
+		return true;
+	}
+	return false;
+}
+
+export const STRUGGLE_DETECTOR: TranscriptFold<StruggleAccumulator, StruggleAnalysis> = {
+	id: "struggle-detector",
+	seed: () => ({
+		recentCalls: [],
+		consecutiveRepeats: 0,
+		lastCallKey: null,
+		lastCallName: null,
+	}),
+	step: (acc, record) => {
+		const calls = extractToolCalls(record);
+		for (const call of calls) {
+			const inputStr = JSON.stringify(call.input);
+			const fileEdited = extractEditedFilePath(call);
+			const key = `${call.name}:${inputStr}`;
+
+			if (acc.lastCallKey === key) {
+				acc.consecutiveRepeats += 1;
+			} else {
+				acc.consecutiveRepeats = 0;
+			}
+			acc.lastCallKey = key;
+			acc.lastCallName = call.name;
+
+			acc.recentCalls.push({
+				name: call.name,
+				inputStr,
+				fileEdited,
+				failed: false,
+			});
+
+			if (acc.recentCalls.length > 15) {
+				acc.recentCalls.shift();
+			}
+		}
+
+		const resultText = extractToolResultText(record);
+		if (resultText !== null && acc.recentCalls.length > 0) {
+			const lastCall = acc.recentCalls[acc.recentCalls.length - 1];
+			if (isToolFailure(resultText)) {
+				lastCall.failed = true;
+			}
+		}
+
+		return acc;
+	},
+	finish: (acc) => {
+		const reasons: string[] = [];
+		const details: Record<string, string> = {};
+
+		if (acc.consecutiveRepeats >= 3 && acc.lastCallName) {
+			reasons.push(`Tool ${acc.lastCallName} was invoked with identical arguments 4 times consecutively`);
+			details.repeatingTool = acc.lastCallName;
+		}
+
+		const callCounts = new Map<string, number>();
+		for (const call of acc.recentCalls) {
+			const key = `${call.name}:${call.inputStr}`;
+			callCounts.set(key, (callCounts.get(key) || 0) + 1);
+		}
+		for (const [key, count] of callCounts.entries()) {
+			if (count >= 4) {
+				const toolName = key.split(":")[0];
+				reasons.push(`Tool ${toolName} was repeated with identical arguments ${count} times recently`);
+				details.repeatingTool = toolName;
+			}
+		}
+
+		const editCounts = new Map<string, number>();
+		for (const call of acc.recentCalls) {
+			if (call.fileEdited) {
+				editCounts.set(call.fileEdited, (editCounts.get(call.fileEdited) || 0) + 1);
+			}
+		}
+		for (const [file, count] of editCounts.entries()) {
+			if (count >= 5) {
+				reasons.push(`File ${file} was edited ${count} times recently without resolution`);
+				details.churningFile = file;
+			}
+		}
+
+		const totalCalls = acc.recentCalls.length;
+		const failedCalls = acc.recentCalls.filter((c) => c.failed).length;
+		const failureRate = totalCalls >= 5 ? failedCalls / totalCalls : 0;
+		if (failureRate >= 0.7) {
+			reasons.push(
+				`High recent tool failure rate of ${(failureRate * 100).toFixed(0)}% (${failedCalls}/${totalCalls} failed)`,
+			);
+			details.failureCount = `${failedCalls}/${totalCalls}`;
+		}
+
+		const struggling = reasons.length > 0;
+
+		return {
+			struggling,
+			reasons,
+			repeatsCount: acc.consecutiveRepeats,
+			failureRate,
+			maxEditChurn: Math.max(0, ...editCounts.values()),
+			details,
+		};
+	},
+};
+
+export async function detectStruggle(path: string): Promise<StruggleAnalysis> {
+	return foldTranscript(path, STRUGGLE_DETECTOR);
+}
