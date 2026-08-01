@@ -191,10 +191,30 @@ describe("shouldMirrorIgnoredPathIntoWorktree", () => {
 		expect(mirrored).toBe(false);
 	});
 
-	it("given a repo that shares node_modules, when the path sits at the repo root, then it is mirrored again", () => {
+	it("given a config that omits node_modules from unsharedPaths, when mirroring is decided, then node_modules is still kept unshared", () => {
 		const mirrored = shouldMirrorIgnoredPathIntoWorktree("node_modules", {
 			unsharedPaths: ["dist"],
 			trackedDirectories,
+		});
+
+		expect(mirrored).toBe(false);
+	});
+
+	it("given a config that explicitly shares node_modules, when mirroring is decided, then the hard guard wins and keeps it unshared", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("node_modules", {
+			unsharedPaths: ["dist"],
+			trackedDirectories,
+			sharedPaths: ["node_modules"],
+		});
+
+		expect(mirrored).toBe(false);
+	});
+
+	it("given a genuinely shared path that is not node_modules, when mirroring is decided, then it is still mirrored", () => {
+		const mirrored = shouldMirrorIgnoredPathIntoWorktree("secrets/token", {
+			unsharedPaths: DEFAULT_WORKTREE_UNSHARED_PATHS,
+			trackedDirectories,
+			sharedPaths: ["secrets"],
 		});
 
 		expect(mirrored).toBe(true);
