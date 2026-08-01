@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import { estimateAgentCostUsd, RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { toBracketedPaste } from "../../terminal/agent-session-adapters";
@@ -501,12 +501,16 @@ function selectCodexUsage(record: TranscriptRecord): RuntimeTaskTokenUsage | nul
 		return null;
 	}
 	const cachedInputTokens = readNumber(total, "cached_input_tokens");
-	return {
+	const modelId = readString(payload, "model") ?? readString(record, "model") ?? null;
+	const sums = {
 		inputTokens: readNumber(total, "input_tokens") - cachedInputTokens,
 		outputTokens: readNumber(total, "output_tokens"),
 		cacheReadTokens: cachedInputTokens,
 		cacheCreationTokens: 0,
-		costUsd: null,
+	};
+	return {
+		...sums,
+		costUsd: estimateAgentCostUsd("codex", modelId, sums),
 	};
 }
 
