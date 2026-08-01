@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 			await context.stop();
 		}
 	});
-	await runScenario(results, "polling a card with a 20 MB transcript stays cheap", async () => {
+	await runScenario(results, "polling a card stays cheap as its transcript grows", async () => {
 		const context = await createSelfcheckContext();
 		try {
 			await givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory(
