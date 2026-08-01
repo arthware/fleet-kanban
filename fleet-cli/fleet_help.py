@@ -99,6 +99,15 @@ def parse_args(args_list):
             run_args.append("--help")
         run_command(run_args)
 
+    elif cmd in ("workspace",):
+        # Translate to fleet.py workspace
+        run_args = [sys.executable, str(fleet_py), "workspace"]
+        if subcmd:
+            run_args.extend([subcmd, "--help"])
+        else:
+            run_args.append("--help")
+        run_command(run_args)
+
     elif cmd in ("linear", "mine", "tasks"):
         run_command([sys.executable, str(fleet_py), "--mine", "--help"])
 

@@ -949,7 +949,7 @@ def epic_create(name: str, repo: str, base: str, cfg: dict):
     print(f"  Open in UI: http://127.0.0.1:{port}?workspace={workspace_id}")
     return 0
 
-def epic_complete(name: str, repo: str, cfg: dict):
+def epic_complete(name: str, repo: str, cfg: dict, force: bool = False):
     rp = _resolve_repo(repo, cfg)
     if not rp:
         return 1
@@ -999,30 +999,63 @@ def epic_complete(name: str, repo: str, cfg: dict):
     print(f"  Branch: {epic_branch}")
     print(f"  Base branch: {base_branch}")
 
-    # 1. Create gh PR
-    pr_title = f"epic: merge {name} to {base_branch}"
-    pr_body = f"Epic workspace integration PR for '{name}'.\n\nThis PR integrates the epic branch {epic_branch} back into {base_branch}."
-    
-    print(f"Opening PR for {epic_branch} → {base_branch}...")
-    # Verify git status of the epic branch first to make sure it's pushed
-    git_run(rp, ["push", "origin", epic_branch], check=False)
+    # 1. Durability Gate: Check uncommitted changes in epic worktree
+    if wt_path.exists():
+        status_res = git_run(wt_path, ["status", "--porcelain", "-uno"], check=False)
+        if status_res.returncode == 0 and status_res.stdout.strip():
+            if not force:
+                print(f"{RED}Error: Epic worktree has uncommitted changes at '{wt_path}'. Use --force to complete anyway.{RESET}", file=sys.stderr)
+                return 1
 
-    pr_res = subprocess.run([
-        "gh", "pr", "create",
-        "--base", base_branch,
-        "--head", epic_branch,
-        "--title", pr_title,
-        "--body", pr_body
-    ], cwd=str(rp), capture_output=True, text=True)
-
-    if pr_res.returncode != 0:
-        print(f"{YELLOW}Warning: Could not create PR via gh: {pr_res.stderr.strip()}{RESET}")
-        print(f"         Make sure the branch is pushed and 'gh' is authenticated.{RESET}")
+    # 2. Durability Gate: Check if commits are contained in base
+    is_contained = False
+    mb_res = git_run(rp, ["merge-base", base_branch, epic_branch], check=False)
+    if mb_res.returncode == 0:
+        mb = mb_res.stdout.strip()
+        # Find files modified in the epic branch
+        files_res = git_run(rp, ["diff", "--name-only", mb, epic_branch], check=False)
+        files = [f.strip() for f in files_res.stdout.splitlines() if f.strip()]
+        if files:
+            # Compare tree of base_branch and epic_branch for those files (squash merge check)
+            diff_res = git_run(rp, ["diff", "--quiet", base_branch, epic_branch, "--"] + files, check=False)
+            is_contained = (diff_res.returncode == 0)
+        else:
+            is_contained = True
     else:
-        print(f"{GREEN}✓ PR created successfully!{RESET}")
-        print(f"  {pr_res.stdout.strip()}")
+        is_contained = False
 
-    # 2. Archive workspace instead of removing it
+    if not is_contained and not force:
+        print(f"{RED}Error: Epic branch '{epic_branch}' is not fully merged/contained in '{base_branch}'. "
+              f"Completing it would lose unmerged commits. Use --force to complete anyway.{RESET}", file=sys.stderr)
+        return 1
+
+    # 3. Create gh PR (skip if already contained)
+    if is_contained:
+        print(f"Epic branch '{epic_branch}' is already merged/contained in '{base_branch}'. Skipping PR creation.")
+    else:
+        pr_title = f"epic: merge {name} to {base_branch}"
+        pr_body = f"Epic workspace integration PR for '{name}'.\n\nThis PR integrates the epic branch {epic_branch} back into {base_branch}."
+        
+        print(f"Opening PR for {epic_branch} → {base_branch}...")
+        # Verify git status of the epic branch first to make sure it's pushed
+        git_run(rp, ["push", "origin", epic_branch], check=False)
+
+        pr_res = subprocess.run([
+            "gh", "pr", "create",
+            "--base", base_branch,
+            "--head", epic_branch,
+            "--title", pr_title,
+            "--body", pr_body
+        ], cwd=str(rp), capture_output=True, text=True)
+
+        if pr_res.returncode != 0:
+            print(f"{YELLOW}Warning: Could not create PR via gh: {pr_res.stderr.strip()}{RESET}")
+            print(f"         Make sure the branch is pushed and 'gh' is authenticated.{RESET}")
+        else:
+            print(f"{GREEN}✓ PR created successfully!{RESET}")
+            print(f"  {pr_res.stdout.strip()}")
+
+    # 4. Archive workspace instead of removing it
     print(f"Archiving epic workspace {workspace_id} on board...")
     set_res = trpc_call(cfg, "projects.setEpic", {
         "workspaceId": workspace_id,
@@ -1037,6 +1070,18 @@ def epic_complete(name: str, repo: str, cfg: dict):
         print(f"{RED}Error: Failed to archive epic workspace.{RESET}", file=sys.stderr)
         return 1
     print(f"  Workspace archived.")
+
+    # 5. Remove git worktree
+    if wt_path.exists():
+        print(f"Removing epic worktree at {wt_path}...")
+        remove_args = ["worktree", "remove", "--force", str(wt_path)]
+        
+        wt_remove_res = git_run(rp, remove_args, check=False)
+        if wt_remove_res.returncode != 0:
+            print(f"{YELLOW}Warning: Failed to remove worktree automatically: {wt_remove_res.stderr.strip()}{RESET}")
+            print(f"         You can remove it manually with: git worktree remove --force {wt_path}")
+        else:
+            print(f"{GREEN}✓ Epic worktree removed successfully.{RESET}")
 
     print(f"\n{GREEN}✓ Epic '{name}' marked as completed/archived!{RESET}")
     return 0
@@ -1139,6 +1184,115 @@ def epic_sync(name: str, repo: str, cfg: dict):
 
     return 0
 
+# ---- workspace management ---------------------------------------------------
+
+def workspace_list(cfg):
+    port = cfg.get("kanban_port", 3484)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.2)
+        if s.connect_ex(("127.0.0.1", port)) != 0:
+            print(f"{RED}Error: Kanban board is not running on port {port}.{RESET}", file=sys.stderr)
+            return 1
+
+    projects_res = trpc_call(cfg, "projects.list")
+    if not projects_res:
+        print(f"{RED}Error: Could not retrieve projects from board.{RESET}", file=sys.stderr)
+        return 1
+
+    projects = projects_res.get("projects", [])
+    if not projects:
+        print("No workspaces registered on the board.")
+        return 0
+
+    print(f"\n{BOLD}WORKSPACES{RESET} on port {port}:\n")
+    for p in projects:
+        pid = p.get("id", "")
+        path = p.get("path", "")
+        epic = p.get("epic")
+        
+        epic_str = ""
+        if epic:
+            archived_status = " (archived)" if epic.get("archived") else ""
+            epic_str = f" · {CYAN}Epic: {epic.get('name')}{archived_status}{RESET}"
+        
+        tc = p.get("taskCounts", {})
+        counts_str = f"backlog: {tc.get('backlog', 0)} · in_progress: {tc.get('in_progress', 0)} · review: {tc.get('review', 0)} · done: {tc.get('done', 0)}"
+        
+        current_marker = " "
+        if projects_res.get("currentProjectId") == pid:
+            current_marker = f"{GREEN}* {RESET}"
+        else:
+            current_marker = "  "
+
+        print(f"{current_marker}{BOLD}{pid}{RESET}")
+        print(f"    Path:  {path}")
+        print(f"    Tasks: {counts_str}{epic_str}")
+        print()
+    return 0
+
+def workspace_remove(project_id, force, cfg):
+    port = cfg.get("kanban_port", 3484)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.2)
+        if s.connect_ex(("127.0.0.1", port)) != 0:
+            print(f"{RED}Error: Kanban board is not running on port {port}.{RESET}", file=sys.stderr)
+            return 1
+
+    projects_res = trpc_call(cfg, "projects.list")
+    if not projects_res:
+        print(f"{RED}Error: Could not retrieve projects from board.{RESET}", file=sys.stderr)
+        return 1
+
+    projects = projects_res.get("projects", [])
+    project = None
+    for p in projects:
+        if p.get("id") == project_id:
+            project = p
+            break
+
+    if not project:
+        print(f"{RED}Error: Workspace '{project_id}' not found on the running board.{RESET}", file=sys.stderr)
+        return 1
+
+    tc = project.get("taskCounts", {})
+    live_tasks = tc.get("backlog", 0) + tc.get("in_progress", 0) + tc.get("review", 0)
+    if live_tasks > 0 and not force:
+        print(f"{RED}Error: Workspace has {live_tasks} live task(s) (backlog, in_progress, review). "
+              f"Removing it would lose progress. Use --force to remove anyway.{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"Removing workspace {project_id}...")
+    res = trpc_call(cfg, "projects.remove", {"projectId": project_id})
+    if not res or not res.get("ok"):
+        err = res.get("error", "unknown error") if res else "tRPC failure"
+        print(f"{RED}Error: Failed to remove workspace: {err}{RESET}", file=sys.stderr)
+        return 1
+
+    print(f"{GREEN}✓ Workspace {project_id} removed successfully.{RESET}")
+    return 0
+
+def cmd_workspace(args_list):
+    ap = argparse.ArgumentParser(prog="fleet workspace", description="Manage board workspaces")
+    sub = ap.add_subparsers(dest="op", required=True)
+
+    p_list = sub.add_parser("ls", help="List workspaces registered with the board")
+    p_rm = sub.add_parser("rm", help="Remove a workspace registration from the board")
+    p_rm.add_argument("project_id", help="The ID of the workspace/project to remove")
+    p_rm.add_argument("--force", "-f", action="store_true", help="Force removal even if there are live tasks")
+
+    try:
+        parsed = ap.parse_args(args_list)
+    except SystemExit as e:
+        return e.code
+
+    cfg = load_config()
+    if parsed.op == "ls":
+        return workspace_list(cfg)
+    elif parsed.op == "rm":
+        return workspace_remove(parsed.project_id, parsed.force, cfg)
+    return 1
+
+
 def cmd_epic(args_list):
     ap = argparse.ArgumentParser(prog="fleet epic", description="Manage epic workspaces")
     sub = ap.add_subparsers(dest="op", required=True)
@@ -1151,6 +1305,7 @@ def cmd_epic(args_list):
     p_complete = sub.add_parser("complete")
     p_complete.add_argument("name", help="Name of the epic")
     p_complete.add_argument("--repo", help="Target repository name (default: first in project)")
+    p_complete.add_argument("--force", "-f", action="store_true", help="Force complete even if the worktree has uncommitted changes or uncontained commits")
 
     p_sync = sub.add_parser("sync")
     p_sync.add_argument("name", help="Name of the epic")
@@ -1165,7 +1320,7 @@ def cmd_epic(args_list):
     if parsed.op == "create":
         return epic_create(parsed.name, parsed.repo, parsed.base, cfg)
     elif parsed.op == "complete":
-        return epic_complete(parsed.name, parsed.repo, cfg)
+        return epic_complete(parsed.name, parsed.repo, cfg, parsed.force)
     elif parsed.op == "sync":
         return epic_sync(parsed.name, parsed.repo, cfg)
     return 1
@@ -1186,6 +1341,8 @@ def resolve_roots(args, cfg) -> list[Path]:
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "epic":
         sys.exit(cmd_epic(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "workspace":
+        sys.exit(cmd_workspace(sys.argv[2:]))
     ap = argparse.ArgumentParser(prog="fleet", description="Epic-grouped view of parallel agent work")
     ap.add_argument("--root", action="append", help="repo root to scan (repeatable); default = the .fleet project you're in")
     ap.add_argument("--json", action="store_true", help="machine-readable output")

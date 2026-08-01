@@ -1346,10 +1346,11 @@ PY
       ;;
     list|ls)
       # Text overview, grouped repo -> state. No JSON: agents (and humans) read this directly.
-      local repo="" col=""
+      local repo="" col="" show_archived=0
       while [ $# -gt 0 ]; do case "$1" in
         --repo) repo="$2"; shift 2;;
         --column) col="$2"; shift 2;;
+        --archived) show_archived=1; shift;;
         *) echo "task list: unknown flag $1" >&2; return 1;;
       esac; done
       local rpath=""
@@ -1359,7 +1360,8 @@ PY
       local projs
       projs="$(curl -fsS --max-time 5 "$KANBAN_URL/api/trpc/projects.list" 2>/dev/null)" || { dim "board not reachable at $KANBAN_URL"; return 1; }
       FLEET_PROJECTS="$projs" FLEET_REPO="${rpath:-$repo}" FLEET_COL="$col" FLEET_BIN="$bin" \
-      FLEET_CH="$CLINE_HOME_DIR" FLEET_PORT="$KANBAN_PORT" FLEET_HOME="$HOME" FLEET_SELF="$DIR" python3 - <<'PY'
+      FLEET_CH="$CLINE_HOME_DIR" FLEET_PORT="$KANBAN_PORT" FLEET_HOME="$HOME" FLEET_SELF="$DIR" \
+      FLEET_SHOW_ARCHIVED="$show_archived" python3 - <<'PY'
 import os, json, subprocess, sys
 B="\033[1m";D="\033[2m";R="\033[0m";C="\033[36m";Y="\033[33m";RED="\033[31m"
 # Remaining agent budget up top, so the architect/agent reading this list can steer
@@ -1373,9 +1375,12 @@ except Exception:
     pass
 projects=json.loads(os.environ["FLEET_PROJECTS"])["result"]["data"]["projects"]
 rf=os.environ.get("FLEET_REPO","");cf=os.environ.get("FLEET_COL","");home=os.environ["FLEET_HOME"];bin_=os.environ["FLEET_BIN"]
+show_archived=os.environ.get("FLEET_SHOW_ARCHIVED","0")=="1"
 env={**os.environ,"CLINE_HOME":os.environ["FLEET_CH"],"KANBAN_RUNTIME_PORT":os.environ["FLEET_PORT"]}
 ORDER=["backlog","in_progress","review","done"]
 for p in projects:
+    if not show_archived and p.get("epic") and p["epic"].get("archived"):
+        continue
     name=p["id"];path=p["path"]
     if rf and rf not in (name, os.path.basename(path)) and (not os.path.exists(rf) or os.path.realpath(path) != os.path.realpath(rf)): continue
     # The kanban CLI truncates large stdout when it exits before the pipe flushes
@@ -1598,8 +1603,7 @@ for line in tail:
 PY
       ;;
     update)
-      # Edit a card's fields in place (backlog cards). The per-card agent model is
-      # NOT updatable (kanban limitation) -> recreate to change it.
+      # Edit a card's fields in place (backlog cards).
       local tid="" repo=""; local -a uargs=()
       while [ $# -gt 0 ]; do case "$1" in
         --task-id) tid="$2"; shift 2;;
@@ -1616,11 +1620,19 @@ PY
             pr) uargs+=(--auto-review-enabled true --auto-review-mode pr);;
             *) echo "task update: --auto-review pr|off" >&2; return 1;; esac; shift 2;;
         --cline-model) uargs+=(--cline-model "$2"); shift 2;;
-        --model) echo "task update: the per-card agent model can't be changed in place (kanban limitation)." >&2
-                 echo "  recreate instead:  fleet task create … --model $2   then delete the old card." >&2; return 1;;
-        *) echo "task update: unknown flag $1" >&2; return 1;;
+        --agent-model) uargs+=(--agent-model "$2"); shift 2;;
+        --skill) uargs+=(--skill "$2"); shift 2;;
+        --external-issue|--issue) uargs+=(--external-issue "$2"); shift 2;;
+        --type|--card-type) uargs+=(--card-type "$2"); shift 2;;
+        --auto-review-enabled) uargs+=(--auto-review-enabled "$2"); shift 2;;
+        --auto-review-mode) uargs+=(--auto-review-mode "$2"); shift 2;;
+        --model) uargs+=(--agent-model "$2"); shift 2;; # Redirect legacy --model to --agent-model
+        *)
+          echo "task update: unknown flag $1" >&2
+          echo "valid flags: --task-id, --repo, --title, --prompt, --prompt-file, --base-ref, --agent, --auto-review, --cline-model, --agent-model, --skill, --external-issue, --issue, --type, --card-type" >&2
+          return 1;;
       esac; done
-      [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review pr|off] [--agent claude|codex|cline] [--plan|--no-plan] [--cline-model <id>] [--repo <name>]" >&2; return 1; }
+      [ -n "$tid" ] || { echo "usage: fleet task update --task-id <id> [--title <t>] [--prompt <text>|--prompt-file <f>] [--base-ref <ref>] [--auto-review pr|off] [--agent claude|codex|cline] [--cline-model <id>] [--agent-model <id>] [--skill <name>] [--type <name>] [--external-issue <ref>] [--repo <name>]" >&2; return 1; }
       [ "${#uargs[@]}" -gt 0 ] || { echo "task update: nothing to change — pass at least one field" >&2; return 1; }
       local pp; pp="$(_fleet_repo_path "$repo" "task update")" || return 1
       local out; out="$(CLINE_HOME="$CLINE_HOME_DIR" KANBAN_RUNTIME_PORT="$KANBAN_PORT" "$bin" task update --task-id "$tid" --project-path "$pp" "${uargs[@]}" 2>&1 || true)"
@@ -2195,6 +2207,7 @@ case "$cmd" in
     esac;;
   initiatives|inits|initiative) exec python3 "$DIR/fleet.py" --initiatives "$@";;
   epic) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
+  workspace) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
   port) exec "$DIR/port-for" "$@";;
   kanban) fleet_kanban "$@"; exit $?;;
   service|svc) fleet_service "$@"; exit $?;;
@@ -2204,5 +2217,5 @@ case "$cmd" in
   init) fleet_init "$@"; exit $?;;
   update) fleet_update "$@"; exit $?;;
   budget|limits|usage) exec python3 "$DIR/budget.py" "$@";;
-  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools)" >&2; exit 1;;
+  *) echo "fleet: unknown command '$cmd' (try: status init update budget new up run ls rm port kanban task card-type xtools workspace)" >&2; exit 1;;
 esac
