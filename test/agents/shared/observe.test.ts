@@ -10,6 +10,7 @@ import {
 	getTranscriptReadCost,
 	readFirstTranscriptRecord,
 	resetTranscriptReadCost,
+	STRUGGLE_DETECTOR,
 	selectFromTranscriptTail,
 	type TranscriptRecord,
 } from "../../../src/agents/shared/observe";
@@ -237,5 +238,112 @@ describe("transcript head", () => {
 
 		expect(first?.index).toBe(0);
 		expect(cost.bytesRead).toBeLessThan(128 * 1024);
+	});
+});
+
+describe("struggle detector", () => {
+	it("given an active session transcript, when folded again, then it reads only appended bytes", async () => {
+		const path = join(home, "struggle-cost.jsonl");
+		writeFileSync(path, "", "utf8");
+		await foldTranscript(path, STRUGGLE_DETECTOR);
+
+		const firstTurn = `${JSON.stringify({
+			type: "assistant",
+			message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "src/index.ts" } }] },
+		})}\n`;
+		appendFileSync(path, firstTurn, "utf8");
+
+		resetTranscriptReadCost();
+		await foldTranscript(path, STRUGGLE_DETECTOR);
+		const cost = getTranscriptReadCost();
+
+		expect(cost.bytesRead).toBe(Buffer.byteLength(firstTurn));
+		expect(cost.recordsParsed).toBe(1);
+	});
+
+	it("given a thrashing pattern, when analyzed, then it flags as struggling", async () => {
+		const path = join(home, "thrashing.jsonl");
+
+		// 4 consecutive identical tool calls
+		const record = {
+			type: "assistant",
+			message: {
+				content: [
+					{
+						type: "tool_use",
+						name: "replace",
+						input: { file_path: "src/lib.ts", old_string: "foo", new_string: "bar" },
+					},
+				],
+			},
+		};
+		const lineStr = `${JSON.stringify(record)}\n`;
+		writeFileSync(path, lineStr.repeat(4), "utf8");
+
+		const result = await foldTranscript(path, STRUGGLE_DETECTOR);
+		expect(result.struggling).toBe(true);
+		expect(result.reasons[0]).toContain("Tool replace was invoked with identical arguments 4 times consecutively");
+	});
+
+	it("given an edit-churn pattern, when analyzed, then it flags as struggling", async () => {
+		const path = join(home, "churn.jsonl");
+
+		// 5 edits to the same file in the sliding window
+		let content = "";
+		for (let i = 1; i <= 5; i++) {
+			content += `${JSON.stringify({
+				type: "assistant",
+				message: { content: [{ type: "tool_use", name: "replace", input: { file_path: "src/lib.ts", index: i } }] },
+			})}\n`;
+		}
+		writeFileSync(path, content, "utf8");
+
+		const result = await foldTranscript(path, STRUGGLE_DETECTOR);
+		expect(result.struggling).toBe(true);
+		expect(result.reasons[0]).toContain("File src/lib.ts was edited 5 times recently");
+	});
+
+	it("given a high-failure pattern, when analyzed, then it flags as struggling", async () => {
+		const path = join(home, "failures.jsonl");
+
+		// 5 tools, and more than 70% fail
+		let content = "";
+		for (let i = 1; i <= 5; i++) {
+			content += `${JSON.stringify({
+				type: "assistant",
+				message: { content: [{ type: "tool_use", name: "replace", input: { file_path: `src/file${i}.ts` } }] },
+			})}\n`;
+			content += `${JSON.stringify({
+				type: "user",
+				message: { content: [{ type: "tool_result", content: "Error: failed to compile" }] },
+			})}\n`;
+		}
+		writeFileSync(path, content, "utf8");
+
+		const result = await foldTranscript(path, STRUGGLE_DETECTOR);
+		expect(result.struggling).toBe(true);
+		expect(result.reasons[0]).toContain("High recent tool failure rate");
+	});
+
+	it("given a hard but productive pattern, when analyzed, then it does NOT flag as struggling", async () => {
+		const path = join(home, "productive.jsonl");
+
+		// 5 edits to DIFFERENT files, and some successful tool results
+		let content = "";
+		for (let i = 1; i <= 5; i++) {
+			content += `${JSON.stringify({
+				type: "assistant",
+				message: { content: [{ type: "tool_use", name: "replace", input: { file_path: `src/file${i}.ts` } }] },
+			})}\n`;
+			content += `${JSON.stringify({
+				type: "user",
+				message: { content: [{ type: "tool_result", content: "Success" }] },
+			})}\n`;
+		}
+		writeFileSync(path, content, "utf8");
+
+		const result = await foldTranscript(path, STRUGGLE_DETECTOR);
+		expect(result.struggling).toBe(false);
+		expect(result.reasons).toEqual([]);
 	});
 });

@@ -435,15 +435,23 @@ function extractToolCalls(record: TranscriptRecord): ToolCallInfo[] {
 	return calls;
 }
 
+function isEditTool(name: string): boolean {
+	const lower = name.toLowerCase();
+	return (
+		lower.includes("write") ||
+		lower.includes("edit") ||
+		lower.includes("replace") ||
+		lower.includes("patch") ||
+		lower.includes("pencil") ||
+		lower.includes("insert") ||
+		lower.includes("update") ||
+		lower.includes("delete") ||
+		lower.includes("design")
+	);
+}
+
 function extractEditedFilePath(call: ToolCallInfo): string | null {
-	const editTools = [
-		"replace",
-		"write_file",
-		"mcp_pencil_batch_design",
-		"patch",
-		"mcp_pencil_replace_all_matching_properties",
-	];
-	if (!editTools.includes(call.name)) {
+	if (!isEditTool(call.name)) {
 		return null;
 	}
 	if (call.input && typeof call.input === "object") {
@@ -451,8 +459,10 @@ function extractEditedFilePath(call: ToolCallInfo): string | null {
 		if (typeof inp.file_path === "string") return inp.file_path;
 		if (typeof inp.filePath === "string") return inp.filePath;
 		if (typeof inp.path === "string") return inp.path;
+		if (typeof inp.target === "string") return inp.target;
+		if (typeof inp.dest === "string") return inp.dest;
 	}
-	return null;
+	return "unknown";
 }
 
 function extractToolResultText(record: TranscriptRecord): string | null {
