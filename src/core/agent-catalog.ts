@@ -43,43 +43,53 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		installUrl: "https://docs.anthropic.com/en/docs/claude-code/quickstart",
 		supportsAgentModelOverride: true,
 		modelPrices: {
+			// Per-model Claude API prices in USD per MILLION tokens. Cached 2026-07-28 from
+			// Anthropic's published pricing table. Cache-write uses the 5-minute-TTL rate —
+			// Claude Code's default — which is 1.25× base input; cache-read is 0.1× base
+			// input. Cost is a best-effort estimate for a "watch it burn" glance, not a
+			// billing figure: a model absent from this table yields a `null` cost (tokens
+			// render alone) rather than a wrong number.
 			"claude-opus-5": {
 				inputPerMTok: 5.0,
 				outputPerMTok: 25.0,
-				cacheWritePerMTok: 6.25,
-				cacheReadPerMTok: 0.5,
+				cacheWritePerMTok: 6.25, // 5-minute-TTL rate (1.25x of input rate)
+				cacheReadPerMTok: 0.5, // 0.1x of input rate
 				source: "Anthropic published pricing table",
 				date: "2026-07-28",
 			},
 			"claude-opus-4-8": {
 				inputPerMTok: 5.0,
 				outputPerMTok: 25.0,
-				cacheWritePerMTok: 6.25,
-				cacheReadPerMTok: 0.5,
+				cacheWritePerMTok: 6.25, // 5-minute-TTL rate (1.25x of input rate)
+				cacheReadPerMTok: 0.5, // 0.1x of input rate
 				source: "Anthropic published pricing table",
 				date: "2026-07-28",
 			},
 			"claude-fable-5": {
 				inputPerMTok: 10.0,
 				outputPerMTok: 50.0,
-				cacheWritePerMTok: 12.5,
-				cacheReadPerMTok: 1.0,
+				cacheWritePerMTok: 12.5, // 5-minute-TTL rate (1.25x of input rate)
+				cacheReadPerMTok: 1.0, // 0.1x of input rate
 				source: "Anthropic published pricing table",
 				date: "2026-07-28",
 			},
 			"claude-sonnet-5": {
 				inputPerMTok: 3.0,
 				outputPerMTok: 15.0,
-				cacheWritePerMTok: 3.75,
-				cacheReadPerMTok: 0.3,
-				source: "Anthropic published pricing table",
+				cacheWritePerMTok: 3.75, // 5-minute-TTL rate (1.25x of input rate)
+				cacheReadPerMTok: 0.3, // 0.1x of input rate
+				// Sonnet 5 carries introductory pricing ($2 input / $10 output per MTok)
+				// through 2026-08-31; we price at the STANDARD rate ($3 / $15) since cost is
+				// an estimate, not a bill, and the intro rate would understate the steady state.
+				source:
+					"Anthropic published pricing table. Priced at standard rate rather than temporary intro rate ($2/$10) to reflect steady-state estimate.",
 				date: "2026-07-28",
 			},
 			"claude-haiku-4-5": {
 				inputPerMTok: 1.0,
 				outputPerMTok: 5.0,
-				cacheWritePerMTok: 1.25,
-				cacheReadPerMTok: 0.1,
+				cacheWritePerMTok: 1.25, // 5-minute-TTL rate (1.25x of input rate)
+				cacheReadPerMTok: 0.1, // 0.1x of input rate
 				source: "Anthropic published pricing table",
 				date: "2026-07-28",
 			},
@@ -94,32 +104,6 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		autonomousArgs: ["--dangerously-bypass-approvals-and-sandbox"],
 		installUrl: "https://github.com/openai/codex",
 		supportsAgentModelOverride: true,
-		modelPrices: {
-			"gpt-5.5": {
-				inputPerMTok: 2.5,
-				outputPerMTok: 10.0,
-				cacheWritePerMTok: 0.0,
-				cacheReadPerMTok: 1.25,
-				source: "OpenAI pricing for GPT-4o/GPT-5 class models",
-				date: "2026-08-01",
-			},
-			"gpt-5-codex": {
-				inputPerMTok: 2.5,
-				outputPerMTok: 10.0,
-				cacheWritePerMTok: 0.0,
-				cacheReadPerMTok: 1.25,
-				source: "OpenAI pricing for GPT-4o/GPT-5 class models",
-				date: "2026-08-01",
-			},
-			"gpt-4-turbo": {
-				inputPerMTok: 10.0,
-				outputPerMTok: 30.0,
-				cacheWritePerMTok: 0.0,
-				cacheReadPerMTok: 5.0,
-				source: "OpenAI GPT-4 Turbo pricing",
-				date: "2026-08-01",
-			},
-		},
 	},
 	{
 		id: "gemini",
@@ -129,16 +113,6 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		baseArgs: [],
 		autonomousArgs: ["--yolo"],
 		installUrl: "https://github.com/google-gemini/gemini-cli",
-		modelPrices: {
-			"gemini-3.5-flash": {
-				inputPerMTok: 0.075,
-				outputPerMTok: 0.3,
-				cacheWritePerMTok: 0.0,
-				cacheReadPerMTok: 0.01875,
-				source: "Google Vertex AI pricing for Gemini 1.5/2.0/3.5 Flash",
-				date: "2026-08-01",
-			},
-		},
 	},
 ];
 

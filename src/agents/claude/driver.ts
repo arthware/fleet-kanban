@@ -6,9 +6,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
+import { estimateAgentCostUsd, RUNTIME_AGENT_CATALOG, type RuntimeAgentCatalogEntry } from "../../core/agent-catalog";
 import type { RuntimeTaskChatMessage, RuntimeTaskTokenUsage } from "../../core/api-contract";
-import { estimateClaudeCostUsd } from "../../core/claude-model-pricing";
 import { resolveHomeAgentAppendSystemPrompt } from "../../prompts/append-system-prompt";
 import { getHookAgentDirectory, toBracketedPaste } from "../../terminal/agent-session-adapters";
 import {
@@ -681,7 +680,7 @@ const CLAUDE_USAGE: TranscriptFold<ClaudeUsageTotals, RuntimeTaskTokenUsage | nu
 			cacheReadTokens: totals.cacheReadTokens,
 			cacheCreationTokens: totals.cacheCreationTokens,
 		};
-		return { ...sums, costUsd: estimateClaudeCostUsd(sums, totals.modelId) };
+		return { ...sums, costUsd: estimateAgentCostUsd("claude", totals.modelId, sums) };
 	},
 };
 

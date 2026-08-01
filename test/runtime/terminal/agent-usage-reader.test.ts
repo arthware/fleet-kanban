@@ -340,7 +340,7 @@ describe("readAgentUsage — gemini", () => {
 				outputTokens: 630,
 				cacheReadTokens: 40786,
 				cacheCreationTokens: 0,
-				costUsd: 0.0046420875,
+				costUsd: null,
 			},
 		});
 	});
