@@ -395,6 +395,8 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	latestTurnCheckpoint: runtimeTaskTurnCheckpointSchema.nullable().optional(),
 	previousTurnCheckpoint: runtimeTaskTurnCheckpointSchema.nullable().optional(),
 	lastReviewNotificationKey: z.string().nullable().optional(),
+	struggling: z.boolean().optional(),
+	struggleReasons: z.array(z.string()).optional(),
 });
 export type RuntimeTaskSessionSummary = z.infer<typeof runtimeTaskSessionSummarySchema>;
 

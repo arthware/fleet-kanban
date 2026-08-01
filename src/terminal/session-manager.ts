@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { DRIVERS, type DriverSessionRef } from "../agents/driver";
+import { detectStruggle } from "../agents/shared/observe";
 import type {
 	RuntimeAgentId,
 	RuntimeAgentSessionLifecycle,
@@ -303,15 +304,43 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry);
 		const reconciled = reconcileTaskSessionSummaryLiveness({ summary: entry.summary, lifecycle });
+
+		let struggling = false;
+		let struggleReasons: string[] = [];
+		let agentSessionId = entry.summary.agentSessionId;
+		const agentId = entry.summary.agentId;
+		const parsedHome = parseHomeAgentSessionId(entry.summary.taskId);
+		if (!agentSessionId && agentId === "claude" && parsedHome) {
+			agentSessionId = deriveHomeAgentClaudeSessionId(
+				parsedHome.workspaceId,
+				agentId,
+				entry.summary.homeAgentSessionGeneration ?? 0,
+			);
+		}
+		if (agentSessionId && agentId) {
+			const transcript = await locateAgentTranscript({
+				agentId,
+				sessionId: agentSessionId,
+				homePath: homedir(),
+			});
+			if (transcript.present) {
+				const struggle = await detectStruggle(transcript.path);
+				struggling = struggle.struggling;
+				struggleReasons = [...struggle.reasons];
+			}
+		}
+
 		if (
 			entry.summary.agentSessionLifecycle === reconciled.agentSessionLifecycle &&
 			entry.summary.state === reconciled.state &&
 			entry.summary.pid === reconciled.pid &&
-			entry.summary.reviewReason === reconciled.reviewReason
+			entry.summary.reviewReason === reconciled.reviewReason &&
+			entry.summary.struggling === struggling &&
+			JSON.stringify(entry.summary.struggleReasons) === JSON.stringify(struggleReasons)
 		) {
 			return cloneSummary(entry.summary);
 		}
-		return cloneSummary(updateSummary(entry, reconciled));
+		return cloneSummary(updateSummary(entry, { ...reconciled, struggling, struggleReasons }));
 	}
 
 	attach(taskId: string, listener: TerminalSessionListener): (() => void) | null {
