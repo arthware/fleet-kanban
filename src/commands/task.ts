@@ -9,6 +9,7 @@ import type {
 	RuntimeBoardData,
 	RuntimeBoardDependency,
 	RuntimeExternalIssue,
+	RuntimeTaskTokenUsage,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import { runtimeAgentIdSchema } from "../core/api-contract";
@@ -386,6 +387,32 @@ export function resolveCardIdFromRefOrIssue(state: RuntimeWorkspaceStateResponse
 	return matches[0] ?? ref;
 }
 
+export function formatCliTokenUsage(usage: RuntimeTaskTokenUsage | null, hasSession: boolean): string {
+	if (!hasSession) {
+		return "-";
+	}
+	if (!usage) {
+		return "?";
+	}
+	const realWork = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+	if (realWork === 0) {
+		return "0";
+	}
+	if (realWork >= 1_000_000) {
+		const val = realWork / 1_000_000;
+		const rounded = Math.round(val * 10) / 10;
+		const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+		return `${text}M`;
+	}
+	if (realWork >= 1_000) {
+		const val = realWork / 1_000;
+		const rounded = Math.round(val * 10) / 10;
+		const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+		return `${text}k`;
+	}
+	return String(Math.round(realWork));
+}
+
 export function formatTaskRecord(
 	state: RuntimeWorkspaceStateResponse,
 	task: RuntimeBoardCard,
@@ -487,6 +514,20 @@ function findTasksInColumn(
 	}));
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`Timeout of ${timeoutMs}ms exceeded`)), timeoutMs);
+	});
+	try {
+		return await Promise.race([promise, timeoutPromise]);
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
+		}
+	}
+}
+
 async function listTasks(input: { cwd: string; projectPath?: string; column?: ListTaskColumn }): Promise<JsonRecord> {
 	const workspace = await resolveRuntimeWorkspace(input.projectPath, input.cwd, {
 		autoCreateIfMissing: false,
@@ -503,6 +544,25 @@ async function listTasks(input: { cwd: string; projectPath?: string; column?: Li
 		}
 		return boardColumn.cards.map((task) => formatTaskRecord(state, task, boardColumn.id));
 	});
+
+	const taskIds = tasks.map((t) => t.id as string);
+	let tokenUsages: Record<string, RuntimeTaskTokenUsage | null> = {};
+	if (taskIds.length > 0) {
+		try {
+			const usageResult = await withTimeout(runtimeClient.runtime.getTaskTokenUsage.query({ taskIds }), 500);
+			if (usageResult.ok && usageResult.usage) {
+				tokenUsages = usageResult.usage;
+			}
+		} catch {
+			// Degrade gracefully to preserve fast task list behavior
+		}
+	}
+
+	for (const t of tasks) {
+		const usage = tokenUsages[t.id as string] ?? null;
+		t.tokenUsage = usage;
+		t.tokenUsageCompact = formatCliTokenUsage(usage, t.session !== null);
+	}
 
 	return {
 		ok: true,

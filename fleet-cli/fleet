@@ -1434,7 +1434,8 @@ for p in projects:
             # end so it never disrupts the id/agent/state column alignment.
             xi=(t.get("externalIssue") or {}).get("key") or ""
             xitxt=f"  {C}⧉ {xi}{R}" if xi else ""
-            print(f"    {Y}{t.get('id','?')}{R}  {ag:<7} {stcol} {title}{mdtxt}{xitxt}")
+            tok_str=t.get("tokenUsageCompact") or "-"
+            print(f"    {Y}{t.get('id','?')}{R}  {ag:<7} {stcol} {tok_str:<6} {title}{mdtxt}{xitxt}")
     print()
 PY
       ;;
@@ -1480,6 +1481,17 @@ pr=(t.get('prompt') or '').strip()
 if pr: print(f"{D}{pr[:360]}{'…' if len(pr)>360 else ''}{R}")
 meta=" ".join(f"{k}={s[k]}" for k in ('pid','exitCode','reviewReason') if s.get(k) is not None)
 if meta: print(f"{D}session: {meta}{R}")
+u = t.get("tokenUsage")
+if not s:
+    print(f"{D}tokens:{R} -")
+elif not u:
+    print(f"{D}tokens:{R} ?")
+else:
+    cost = u.get("costUsd")
+    cost_str = f"${cost:.4f}" if cost is not None else "unknown"
+    print(f"{D}tokens:{R} {u.get('inputTokens', 0):,} fresh input · {u.get('outputTokens', 0):,} output · "
+          f"{u.get('cacheCreationTokens', 0):,} cache write · {u.get('cacheReadTokens', 0):,} cache read · "
+          f"cost: {cost_str}")
 wts=glob.glob(os.path.join(ch,"worktrees",tid,"*"))
 if wts:
     wt=wts[0];print(f"{D}worktree:{R} {wt.replace(home,'~')}")
