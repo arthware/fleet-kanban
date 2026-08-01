@@ -14,6 +14,7 @@ import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./sc
 import { givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved } from "./scenarios/givenCompletedEpicWhenArchivedThenItsWorktreeIsRemoved";
 import { givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt } from "./scenarios/givenGeminiNotificationWhenIngestedThenCardParksAndSteerWakesIt";
 import { givenLifecycleCardWhenCompletedThenLinkedCardStarts } from "./scenarios/givenLifecycleCardWhenCompletedThenLinkedCardStarts";
+import { givenSteeredReviewCardWhenReturnsToReviewThenTransitionsRecordRoundTrip } from "./scenarios/givenReviewCardWhenSteeredThenMovesToInProgress";
 import { givenReviewHookWhenIngestedThenOverseerIsNotified } from "./scenarios/givenReviewHookWhenIngestedThenOverseerIsNotified";
 import { givenRunningCardWhenSteeredThenAgentReceivesSubmittedText } from "./scenarios/givenRunningCardWhenSteeredThenAgentReceivesSubmittedText";
 import { givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts } from "./scenarios/givenWorktreeShapesWhenEnsuredThenTheyKeepTheExpectedArtifacts";
@@ -61,6 +62,16 @@ async function main(): Promise<void> {
 	});
 	await runScenario(results, "steer a Review card -> moves to In Progress", async () => {
 		await runBrowserScenario("review-steering");
+	});
+	await runScenario(results, "steered Review card records a second Review entry", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenSteeredReviewCardWhenReturnsToReviewThenTransitionsRecordRoundTrip(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
 	});
 	await runScenario(results, "review ping reaches the overseer session", async () => {
 		const context = await createSelfcheckContext();
@@ -213,6 +224,7 @@ async function runBrowserScenario(name: string): Promise<void> {
 					KANBAN_SELFCHECK_BASE_URL: context.baseUrl,
 					KANBAN_SELFCHECK_WORKSPACE_ID: context.workspaceId,
 					KANBAN_SELFCHECK_HOME: context.instance.homeDir,
+					KANBAN_SELFCHECK_FIXTURE_PATH: context.fixture.path,
 					KANBAN_SELFCHECK_ARTIFACT_DIR: artifactDir,
 				},
 			},

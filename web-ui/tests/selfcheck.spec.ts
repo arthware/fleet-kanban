@@ -11,9 +11,12 @@ import { givenReviewCardWhenSteeredThenMovesToInProgress } from "../../test/self
 const baseUrl = process.env.KANBAN_SELFCHECK_BASE_URL;
 const workspaceId = process.env.KANBAN_SELFCHECK_WORKSPACE_ID;
 const homeDir = process.env.KANBAN_SELFCHECK_HOME;
+const fixturePath = process.env.KANBAN_SELFCHECK_FIXTURE_PATH;
 
-if (!baseUrl || !workspaceId || !homeDir) {
-	throw new Error("KANBAN_SELFCHECK_BASE_URL, KANBAN_SELFCHECK_WORKSPACE_ID, and KANBAN_SELFCHECK_HOME are required.");
+if (!baseUrl || !workspaceId || !homeDir || !fixturePath) {
+	throw new Error(
+		"KANBAN_SELFCHECK_BASE_URL, KANBAN_SELFCHECK_WORKSPACE_ID, KANBAN_SELFCHECK_HOME, and KANBAN_SELFCHECK_FIXTURE_PATH are required.",
+	);
 }
 
 function createBrowserDriver(page: Page): ScenarioDriver {
@@ -27,7 +30,7 @@ function createBrowserDriver(page: Page): ScenarioDriver {
 			stop: async () => undefined,
 		},
 		fixture: {
-			path: "",
+			path: fixturePath,
 			baseCommit: "",
 			cleanup: () => undefined,
 		},

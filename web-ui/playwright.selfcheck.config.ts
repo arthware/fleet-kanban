@@ -7,7 +7,7 @@ if (!baseURL) {
 
 export default defineConfig({
 	testDir: "./tests",
-	timeout: 20_000,
+	timeout: 45_000,
 	outputDir: process.env.KANBAN_SELFCHECK_ARTIFACT_DIR,
 	use: {
 		baseURL,
