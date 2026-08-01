@@ -442,11 +442,7 @@ function isEditTool(name: string): boolean {
 		lower.includes("edit") ||
 		lower.includes("replace") ||
 		lower.includes("patch") ||
-		lower.includes("pencil") ||
-		lower.includes("insert") ||
-		lower.includes("update") ||
-		lower.includes("delete") ||
-		lower.includes("design")
+		lower.includes("insert")
 	);
 }
 
