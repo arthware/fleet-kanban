@@ -213,6 +213,7 @@ async function runBrowserScenario(name: string): Promise<void> {
 					KANBAN_SELFCHECK_BASE_URL: context.baseUrl,
 					KANBAN_SELFCHECK_WORKSPACE_ID: context.workspaceId,
 					KANBAN_SELFCHECK_HOME: context.instance.homeDir,
+					KANBAN_SELFCHECK_FIXTURE_PATH: context.fixture.path,
 					KANBAN_SELFCHECK_ARTIFACT_DIR: artifactDir,
 				},
 			},
