@@ -57,6 +57,7 @@ const STUB_DISCOVERED_SESSION_ID = "5e1fc4ec-0000-4000-8000-000000000001";
 // the transcript behind it. One list, because both halves of the impersonation
 // (write the rollout, stay alive for the discovery poll) must cover the same tasks.
 const DISCOVERABLE_SESSION_TASK_IDS = new Set(["selfcheck-discovered-session-id", "selfcheck-transcript-read-cost"]);
+const EARLY_REVIEW_TASK_IDS = new Set(["selfcheck-steer-review"]);
 if (DISCOVERABLE_SESSION_TASK_IDS.has(taskId) && process.env.HOME) {
 	const sessionsDir = join(process.env.HOME, ".codex", "sessions", "2026", "07", "30");
 	mkdirSync(sessionsDir, { recursive: true });
@@ -91,6 +92,9 @@ if (runtimeHome) {
 appendFileSync(markerPath, `stub commit for ${taskId}\n`, "utf8");
 run("git", ["add", "stub-agent-output.txt"], { cwd });
 run("git", ["commit", "-qm", `stub agent commit for ${taskId}`], { cwd });
+if (EARLY_REVIEW_TASK_IDS.has(taskId)) {
+	await notifyReview();
+}
 // Session-id discovery only polls while the session is still live, so a task that
 // asserts on it needs the stub to stay up rather than exit in 100ms.
 const sleepMs =
@@ -101,5 +105,7 @@ const sleepMs =
 		? 60000
 		: 100;
 await new Promise((resolve) => setTimeout(resolve, sleepMs));
-await notifyReview();
+if (!EARLY_REVIEW_TASK_IDS.has(taskId)) {
+	await notifyReview();
+}
 process.stdout.write("stub-agent: committed deterministic work\n");
