@@ -1,16 +1,19 @@
 import type { RuntimeConfigResponse } from "../../../src/core/api-contract";
-import {
-	LINKED_CHILD_TASK_ID,
-	LINKED_PARENT_TASK_ID,
-	STUB_LIFECYCLE_TASK_ID,
-	seedIsolatedBoardState,
-} from "../../utilities/board-seed";
+import { LINKED_CHILD_TASK_ID, LINKED_PARENT_TASK_ID, STUB_LIFECYCLE_TASK_ID } from "../../utilities/board-seed";
 import { requestJson } from "../../utilities/trpc-request";
-import { assertOk, completeTask, driverContext, moveCard, mutateBoard, type ScenarioDriver } from "../scenario-api";
+import {
+	assertOk,
+	completeTask,
+	driverContext,
+	moveCard,
+	mutateBoard,
+	type ScenarioDriver,
+	seedScenarioBoardState,
+} from "../scenario-api";
 
 export async function givenLifecycleCardWhenCompletedThenLinkedCardStarts(driver: ScenarioDriver): Promise<void> {
 	const context = driverContext(driver);
-	seedIsolatedBoardState({ homeDir: context.instance.homeDir, workspaceId: context.workspaceId });
+	await seedScenarioBoardState(context);
 	const config = await requestJson<RuntimeConfigResponse>({
 		baseUrl: context.baseUrl,
 		procedure: "runtime.getConfig",

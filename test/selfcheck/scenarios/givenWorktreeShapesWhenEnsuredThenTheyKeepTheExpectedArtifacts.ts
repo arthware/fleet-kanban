@@ -7,12 +7,11 @@ import type {
 	RuntimeProjectsResponse,
 	RuntimeWorktreeEnsureResponse,
 } from "../../../src/core/api-contract";
-import { seedIsolatedBoardState } from "../../utilities/board-seed";
 import { createGitTestEnv } from "../../utilities/git-env";
 import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../../utilities/kanban-test-instance";
 import { createTempDir } from "../../utilities/temp-dir";
 import { requestJson } from "../../utilities/trpc-request";
-import { assertOk, createSelfcheckCard, ScenarioAssertionError } from "../scenario-api";
+import { assertOk, createSelfcheckCard, ScenarioAssertionError, seedScenarioBoardState } from "../scenario-api";
 
 const DEFAULT_COLUMNS: Array<{ id: RuntimeBoardColumnId; title: string }> = [
 	{ id: "backlog", title: "Backlog" },
@@ -267,20 +266,36 @@ async function ensureWorktree(
 	taskId: string,
 	baseRef: string,
 ): Promise<string> {
-	seedIsolatedBoardState({
-		homeDir,
-		workspaceId,
-		board: {
-			columns: DEFAULT_COLUMNS.map((column) => ({
-				...column,
-				cards:
-					column.id === "backlog"
-						? [createSelfcheckCard({ id: taskId, title: taskId, baseRef, agentId: "claude" })]
-						: [],
-			})),
-			dependencies: [],
+	await seedScenarioBoardState(
+		{
+			baseUrl,
+			workspaceId,
+			instance: {
+				baseUrl,
+				port: Number(new URL(baseUrl).port),
+				homeDir,
+				stop: async () => undefined,
+			},
+			fixture: {
+				path: "",
+				baseCommit: "",
+				cleanup: () => undefined,
+			},
+			stop: async () => undefined,
 		},
-	});
+		{
+			board: {
+				columns: DEFAULT_COLUMNS.map((column) => ({
+					...column,
+					cards:
+						column.id === "backlog"
+							? [createSelfcheckCard({ id: taskId, title: taskId, baseRef, agentId: "claude" })]
+							: [],
+				})),
+				dependencies: [],
+			},
+		},
+	);
 	const ensured = await requestJson<RuntimeWorktreeEnsureResponse>({
 		baseUrl,
 		procedure: "workspace.ensureWorktree",

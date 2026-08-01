@@ -23,6 +23,7 @@ import {
 	hasTaskEnteredColumn,
 	moveTaskToColumn,
 } from "../../src/core/task-board-mutations";
+import { createStubLifecycleBoard, type SeedBoardStateInput } from "../utilities/board-seed";
 import { type IsolatedKanbanInstance, startIsolatedKanbanInstance } from "../utilities/kanban-test-instance";
 import { createPetRepoFixtureCopy, type PetRepoFixture } from "../utilities/pet-repo-fixture";
 import { requestJson } from "../utilities/trpc-request";
@@ -371,6 +372,37 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 	};
 }
 
+export async function seedScenarioBoardState(
+	context: SelfcheckContext,
+	input: Pick<SeedBoardStateInput, "board" | "sessions"> = {},
+): Promise<RuntimeWorkspaceStateResponse> {
+	const board = input.board ?? createStubLifecycleBoard();
+	let attempts = 3;
+	while (attempts > 0) {
+		const current = await loadState(context);
+		const response = await requestJson<RuntimeWorkspaceStateResponse>({
+			baseUrl: context.baseUrl,
+			procedure: "workspace.saveState",
+			type: "mutation",
+			workspaceId: context.workspaceId,
+			payload: {
+				board,
+				sessions: input.sessions ?? {},
+				expectedRevision: current.revision,
+			},
+		});
+		if (response.status === 200 && response.payload) {
+			return response.payload;
+		}
+		attempts -= 1;
+		if (attempts === 0) {
+			assertOk(false, "seedScenarioBoardState failed after 3 attempts due to revision conflicts.");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	throw new Error("unreachable");
+}
+
 export function driverContext(driver: ScenarioDriver): SelfcheckContext {
 	const context = (driver as { __context?: SelfcheckContext }).__context;
 	if (!context) {
@@ -536,14 +568,16 @@ async function startShellReviewSession(context: SelfcheckContext, taskId: string
 export async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
 	const startedAt = Date.now();
 	let lastValue: T | null = null;
-	while (Date.now() - startedAt < timeoutMs) {
+	while (true) {
 		lastValue = await resolveValue();
 		if (lastValue !== null) {
 			return lastValue;
 		}
+		if (Date.now() - startedAt >= timeoutMs) {
+			throw new ScenarioAssertionError(`Timed out waiting for ${label}. Last value: ${JSON.stringify(lastValue)}`);
+		}
 		await new Promise((resolvePoll) => setTimeout(resolvePoll, 100));
 	}
-	throw new ScenarioAssertionError(`Timed out waiting for ${label}. Last value: ${JSON.stringify(lastValue)}`);
 }
 
 export function assertOk(condition: unknown, message: string): asserts condition {
