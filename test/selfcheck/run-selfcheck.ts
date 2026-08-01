@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { attachContext, createSelfcheckContext, createTrpcScenarioDriver } from "./scenario-api";
+import { givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory } from "./scenarios/givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory";
 import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
 import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
@@ -109,6 +110,16 @@ async function main(): Promise<void> {
 		const context = await createSelfcheckContext();
 		try {
 			await givenRunningCardWhenSteeredThenAgentReceivesSubmittedText(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "polling a card with a 20 MB transcript stays cheap", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHistory(
 				attachContext(createTrpcScenarioDriver(context), context),
 			);
 		} finally {
