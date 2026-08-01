@@ -16,3 +16,33 @@ permissions:
 jobs:
   test:
     uses: ./.github/workflows/test.yml
+
+  build-artifact:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Install Web UI Dependencies
+        run: npm ci --prefix web-ui
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Dist Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-kanban-dist
+          path: dist/
+          retention-days: 7
