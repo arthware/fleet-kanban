@@ -152,7 +152,7 @@ Card Types
 Verification (there is exactly one definition of green in this repo: npm run verify)
 - **Run the full verification command:** ALWAYS run `npm run verify` to make sure your changes pass all local and CI checks. It covers repo-wide linting, compiling web-ui, typechecking, fast tests, and the `selfcheck` end-to-end scenarios suite (which proves actual board and agent behavior).
 - **Understand the verification tiers:**
-  - `verify:precommit`: Fast check (lint, typecheck, fast tests, web tests) run automatically on commit. It takes ~20 seconds. **Passing pre-commit checks does NOT guarantee the scenarios passed.**
+  - `verify:precommit`: Fast check (lint, typecheck, fast tests, web tests) run automatically on commit. It takes ~2-3 minutes (as Vitest is capped to a single worker for reliability). **Passing pre-commit checks does NOT guarantee the scenarios passed.**
   - `selfcheck`: Running `npm run selfcheck` executes 11 end-to-end headless scenario tests which take ~4.25 minutes. It is excluded from the pre-commit hook to keep the developer loop fast, but is executed as part of `npm run verify` and validated on every CI run.
 - **Never run full repo-root `npx vitest run` or `npm run test:integration`** in your inner loop — they sweep in `test/integration/*` server-boot tests that time out in agent worktrees and produce phantom failures. Use `npm run verify` instead.
 - **CLI-entry warning/bootstrap logic must be unit-testable without the entry.** Extract helpers (e.g. the DEP-warning filter) into a **non-entry module**; **never import `src/cli.ts` in a unit test** — importing the entry drags in the whole bootstrap.
