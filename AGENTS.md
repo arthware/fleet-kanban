@@ -152,8 +152,14 @@ Card Types
 Verification (there is exactly one definition of green in this repo: npm run verify)
 - **Run the full verification command:** ALWAYS run `npm run verify` to make sure your changes pass all local and CI checks. It covers repo-wide linting, compiling web-ui, typechecking, fast tests, and the `selfcheck` end-to-end scenarios suite (which proves actual board and agent behavior).
 - **Understand the verification tiers:**
-  - `verify:precommit`: Fast check (lint, typecheck, fast tests, web tests) run automatically on commit. It takes ~2-3 minutes (as Vitest is capped to a single worker for reliability). **Passing pre-commit checks does NOT guarantee the scenarios passed.**
-  - `selfcheck`: Running `npm run selfcheck` executes 11 end-to-end headless scenario tests which take ~4.25 minutes. It is excluded from the pre-commit hook to keep the developer loop fast, but is executed as part of `npm run verify` and validated on every CI run.
+  - `verify:precommit`: Fast check (lint, typecheck, fast tests, web tests) run automatically on commit. It takes **~70 seconds** (measured 10/10 runs at 64-75s; ~71s on CI), of which `test:fast` is ~45s because Vitest is capped to a single worker for reliability. **Passing pre-commit checks does NOT guarantee the scenarios passed.**
+  - `selfcheck`: Running `npm run selfcheck` executes **15** end-to-end headless scenario tests which take **~100 seconds**. It is excluded from the pre-commit hook to keep the developer loop fast, but is executed as part of `npm run verify` and validated on every CI run.
+  - `verify` end to end is **~2.5-3 minutes** locally (measured 146-191s).
+- **Vitest runs one file at a time, and the config owns `VITEST_MAX_WORKERS` to keep it that way.** The
+  cap is not about CPU: a file lock starved past its 10s staleness window is stolen from its own holder
+  and `proper-lockfile` throws `ECOMPROMISED` from a timer, crashing the run with no failing test to
+  blame (see `concepts/persistence-cline-home.md`). Setting `VITEST_MAX_WORKERS` yourself does nothing —
+  `vitest.config.ts` pins it — so don't reach for it the way older cards did.
 - **Never run full repo-root `npx vitest run` or `npm run test:integration`** in your inner loop — they sweep in `test/integration/*` server-boot tests that time out in agent worktrees and produce phantom failures. Use `npm run verify` instead.
 - **CLI-entry warning/bootstrap logic must be unit-testable without the entry.** Extract helpers (e.g. the DEP-warning filter) into a **non-entry module**; **never import `src/cli.ts` in a unit test** — importing the entry drags in the whole bootstrap.
 - **`test/integration/task-command-exit.integration.test.ts` runs sequentially**, not in parallel with `test:fast`.
