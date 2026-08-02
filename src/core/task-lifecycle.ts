@@ -34,6 +34,19 @@ export function hasTaskEnteredColumn(card: BoardLifecycleCard, columnId: BoardLi
 	return card.transitions?.some((transition) => transition.column === columnId) ?? false;
 }
 
+/**
+ * Whether `columnId` ends the card's lifecycle.
+ *
+ * `done` and `trash` are the only terminal columns — every other column is a stage the
+ * card is passing through, so work can legitimately resume from it. Callers gating a
+ * "can this card still be worked on" decision MUST ask this rather than allow-listing
+ * the columns they happen to expect: an allowlist strands a card the moment the board
+ * grows a column, and `review` (where review feedback arrives) is exactly such a case.
+ */
+export function isTerminalLifecycleColumn(columnId: BoardLifecycleColumnId): boolean {
+	return columnId === "done" || columnId === "trash";
+}
+
 export function getTaskStartedAt(card: BoardLifecycleCard): number | undefined {
 	return card.transitions?.find((transition) => transition.column === "in_progress")?.at;
 }
