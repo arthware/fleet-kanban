@@ -1,23 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ScenarioAssertionError, waitFor } from "../../selfcheck/scenario-api";
 
 describe("selfcheck wait helper", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("given readiness appears after the last sampled miss, when the poll budget elapses, then it checks readiness before failing", async () => {
 		// Given
+		vi.useFakeTimers();
 		let calls = 0;
 
-		// When / Then
-		await expect(
-			waitFor(
-				async () => {
-					calls += 1;
-					return calls >= 2 ? "ready" : null;
-				},
-				"delayed readiness",
-				1,
-			),
-		).resolves.toBe("ready");
+		// When
+		const ready = waitFor(
+			async () => {
+				calls += 1;
+				return calls >= 2 ? "ready" : null;
+			},
+			"delayed readiness",
+			100,
+		);
+		await vi.advanceTimersByTimeAsync(100);
+
+		// Then
+		await expect(ready).resolves.toBe("ready");
 		expect(calls).toBe(2);
 	});
 

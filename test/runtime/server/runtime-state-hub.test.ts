@@ -463,6 +463,65 @@ describe("projectSessionSummaryColumn", () => {
 		expect(mockBroadcast).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		["done", "awaiting_review"],
+		["done", "running"],
+		["trash", "awaiting_review"],
+		["trash", "running"],
+	] as const)(
+		"given a card already in %s, when a stale %s summary is projected, then it stays terminal",
+		async (terminalColumnId, sessionState) => {
+			let board = boardWithCard(terminalColumnId);
+			mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+				const res = mutate(createWorkspaceState("/path/to/workspace", board));
+				if (res.board) {
+					board = res.board;
+				}
+				return { value: res.value, state: createWorkspaceState("/path/to/workspace", board), saved: res.save };
+			});
+			const mockWorkspaceRegistry = {
+				getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+			};
+			const mockBroadcast = vi.fn();
+
+			const result = await projectSessionSummaryColumn(
+				"workspace-1",
+				{ taskId: "task-1", state: sessionState },
+				mockWorkspaceRegistry,
+				mockBroadcast,
+			);
+
+			expect(result).toBe(false);
+			expect(cardColumnId(board, "task-1")).toBe(terminalColumnId);
+			expect(mockBroadcast).not.toHaveBeenCalled();
+		},
+	);
+
+	it("given a non-terminal card is missing, when projected, then it no-ops and returns false", async () => {
+		let board = emptyBoard();
+		mockMutateWorkspaceState.mockImplementation(async (_id, mutate) => {
+			const res = mutate(createWorkspaceState("/path/to/workspace", board));
+			if (res.board) {
+				board = res.board;
+			}
+			return { value: res.value, state: createWorkspaceState("/path/to/workspace", board), saved: res.save };
+		});
+		const mockWorkspaceRegistry = {
+			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
+		};
+		const mockBroadcast = vi.fn();
+
+		const result = await projectSessionSummaryColumn(
+			"workspace-1",
+			{ taskId: "task-1", state: "awaiting_review" },
+			mockWorkspaceRegistry,
+			mockBroadcast,
+		);
+
+		expect(result).toBe(false);
+		expect(mockBroadcast).not.toHaveBeenCalled();
+	});
+
 	it("given an overseer, when projected, then it no-ops and returns false", async () => {
 		const mockWorkspaceRegistry = {
 			getWorkspacePathById: vi.fn(() => "/path/to/workspace"),
