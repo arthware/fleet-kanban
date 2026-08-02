@@ -4,7 +4,6 @@
 import type { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type {
-	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeStateStreamErrorMessage,
 	RuntimeStateStreamMessage,

@@ -131,14 +131,12 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 			if (step.run) {
 				const runCmd = step.run.trim();
 				// Setup steps are exempt; the guard is that no step performs
-				// *verification* outside `npm run verify`. Installing the browser the
-				// selfcheck scenarios drive is setup, not an alternate verify path.
+				// *verification* outside `npm run verify`.
 				const isInstallOrSetup =
 					runCmd.includes("npm ci") ||
 					runCmd.includes("git config") ||
 					runCmd.includes("npm i") ||
-					runCmd.includes("npm install") ||
-					runCmd.includes("playwright install");
+					runCmd.includes("npm install");
 
 				if (!isInstallOrSetup) {
 					expect(runCmd).toContain("npm run verify");
