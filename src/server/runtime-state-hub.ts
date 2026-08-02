@@ -64,6 +64,9 @@ export async function projectSessionSummaryColumn(
 			if (!previousColumnId || previousColumnId === targetColumnId) {
 				return { board: state.board, value: false, save: false };
 			}
+			if (previousColumnId === "done" || previousColumnId === "trash") {
+				return { board: state.board, value: false, save: false };
+			}
 			const moved = moveTaskToColumn(state.board, summary.taskId, targetColumnId, Date.now());
 			return { board: moved.board, value: moved.moved, save: moved.moved };
 		});
