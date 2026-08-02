@@ -3,6 +3,8 @@ import path from "node:path";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
 
+import vitestConfig from "../../vitest.config";
+
 interface WorkflowStep {
 	name?: string;
 	run?: string;
@@ -165,10 +167,16 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 		assertCiTriggersOnEpics(parsedCi);
 	});
 
-	it("givenVitestConfigWhenInspectedThenMaxWorkersIsSetToOne", () => {
-		const configPath = path.resolve(__dirname, "../../vitest.config.ts");
-		const content = fs.readFileSync(configPath, "utf8");
-		expect(content).toMatch(/\bmaxWorkers\s*:\s*1\b/);
+	it("givenVitestConfigWhenLoadedThenItCapsTheSuiteToOneWorker", () => {
+		expect(vitestConfig.test?.maxWorkers).toBe(1);
+	});
+
+	// `maxWorkers: 1` alone does not hold: Vitest applies `VITEST_MAX_WORKERS`
+	// *after* config resolution, so an ambient value silently un-caps the gate —
+	// and it overrides `fileParallelism: false` too. Importing the config must
+	// therefore pin the variable, and this asserts that side effect survives.
+	it("givenAnAmbientVitestMaxWorkersWhenTheConfigIsLoadedThenTheCapStillWins", () => {
+		expect(process.env.VITEST_MAX_WORKERS).toBe("1");
 	});
 });
 

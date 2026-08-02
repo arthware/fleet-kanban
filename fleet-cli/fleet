@@ -1496,12 +1496,7 @@ for p in projects:
             # A card blocked on the agent asking a question ("needs_input") reads as
             # awaiting_review like a finished card; call it out so the architect can
             # answer it instead of reviewing it.
-            if rr=="needs_input":
-                stcol=f"{B}{C}{'needs-input':<16}{R}"
-            elif s and s.get("struggling"):
-                stcol=f"{B}{RED}{'struggling':<16}{R}"
-            else:
-                stcol=f"{st:<16}"
+            stcol=f"{B}{C}{'needs-input':<16}{R}" if rr=="needs_input" else f"{st:<16}"
             md=(t.get("agentModel") or "").replace("claude-","")  # dark until task list JSON exposes agentModel
             mdtxt=f"  {D}[{md}]{R}" if md else ""
             # Surface the correlated external issue (Linear ENG-123 / GitHub #12) as a
@@ -1567,10 +1562,6 @@ else:
     print(f"{D}tokens:{R} {u.get('inputTokens', 0):,} fresh input · {u.get('outputTokens', 0):,} output · "
           f"{u.get('cacheCreationTokens', 0):,} cache write · {u.get('cacheReadTokens', 0):,} cache read · "
           f"cost: {cost_str}")
-if s and s.get("struggling"):
-    print(f"  {RED}⚠️  STRUGGLING DETECTED:{R}")
-    for reason in s.get("struggleReasons", []):
-        print(f"    {RED}- {reason}{R}")
 wts=glob.glob(os.path.join(ch,"worktrees",tid,"*"))
 if wts:
     wt=wts[0];print(f"{D}worktree:{R} {wt.replace(home,'~')}")

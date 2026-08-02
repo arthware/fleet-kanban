@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { detectStruggle } from "../agents/shared/observe";
+
 import { type RuntimeConfigState, toGlobalRuntimeConfigState } from "../config/runtime-config";
 import type {
 	RuntimeAgentSessionLifecycle,
@@ -372,15 +372,8 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 								homePath: homedir(),
 							});
 							const lifecycle: RuntimeAgentSessionLifecycle = transcript.present ? "resumable" : "gone";
-							let struggling = false;
-							let struggleReasons: string[] = [];
-							if (transcript.present) {
-								const struggle = await detectStruggle(transcript.path);
-								struggling = struggle.struggling;
-								struggleReasons = [...struggle.reasons];
-							}
 							return reconcileTaskSessionSummaryLiveness({
-								summary: { ...summary, agentSessionId, struggling, struggleReasons },
+								summary: { ...summary, agentSessionId },
 								lifecycle,
 							});
 						}
@@ -391,8 +384,6 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 				case "card": {
 					resolvePromise = (async () => {
 						let lifecycle: RuntimeAgentSessionLifecycle = "gone";
-						let struggling = false;
-						let struggleReasons: string[] = [];
 						if (summary.agentSessionId && summary.agentId) {
 							const transcript = await locateAgentTranscript({
 								agentId: summary.agentId,
@@ -401,13 +392,10 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 							});
 							if (transcript.present) {
 								lifecycle = "resumable";
-								const struggle = await detectStruggle(transcript.path);
-								struggling = struggle.struggling;
-								struggleReasons = [...struggle.reasons];
 							}
 						}
 						return reconcileTaskSessionSummaryLiveness({
-							summary: { ...summary, struggling, struggleReasons },
+							summary,
 							lifecycle,
 						});
 					})();
