@@ -15,73 +15,14 @@ import type {
 	RuntimeStateStreamTaskSessionsMessage,
 	RuntimeStateStreamWorkspaceMetadataMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
-	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 } from "../core/api-contract";
-import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { getTaskColumnId, moveTaskToColumn, setCardPrUrl } from "../core/task-board-mutations";
 import { mutateWorkspaceStateById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
+import { createSessionColumnProjector } from "./session-column-projection";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry";
-
-export function getTargetColumnForSession(summary: {
-	taskId: string;
-	state: RuntimeTaskSessionState;
-}): RuntimeBoardColumnId | null {
-	if (isHomeAgentSessionId(summary.taskId)) {
-		return null;
-	}
-	switch (summary.state) {
-		case "awaiting_review":
-			return "review";
-		case "running":
-			return "in_progress";
-		case "idle":
-		case "failed":
-		case "interrupted":
-			return null;
-		default: {
-			const _exhaustive: never = summary.state;
-			return null;
-		}
-	}
-}
-
-export async function projectSessionSummaryColumn(
-	workspaceId: string,
-	summary: { taskId: string; state: RuntimeTaskSessionState },
-	_workspaceRegistry: Pick<WorkspaceRegistry, "getWorkspacePathById">,
-	broadcastWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>,
-): Promise<boolean> {
-	const targetColumnId = getTargetColumnForSession(summary);
-	if (!targetColumnId) {
-		return false;
-	}
-	try {
-		const mutation = await mutateWorkspaceStateById(workspaceId, (state) => {
-			const previousColumnId = getTaskColumnId(state.board, summary.taskId);
-			if (!previousColumnId || previousColumnId === targetColumnId) {
-				return { board: state.board, value: false, save: false };
-			}
-			if (previousColumnId === "done" || previousColumnId === "trash") {
-				return { board: state.board, value: false, save: false };
-			}
-			const moved = moveTaskToColumn(state.board, summary.taskId, targetColumnId, Date.now());
-			return { board: moved.board, value: moved.moved, save: moved.moved };
-		});
-		if (mutation.saved && mutation.value) {
-			await broadcastWorkspaceStateUpdated(workspaceId, mutation.state.repoPath);
-			return true;
-		}
-	} catch (error) {
-		const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
-		process.stderr.write(
-			`[kanban] Background projection mutation failed for task "${summary.taskId}" in workspace "${workspaceId}": ${errorMessage}\n`,
-		);
-	}
-	return false;
-}
 
 /**
  * Write back an agent session id that only became known after the agent booted.
@@ -240,6 +181,11 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	const runtimeStateWorkspaceIdByClient = new Map<WebSocket, string>();
 	const responsiveClients = new Set<WebSocket>();
 	const runtimeStateWebSocketServer = new WebSocketServer({ noServer: true });
+	// Card columns follow the session state stream in emission order — see
+	// `session-column-projection.ts` for why that ordering is load-bearing.
+	const sessionColumnProjector = createSessionColumnProjector((workspaceId, workspacePath) =>
+		broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath),
+	);
 	const workspaceMetadataMonitor = createWorkspaceMetadataMonitor({
 		onMetadataUpdated: (workspaceId, workspaceMetadata) => {
 			const clients = runtimeStateClientsByWorkspaceId.get(workspaceId);
@@ -648,12 +594,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 			const unsubscribe = manager.onSummary((summary) => {
 				queueTaskSessionSummaryBroadcast(workspaceId, summary);
-				void projectSessionSummaryColumn(
-					workspaceId,
-					summary,
-					deps.workspaceRegistry,
-					broadcastRuntimeWorkspaceStateUpdated,
-				).catch(() => {
+				void sessionColumnProjector.project(workspaceId, summary).catch(() => {
 					// Ignore background projection error
 				});
 				void persistDiscoveredAgentSessionId(workspaceId, summary).catch(() => {
