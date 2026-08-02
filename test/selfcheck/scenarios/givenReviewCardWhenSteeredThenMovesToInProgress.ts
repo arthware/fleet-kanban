@@ -17,7 +17,10 @@ export async function givenSteeredReviewCardWhenReturnsToReviewThenTransitionsRe
 	const context = driverContext(driver);
 	await createReviewSteeringCard(driver, taskId);
 	await driver.steerCard(taskId, "Continue after review.");
-	await driver.expectEnteredColumnTimes(taskId, "in_progress", 2);
+	// Deliberately NOT waiting for the steer to reach the board first: the hook races
+	// the steer's own column write, which is exactly the interleaving that used to
+	// produce a phantom extra round-trip. Waiting here would make the check pass on a
+	// runtime that still applies session states out of order.
 	await driver.ingestNativeHook(taskId, {
 		event: "to_review",
 		metadata: { source: "claude", hookEventName: "Stop" },
