@@ -27,6 +27,7 @@ import {
 	trashTaskAndGetReadyLinkedTaskIds,
 	updateTask,
 } from "../core/task-board-mutations";
+import { isTerminalLifecycleColumn } from "../core/task-lifecycle";
 import { resolveTaskTitle } from "../core/task-title";
 import { resolveProjectInputPath } from "../projects/project-path";
 import {
@@ -75,6 +76,12 @@ interface StartTaskFromStateInput {
 	runtimeState: RuntimeWorkspaceStateResponse;
 	taskId: string;
 	fromColumnId: RuntimeBoardColumnId;
+}
+
+function assertTaskCanStartFromColumn(taskId: string, fromColumnId: RuntimeBoardColumnId): void {
+	if (isTerminalLifecycleColumn(fromColumnId)) {
+		throw new Error(`Task "${taskId}" is in "${fromColumnId}" and cannot be started.`);
+	}
 }
 
 function toErrorMessage(error: unknown): string {
@@ -924,9 +931,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 		throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 	}
 
-	if (fromColumnId !== "backlog" && fromColumnId !== "in_progress") {
-		throw new Error(`Task "${taskId}" is in "${fromColumnId}" and can only be started from backlog or in_progress.`);
-	}
+	assertTaskCanStartFromColumn(taskId, fromColumnId);
 
 	return await startTaskFromState({
 		runtimeClient,
@@ -938,12 +943,6 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 }
 
 async function startTaskFromState(input: StartTaskFromStateInput): Promise<JsonRecord> {
-	if (input.fromColumnId !== "backlog" && input.fromColumnId !== "in_progress") {
-		throw new Error(
-			`Task "${input.taskId}" is in "${input.fromColumnId}" and can only be started from backlog or in_progress.`,
-		);
-	}
-
 	const currentRecord = findTaskRecord(input.runtimeState, input.taskId);
 	const task = currentRecord?.task;
 	if (!task) {

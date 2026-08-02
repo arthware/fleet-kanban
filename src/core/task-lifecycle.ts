@@ -51,6 +51,10 @@ export function getTaskCompletedAt(card: BoardLifecycleCard): number | undefined
 	return undefined;
 }
 
+export function isTerminalLifecycleColumn(columnId: BoardLifecycleColumnId): boolean {
+	return columnId === "done" || columnId === "trash";
+}
+
 function backfillCardTransitions<Card extends BoardLifecycleCard>(
 	card: Card,
 	currentColumnId: BoardLifecycleColumnId,
