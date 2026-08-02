@@ -27,6 +27,7 @@ import {
 	trashTaskAndGetReadyLinkedTaskIds,
 	updateTask,
 } from "../core/task-board-mutations";
+import { isTerminalLifecycleColumn } from "../core/task-lifecycle";
 import { resolveTaskTitle } from "../core/task-title";
 import { resolveProjectInputPath } from "../projects/project-path";
 import {
@@ -922,10 +923,6 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 		throw new Error(`Task "${input.taskId}" was not found in workspace ${workspaceRepoPath}.`);
 	}
 
-	if (fromColumnId !== "backlog" && fromColumnId !== "in_progress") {
-		throw new Error(`Task "${taskId}" is in "${fromColumnId}" and can only be started from backlog or in_progress.`);
-	}
-
 	return await startTaskFromState({
 		runtimeClient,
 		workspaceRepoPath,
@@ -936,9 +933,9 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 }
 
 async function startTaskFromState(input: StartTaskFromStateInput): Promise<JsonRecord> {
-	if (input.fromColumnId !== "backlog" && input.fromColumnId !== "in_progress") {
+	if (isTerminalLifecycleColumn(input.fromColumnId)) {
 		throw new Error(
-			`Task "${input.taskId}" is in "${input.fromColumnId}" and can only be started from backlog or in_progress.`,
+			`Task "${input.taskId}" is in "${input.fromColumnId}" and cannot be started — "done" and "trash" are terminal.`,
 		);
 	}
 
