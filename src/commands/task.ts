@@ -447,8 +447,6 @@ export function formatTaskRecord(
 					lastOutputAt: session.lastOutputAt,
 					reviewReason: session.reviewReason,
 					exitCode: session.exitCode,
-					struggling: session.struggling,
-					struggleReasons: session.struggleReasons,
 				}
 			: null,
 	};
