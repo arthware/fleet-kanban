@@ -344,4 +344,43 @@ describe("readAgentUsage — gemini", () => {
 			},
 		});
 	});
+
+	it("sums each usage field across multiple distinct turns and deduplicates identical turn IDs", async () => {
+		const sessionId = "ab123456-cc7b-4044-b156-33e5e3ff6807";
+		const absolutePath = getGeminiMockTranscriptPath(
+			homePath,
+			sessionId,
+			"fleet-kanban-4",
+			"session-2026-07-23T18-22-ab123456.jsonl",
+		);
+		const records = [
+			{ sessionId, kind: "main" },
+			{ id: "turn-1", type: "gemini", tokens: { input: 100, output: 10, cached: 50 }, model: "gemini-3.5-flash" },
+			// Identical turn ID (simulates the two-line output with toolCalls):
+			{
+				id: "turn-1",
+				type: "gemini",
+				tokens: { input: 100, output: 10, cached: 50 },
+				model: "gemini-3.5-flash",
+				toolCalls: [],
+			},
+			// Second distinct turn:
+			{ id: "turn-2", type: "gemini", tokens: { input: 200, output: 20, cached: 150 }, model: "gemini-3.5-flash" },
+		];
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, `${records.map((r) => JSON.stringify(r)).join("\n")}\n`, "utf8");
+
+		const result = await readAgentUsage({ agentId: "gemini", sessionId, homePath });
+
+		expect(result).toEqual({
+			present: true,
+			usage: {
+				inputTokens: 300,
+				outputTokens: 30,
+				cacheReadTokens: 200,
+				cacheCreationTokens: 0,
+				costUsd: null,
+			},
+		});
+	});
 });
