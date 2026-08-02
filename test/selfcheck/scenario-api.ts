@@ -43,6 +43,7 @@ export interface ScenarioDriver {
 	steerCard(taskId: string, text: string, submit?: boolean): Promise<void>;
 	expectColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
 	expectEnteredColumn(taskId: string, column: RuntimeBoardColumnId): Promise<void>;
+	expectEnteredColumnTimes(taskId: string, column: RuntimeBoardColumnId, count: number): Promise<void>;
 	expectAgentFinishedCleanly(taskId: string): Promise<void>;
 	expectOverseerNotified(taskId: string): Promise<void>;
 	killAgentProcess(taskId: string): Promise<void>;
@@ -259,6 +260,23 @@ export function createTrpcScenarioDriver(context: SelfcheckContext): ScenarioDri
 				const state = await loadState(context);
 				return hasTaskEnteredColumn(findCard(state.board, taskId), column) ? true : null;
 			}, `card ${taskId} to have entered ${column}`);
+		},
+		// Use this when a card is expected to enter a column AGAIN. `expectEnteredColumn`
+		// only asks whether the card ever reached the column, so on a second pass it is
+		// already satisfied by the first entry and returns without waiting for anything.
+		expectEnteredColumnTimes: async (taskId, column, count) => {
+			let observed = -1;
+			await waitFor(
+				async () => {
+					const state = await loadState(context);
+					const entries = findCard(state.board, taskId).transitions?.filter(
+						(transition) => transition.column === column,
+					);
+					observed = entries?.length ?? 0;
+					return observed === count ? true : null;
+				},
+				() => `card ${taskId} to have entered ${column} ${count} time(s); it entered ${observed} time(s)`,
+			);
 		},
 		expectAgentFinishedCleanly: async (taskId) => {
 			await waitFor(async () => {
@@ -565,16 +583,28 @@ async function startShellReviewSession(context: SelfcheckContext, taskId: string
 	assertOk(hook.status === 200 && hook.payload.ok, `Review hook failed for ${taskId}: ${hook.payload.error}`);
 }
 
-export async function waitFor<T>(resolveValue: () => Promise<T | null>, label: string, timeoutMs = 8_000): Promise<T> {
+/**
+ * Poll `resolveValue` until it returns a non-null value, or fail with `label`.
+ *
+ * `label` may be a function so it can report what the last poll actually saw. A
+ * predicate that compares a whole observation (a transition sequence, a summary
+ * shape) throws that observation away when it returns `null`, and a failure message
+ * that only names what was *expected* costs the next reader an instrumented rerun to
+ * find out what was *seen*. Compute the diagnosis lazily — it runs only on failure.
+ */
+export async function waitFor<T>(
+	resolveValue: () => Promise<T | null>,
+	label: string | (() => string),
+	timeoutMs = 8_000,
+): Promise<T> {
 	const startedAt = Date.now();
-	let lastValue: T | null = null;
 	while (true) {
-		lastValue = await resolveValue();
-		if (lastValue !== null) {
-			return lastValue;
+		const value = await resolveValue();
+		if (value !== null) {
+			return value;
 		}
 		if (Date.now() - startedAt >= timeoutMs) {
-			throw new ScenarioAssertionError(`Timed out waiting for ${label}. Last value: ${JSON.stringify(lastValue)}`);
+			throw new ScenarioAssertionError(`Timed out waiting for ${typeof label === "function" ? label() : label}`);
 		}
 		await new Promise((resolvePoll) => setTimeout(resolvePoll, 100));
 	}
