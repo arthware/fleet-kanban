@@ -24,5 +24,6 @@ export default defineConfig({
 			".worktrees/**",
 		],
 		testTimeout: 15_000,
+		maxWorkers: 1,
 	},
 });

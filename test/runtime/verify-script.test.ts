@@ -164,6 +164,12 @@ describe("CI Workflow vs Verify Script Alignment", () => {
 		// Assert CI workflow handles epic branch PRs
 		assertCiTriggersOnEpics(parsedCi);
 	});
+
+	it("givenVitestConfigWhenInspectedThenMaxWorkersIsSetToOne", () => {
+		const configPath = path.resolve(__dirname, "../../vitest.config.ts");
+		const content = fs.readFileSync(configPath, "utf8");
+		expect(content).toMatch(/\bmaxWorkers\s*:\s*1\b/);
+	});
 });
 
 describe("verify transitive rules assertions", () => {
