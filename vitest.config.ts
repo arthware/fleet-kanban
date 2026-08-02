@@ -2,6 +2,19 @@ import { defineConfig } from "vitest/config";
 
 process.env.NODE_ENV = "production";
 
+// The suite runs one file at a time, and that is what makes the gate reliable:
+// a lock held across an event-loop stall longer than its 10s staleness window
+// (`src/fs/locked-file-system.ts`) gets stolen from its own holder, and
+// `proper-lockfile` reports that as an `ECOMPROMISED` error thrown from a
+// timer — an unhandled crash attributable to no test at all. Oversubscribing
+// cores is what makes stalls that long likely.
+//
+// Pinning the variable is not belt-and-braces: Vitest applies
+// `VITEST_MAX_WORKERS` *after* it resolves this file, so an ambient value
+// silently un-caps the gate (it overrides `fileParallelism: false` too). The
+// cap has to own the variable to actually hold.
+process.env.VITEST_MAX_WORKERS = "1";
+
 export default defineConfig({
 	test: {
 		globals: true,
