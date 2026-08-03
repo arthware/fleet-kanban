@@ -336,8 +336,8 @@ describe("readAgentUsage — gemini", () => {
 		expect(result).toEqual({
 			present: true,
 			usage: {
-				inputTokens: 49178,
-				outputTokens: 630,
+				inputTokens: 8392, // 49178 input - 40786 cached
+				outputTokens: 669, // 630 output + 39 thoughts
 				cacheReadTokens: 40786,
 				cacheCreationTokens: 0,
 				costUsd: null,
@@ -355,17 +355,27 @@ describe("readAgentUsage — gemini", () => {
 		);
 		const records = [
 			{ sessionId, kind: "main" },
-			{ id: "turn-1", type: "gemini", tokens: { input: 100, output: 10, cached: 50 }, model: "gemini-3.5-flash" },
+			{
+				id: "turn-1",
+				type: "gemini",
+				tokens: { input: 100, output: 10, cached: 50, thoughts: 5 },
+				model: "gemini-3.5-flash",
+			},
 			// Identical turn ID (simulates the two-line output with toolCalls):
 			{
 				id: "turn-1",
 				type: "gemini",
-				tokens: { input: 100, output: 10, cached: 50 },
+				tokens: { input: 100, output: 10, cached: 50, thoughts: 5 },
 				model: "gemini-3.5-flash",
 				toolCalls: [],
 			},
 			// Second distinct turn:
-			{ id: "turn-2", type: "gemini", tokens: { input: 200, output: 20, cached: 150 }, model: "gemini-3.5-flash" },
+			{
+				id: "turn-2",
+				type: "gemini",
+				tokens: { input: 200, output: 20, cached: 150, thoughts: 15 },
+				model: "gemini-3.5-flash",
+			},
 		];
 		await mkdir(dirname(absolutePath), { recursive: true });
 		await writeFile(absolutePath, `${records.map((r) => JSON.stringify(r)).join("\n")}\n`, "utf8");
@@ -375,9 +385,9 @@ describe("readAgentUsage — gemini", () => {
 		expect(result).toEqual({
 			present: true,
 			usage: {
-				inputTokens: 300,
-				outputTokens: 30,
-				cacheReadTokens: 200,
+				inputTokens: 100 - 50 + (200 - 150), // input - cached
+				outputTokens: 10 + 5 + (20 + 15), // output + thoughts
+				cacheReadTokens: 50 + 150,
 				cacheCreationTokens: 0,
 				costUsd: null,
 			},

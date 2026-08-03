@@ -449,9 +449,11 @@ function addGeminiUsageRecord(totals: GeminiUsageTotals, record: TranscriptRecor
 		totals.seen.add(id);
 	}
 
-	totals.inputTokens += readNumber(tokens, "input");
-	totals.outputTokens += readNumber(tokens, "output");
-	totals.cacheReadTokens += readNumber(tokens, "cached");
+	const input = readNumber(tokens, "input");
+	const cached = readNumber(tokens, "cached");
+	totals.inputTokens += Math.max(0, input - cached);
+	totals.outputTokens += readNumber(tokens, "output") + readNumber(tokens, "thoughts");
+	totals.cacheReadTokens += cached;
 	totals.modelId = readString(record, "model") ?? totals.modelId;
 	totals.counted += 1;
 	return totals;
