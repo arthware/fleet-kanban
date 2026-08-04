@@ -20,11 +20,11 @@ import type { SessionSignal } from "../session-signal";
 import { binaryPreflight, hasCliOption, withPrompt } from "../shared/launch";
 import {
 	deriveFromTranscript,
+	foldTranscript,
 	readFirstTranscriptRecord,
-	selectFromTranscriptTail,
 	type TranscriptDerivation,
+	type TranscriptFold,
 	type TranscriptRecord,
-	type TranscriptTailQuery,
 } from "../shared/observe";
 import { SIGNAL_SEQUENCE_TRACKER } from "../shared/signals";
 
@@ -183,7 +183,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 				if (!ctx) return supported({ inputTokens: 0, outputTokens: 0 });
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported({ inputTokens: 0, outputTokens: 0 });
-				const usage = await selectFromTranscriptTail(loc.path, GEMINI_USAGE);
+				const usage = await foldTranscript(loc.path, GEMINI_USAGE);
 				if (!usage) return supported({ inputTokens: 0, outputTokens: 0 });
 				return supported({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 			},
@@ -192,7 +192,7 @@ export function createGeminiDriver(context?: ObservationRequest): AgentDriver {
 				if (!ctx) return supported(null);
 				const loc = await locate(ctx.sessionId, ctx.homePath);
 				if (!loc.present) return supported(null);
-				return supported(await selectFromTranscriptTail(loc.path, GEMINI_USAGE));
+				return supported(await foldTranscript(loc.path, GEMINI_USAGE));
 			},
 			artifactPath: async (input) => {
 				const loc = await locate(input.sessionId, input.homePath);
@@ -389,35 +389,74 @@ const GEMINI_TRANSCRIPT: TranscriptDerivation<RuntimeTaskChatMessage[]> = {
 	derive: (records) => parseGeminiTranscript([...records]),
 };
 
+interface GeminiUsageTotals {
+	readonly seen: Set<string>;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheCreationTokens: number;
+	counted: number;
+	modelId: string | null;
+}
+
 /**
- * Gemini restates the session's running totals on every model turn, so the newest
- * record carrying `tokens` already holds the cumulative figure. That makes usage a
- * tail read: bounded work, whatever the session's history weighs.
+ * Fold every record of a transcript, parsing and summing each unique model turn's
+ * token usage from start to finish. Keeps a byte-offset cursor, so cost is O(1) per poll.
  */
-const GEMINI_USAGE: TranscriptTailQuery<RuntimeTaskTokenUsage> = {
+const GEMINI_USAGE: TranscriptFold<GeminiUsageTotals, RuntimeTaskTokenUsage | null> = {
 	id: "gemini-usage",
-	select: (record) => selectGeminiUsage(record),
+	seed: () => ({
+		seen: new Set<string>(),
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
+		counted: 0,
+		modelId: null,
+	}),
+	step: (totals, record) => addGeminiUsageRecord(totals, record),
+	finish: (totals) => {
+		if (totals.counted === 0) {
+			return null;
+		}
+		const sums = {
+			inputTokens: totals.inputTokens,
+			outputTokens: totals.outputTokens,
+			cacheReadTokens: totals.cacheReadTokens,
+			cacheCreationTokens: totals.cacheCreationTokens,
+		};
+		return {
+			...sums,
+			costUsd: estimateAgentCostUsd("gemini", totals.modelId, sums),
+		};
+	},
 };
 
-function selectGeminiUsage(record: TranscriptRecord): RuntimeTaskTokenUsage | null {
+function addGeminiUsageRecord(totals: GeminiUsageTotals, record: TranscriptRecord): GeminiUsageTotals {
 	if (readString(record, "type") !== "gemini") {
-		return null;
+		return totals;
 	}
 	const tokens = asRecord(record.tokens);
 	if (!tokens) {
-		return null;
+		return totals;
 	}
-	const modelId = readString(record, "model") ?? null;
-	const sums = {
-		inputTokens: readNumber(tokens, "input"),
-		outputTokens: readNumber(tokens, "output"),
-		cacheReadTokens: readNumber(tokens, "cached"),
-		cacheCreationTokens: 0,
-	};
-	return {
-		...sums,
-		costUsd: estimateAgentCostUsd("gemini", modelId, sums),
-	};
+
+	const id = readString(record, "id");
+	if (id) {
+		if (totals.seen.has(id)) {
+			return totals;
+		}
+		totals.seen.add(id);
+	}
+
+	const input = readNumber(tokens, "input");
+	const cached = readNumber(tokens, "cached");
+	totals.inputTokens += Math.max(0, input - cached);
+	totals.outputTokens += readNumber(tokens, "output") + readNumber(tokens, "thoughts");
+	totals.cacheReadTokens += cached;
+	totals.modelId = readString(record, "model") ?? totals.modelId;
+	totals.counted += 1;
+	return totals;
 }
 
 function parseGeminiTranscript(records: Record<string, unknown>[]): RuntimeTaskChatMessage[] {
@@ -465,15 +504,9 @@ function parseGeminiTranscript(records: Record<string, unknown>[]): RuntimeTaskC
 	return messages;
 }
 
-/** The same "newest totals win" rule as {@link GEMINI_USAGE}, over records already in hand. */
+/** The same sum as {@link GEMINI_USAGE}, over records already in hand. */
 export function deriveGeminiUsage(records: Record<string, unknown>[]): RuntimeTaskTokenUsage | null {
-	for (let index = records.length - 1; index >= 0; index -= 1) {
-		const usage = selectGeminiUsage(records[index]);
-		if (usage) {
-			return usage;
-		}
-	}
-	return null;
+	return GEMINI_USAGE.finish(records.reduce(addGeminiUsageRecord, GEMINI_USAGE.seed()));
 }
 
 // --- Mapping ---------------------------------------------------------------
