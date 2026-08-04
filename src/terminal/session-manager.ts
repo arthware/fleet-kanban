@@ -156,6 +156,19 @@ function updateSummary(entry: SessionEntry, patch: Partial<RuntimeTaskSessionSum
 	return entry.summary;
 }
 
+/**
+ * A session id is only meaningful to the agent that minted it: `claude --resume` cannot
+ * resume a Gemini session, and the transcript resolver would go looking for it under the
+ * wrong harness — reporting a live card's conversation as missing. So a stored identity is
+ * the card's own only while its agent is unchanged; switching agent retires it.
+ */
+function isForeignSessionIdentity(
+	summary: RuntimeTaskSessionSummary,
+	agentId: StartTaskSessionRequest["agentId"],
+): boolean {
+	return summary.agentSessionId !== null && summary.agentId !== null && summary.agentId !== agentId;
+}
+
 function hasPriorTaskLaunch(summary: RuntimeTaskSessionSummary): boolean {
 	return (
 		summary.agentId !== null ||
@@ -345,11 +358,26 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return cloneSummary(entry.summary);
 		}
 
+		// Retire a previous agent's session id before anything reads it: both the lifecycle
+		// classifier and the driver's identity.resolve() below would otherwise pair the new
+		// agent with an id it can neither resume nor locate. Switching agent is a deliberate
+		// operator action, so this starts a fresh session rather than failing the start — but
+		// the card says so, because the earlier conversation does not carry over.
+		const retiredIdentityAgentId = isForeignSessionIdentity(entry.summary, request.agentId)
+			? entry.summary.agentId
+			: null;
+		if (retiredIdentityAgentId) {
+			updateSummary(entry, { agentSessionId: null });
+		}
+
 		const isFirstTaskLaunch = !hasPriorTaskLaunch(entry.summary);
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
 		updateSummary(entry, { agentSessionLifecycle: lifecycle });
 
-		if (request.resumeMode === "resume" && lifecycle === "gone") {
+		// A resume that finds nothing to resume stays a no-op — but retiring a foreign
+		// identity above is what made this session "gone", and the operator asked for a
+		// different agent, so that start goes ahead as a fresh one.
+		if (request.resumeMode === "resume" && lifecycle === "gone" && !retiredIdentityAgentId) {
 			return cloneSummary(entry.summary);
 		}
 
@@ -630,7 +658,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 			agentSessionLifecycle: "attached",
 			lastHookAt: null,
 			latestHookActivity: null,
-			warningMessage: null,
+			warningMessage: retiredIdentityAgentId
+				? `Started a new ${request.agentId} session — the previous ${retiredIdentityAgentId} conversation cannot be resumed by ${request.agentId}.`
+				: null,
 			latestTurnCheckpoint: null,
 			previousTurnCheckpoint: null,
 		});

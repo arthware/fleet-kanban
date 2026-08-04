@@ -56,7 +56,11 @@ const STUB_DISCOVERED_SESSION_ID = "5e1fc4ec-0000-4000-8000-000000000001";
 // Scenarios that assert on a discovered session — or on what the board does with
 // the transcript behind it. One list, because both halves of the impersonation
 // (write the rollout, stay alive for the discovery poll) must cover the same tasks.
-const DISCOVERABLE_SESSION_TASK_IDS = new Set(["selfcheck-discovered-session-id", "selfcheck-transcript-read-cost"]);
+const DISCOVERABLE_SESSION_TASK_IDS = new Set([
+	"selfcheck-discovered-session-id",
+	"selfcheck-transcript-read-cost",
+	"selfcheck-agent-switch-identity",
+]);
 const EARLY_REVIEW_TASK_IDS = new Set(["selfcheck-steer-review", "selfcheck-steer-review-history"]);
 if (DISCOVERABLE_SESSION_TASK_IDS.has(taskId) && process.env.HOME) {
 	const sessionsDir = join(process.env.HOME, ".codex", "sessions", "2026", "07", "30");
