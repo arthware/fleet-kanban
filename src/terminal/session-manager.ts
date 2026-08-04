@@ -360,8 +360,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 		// Retire a previous agent's session id before anything reads it: both the lifecycle
 		// classifier and the driver's identity.resolve() below would otherwise pair the new
-		// agent with an id it can neither resume nor locate.
-		if (isForeignSessionIdentity(entry.summary, request.agentId)) {
+		// agent with an id it can neither resume nor locate. Switching agent is a deliberate
+		// operator action, so this starts a fresh session rather than failing the start — but
+		// the card says so, because the earlier conversation does not carry over.
+		const retiredIdentityAgentId = isForeignSessionIdentity(entry.summary, request.agentId)
+			? entry.summary.agentId
+			: null;
+		if (retiredIdentityAgentId) {
 			updateSummary(entry, { agentSessionId: null });
 		}
 
@@ -650,7 +655,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 			agentSessionLifecycle: "attached",
 			lastHookAt: null,
 			latestHookActivity: null,
-			warningMessage: null,
+			warningMessage: retiredIdentityAgentId
+				? `Started a new ${request.agentId} session — the previous ${retiredIdentityAgentId} conversation cannot be resumed by ${request.agentId}.`
+				: null,
 			latestTurnCheckpoint: null,
 			previousTurnCheckpoint: null,
 		});

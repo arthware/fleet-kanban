@@ -130,6 +130,28 @@ describe("a card's session identity belongs to the agent that minted it", () => 
 		expect(manager.getSummary("task-1")?.agentSessionId).toBeNull();
 	});
 
+	it("given a stored session id minted by gemini, when the card starts on claude, then the card reports that the gemini conversation did not carry over", async () => {
+		// given
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord(storedCard("gemini", GEMINI_SESSION_ID));
+
+		// when
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd,
+			prompt: "Continue the card",
+			workspaceId: "workspace-1",
+		});
+
+		// then
+		expect(manager.getSummary("task-1")?.warningMessage).toBe(
+			"Started a new claude session — the previous gemini conversation cannot be resumed by claude.",
+		);
+	});
+
 	it("given a stored session id minted by claude, when the card restarts on claude, then it resumes that same session", async () => {
 		// given
 		const manager = new TerminalSessionManager();
