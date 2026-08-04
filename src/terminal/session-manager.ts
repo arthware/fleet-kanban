@@ -156,6 +156,19 @@ function updateSummary(entry: SessionEntry, patch: Partial<RuntimeTaskSessionSum
 	return entry.summary;
 }
 
+/**
+ * A session id is only meaningful to the agent that minted it: `claude --resume` cannot
+ * resume a Gemini session, and the transcript resolver would go looking for it under the
+ * wrong harness — reporting a live card's conversation as missing. So a stored identity is
+ * the card's own only while its agent is unchanged; switching agent retires it.
+ */
+function isForeignSessionIdentity(
+	summary: RuntimeTaskSessionSummary,
+	agentId: StartTaskSessionRequest["agentId"],
+): boolean {
+	return summary.agentSessionId !== null && summary.agentId !== null && summary.agentId !== agentId;
+}
+
 function hasPriorTaskLaunch(summary: RuntimeTaskSessionSummary): boolean {
 	return (
 		summary.agentId !== null ||
@@ -343,6 +356,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const entry = this.ensureEntry(request.taskId);
 		if (entry.active && isActiveState(entry.summary.state)) {
 			return cloneSummary(entry.summary);
+		}
+
+		// Retire a previous agent's session id before anything reads it: both the lifecycle
+		// classifier and the driver's identity.resolve() below would otherwise pair the new
+		// agent with an id it can neither resume nor locate.
+		if (isForeignSessionIdentity(entry.summary, request.agentId)) {
+			updateSummary(entry, { agentSessionId: null });
 		}
 
 		const isFirstTaskLaunch = !hasPriorTaskLaunch(entry.summary);
