@@ -3,6 +3,7 @@ import { givenAGrowingTranscriptWhenPolledForLivenessThenCostDoesNotGrowWithHist
 import { givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero } from "./scenarios/givenAgentBudgetWhenAProviderCannotBeReadThenTheReadoutSaysUnknownNotZero";
 import { givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer } from "./scenarios/givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer";
 import { givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer } from "./scenarios/givenArchivedCardWhenBoardReloadsThenLedgerKeepsItsPointer";
+import { givenCardWithADiscoveredSessionWhenItsAgentChangesThenItDoesNotInheritThatSession } from "./scenarios/givenCardWithADiscoveredSessionWhenItsAgentChangesThenItDoesNotInheritThatSession";
 import { givenCardWithGoneAgentWhenStartedThenNewAgentRuns } from "./scenarios/givenCardWithGoneAgentWhenStartedThenNewAgentRuns";
 import { givenCardWithModelOverrideWhenStartedThenCliReceivesModel } from "./scenarios/givenCardWithModelOverrideWhenStartedThenCliReceivesModel";
 import { givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly } from "./scenarios/givenCliContractWhenExercisedThenHelpAndUsageExitCorrectly";
@@ -85,6 +86,16 @@ async function main(): Promise<void> {
 		const context = await createSelfcheckContext();
 		try {
 			await givenAgentThatMintsItsOwnSessionIdWhenStartedThenTheCardKeepsItsConversationPointer(
+				attachContext(createTrpcScenarioDriver(context), context),
+			);
+		} finally {
+			await context.stop();
+		}
+	});
+	await runScenario(results, "a card that switches agent does not inherit the previous agent's session", async () => {
+		const context = await createSelfcheckContext();
+		try {
+			await givenCardWithADiscoveredSessionWhenItsAgentChangesThenItDoesNotInheritThatSession(
 				attachContext(createTrpcScenarioDriver(context), context),
 			);
 		} finally {

@@ -152,6 +152,50 @@ describe("a card's session identity belongs to the agent that minted it", () => 
 		);
 	});
 
+	it("given a resume-mode start, when the card switches agent, then it still starts instead of silently doing nothing", async () => {
+		// given a card the board offers to resume, because its stored gemini session is live
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord(storedCard("gemini", GEMINI_SESSION_ID));
+
+		// when the operator resumes it on a different agent
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd,
+			prompt: "Continue the card",
+			workspaceId: "workspace-1",
+			resumeMode: "resume",
+		});
+
+		// then a claude session actually starts
+		expect(prepareAgentLaunchMock).toHaveBeenCalled();
+		expect(manager.getSummary("task-1")).toMatchObject({ state: "running", agentId: "claude" });
+	});
+
+	it("given a resume-mode start on the same agent, when nothing is left to resume, then it stays a no-op", async () => {
+		// given a stored claude session whose transcript is gone
+		locateAgentTranscriptMock.mockResolvedValue({ present: false });
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord(storedCard("claude", CLAUDE_SESSION_ID));
+
+		// when the board tries to resume it
+		await manager.startTaskSession({
+			taskId: "task-1",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			cwd,
+			prompt: "Continue the card",
+			workspaceId: "workspace-1",
+			resumeMode: "resume",
+		});
+
+		// then nothing is launched
+		expect(prepareAgentLaunchMock).not.toHaveBeenCalled();
+	});
+
 	it("given a stored session id minted by claude, when the card restarts on claude, then it resumes that same session", async () => {
 		// given
 		const manager = new TerminalSessionManager();

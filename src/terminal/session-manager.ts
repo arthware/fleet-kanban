@@ -374,7 +374,10 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const lifecycle = await this.classifyEntryAgentSessionLifecycle(entry, request.agentId);
 		updateSummary(entry, { agentSessionLifecycle: lifecycle });
 
-		if (request.resumeMode === "resume" && lifecycle === "gone") {
+		// A resume that finds nothing to resume stays a no-op — but retiring a foreign
+		// identity above is what made this session "gone", and the operator asked for a
+		// different agent, so that start goes ahead as a fresh one.
+		if (request.resumeMode === "resume" && lifecycle === "gone" && !retiredIdentityAgentId) {
 			return cloneSummary(entry.summary);
 		}
 
