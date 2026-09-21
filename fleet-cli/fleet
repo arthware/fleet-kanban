@@ -15,6 +15,7 @@
 #   fleet rm   [dir]        remove a worktree + free its port (-> wt rm)
 #   fleet port [args]       stable per-worktree port (-> port-for)
 #   fleet kanban [install|start|stop|restart|sync|status|open]   fleet-managed kanban server (sync = register configured repos as projects)
+#   fleet health [--json]                  read-only board/project/repository health report
 #   fleet service [start|stop|restart [--build|--install]|status]   run the board under launchd
 #       (--build = stop, rebuild source offline, restart; --install = same but force `npm install` first)
 #   fleet task [create|start|ls|cat|tail|say|update|link|unlink|done|land|delete]   manage cards/tasks on the board
@@ -348,6 +349,98 @@ kanban_status() {
     kanban_require_running
     return 1
   fi
+}
+
+fleet_health() {
+  [ "${1:-}" = "" ] || [ "${1:-}" = "--json" ] || {
+    echo "usage: fleet health --json" >&2
+    return 2
+  }
+  URL="$KANBAN_URL" PORT="$KANBAN_PORT" python3 - <<'PY'
+import json
+import os
+import subprocess
+import time
+import urllib.error
+import urllib.request
+
+base = os.environ["URL"].rstrip("/")
+started = time.time()
+
+def request(path, timeout):
+    try:
+        with urllib.request.urlopen(f"{base}{path}", timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+            return {"state": "ok", "status": response.status, "body": body}
+    except urllib.error.HTTPError as error:
+        return {"state": "http_error", "status": error.code, "error": str(error)}
+    except Exception as error:
+        return {"state": "unknown", "error": str(error)}
+
+health = request("/api/healthz", 1)
+if health["state"] == "ok":
+    board_state = "running"
+elif health.get("status") == 404:
+    legacy = request("/api/trpc/projects.list", 3)
+    board_state = "running" if legacy["state"] == "ok" else "unknown"
+else:
+    board_state = "unknown"
+
+projects = []
+project_error = None
+if board_state == "running":
+    response = request("/api/trpc/projects.list", 3)
+    if response["state"] == "ok":
+        try:
+            projects = json.loads(response["body"])["result"]["data"]["projects"]
+            if not isinstance(projects, list):
+                raise TypeError("projects is not a list")
+            if any(not isinstance(project, dict) or not isinstance(project.get("path"), str) or not project["path"] for project in projects):
+                raise TypeError("project is missing a non-empty path")
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            project_error = f"invalid projects.list response: {error}"
+    else:
+        project_error = response.get("error", "projects.list unavailable")
+else:
+    project_error = health.get("error", "board did not pass liveness")
+
+def git_state(path):
+    result = {"path": path, "state": "unknown"}
+    def git(*args):
+        return subprocess.run(["git", "-C", path, *args], capture_output=True, text=True, timeout=2)
+    try:
+        inside = git("rev-parse", "--is-inside-work-tree")
+        if inside.returncode != 0:
+            result["state"] = "not_a_repository"
+            return result
+        branch = git("branch", "--show-current")
+        head = git("rev-parse", "HEAD")
+        if branch.returncode != 0 or head.returncode != 0 or not head.stdout.strip():
+            result["error"] = (head.stderr or branch.stderr or "repository has no readable HEAD").strip()
+            return result
+        result.update({"state": "ok", "branch": branch.stdout.strip(), "head": head.stdout.strip()})
+    except Exception as error:
+        result["error"] = str(error)
+    return result
+
+repo_paths = []
+for project in projects:
+    if isinstance(project, dict) and isinstance(project.get("path"), str):
+        repo_paths.append(project["path"])
+report = {
+    "schemaVersion": 1,
+    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "durationMs": round((time.time() - started) * 1000),
+    "board": {"url": base, "port": int(os.environ["PORT"]), "state": board_state, "probe": health},
+    "projects": [{"id": p.get("id"), "name": p.get("name"), "path": p.get("path")} for p in projects if isinstance(p, dict)],
+    "repositories": [git_state(path) for path in repo_paths],
+}
+if project_error:
+    report["projectsError"] = project_error
+print(json.dumps(report, sort_keys=True))
+repo_degraded = any(repository["state"] != "ok" for repository in report["repositories"])
+raise SystemExit(0 if board_state == "running" and not project_error and not repo_degraded else 2)
+PY
 }
 
 # --- launchd daemon: parent is the OS, not your terminal ---------------------
@@ -2298,6 +2391,7 @@ case "$cmd" in
   workspace) exec python3 "$DIR/fleet.py" "$cmd" "$@";;
   port) exec "$DIR/port-for" "$@";;
   kanban) fleet_kanban "$@"; exit $?;;
+  health) fleet_health "$@"; exit $?;;
   service|svc) fleet_service "$@"; exit $?;;
   task) fleet_task "$@"; exit $?;;
   card-type|card-types|ct) fleet_card_type "$@"; exit $?;;
